@@ -1,0 +1,17 @@
+[project]
+name = "trade-panel"
+version = "0.1.0"
+description = "Crypto Trading Panel (PySide6 desktop trading panel for Hyperliquid & Binance)"
+requires-python = ">=3.12"
+dependencies = [
+    "python-dotenv",
+    "PySide6",
+    "pyside6-essentials",
+    "hyperliquid-python-sdk",
+    "requests",
+    "pandas",
+    "pandas_ta",
+]
+
+[tool.uv]
+package = false

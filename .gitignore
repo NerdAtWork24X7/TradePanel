@@ -1,0 +1,66 @@
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+build/
+dist/
+.eggs/
+pip-wheel-metadata/
+
+# ── Virtual environments ─────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Secrets & credentials (never commit) ─────────────────────────────────────
+.env
+.env.*
+!.env.example
+keys/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ── Runtime data (generated at runtime) ─────────────────────────────────────
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Tooling / caches ────────────────────────────────────────────────────────
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# ── Agent / local tooling state ──────────────────────────────────────────────
+.pi/
+.pi-scope/
+.pi_memory/
+
+# ── OS / editor ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+
+# ── Temp generated artifacts (scripts themselves are kept) ───────────────────
+tmp/
+
+

@@ -1,0 +1,427 @@
+//@version=6
+indicator("HL Scalp Indicators [v6]", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500, max_bars_back=1500)
+
+// ---------- Inputs ----------
+tpMult       = input.float(7.0,  "TP Multiplier (R)",      minval=0.1, step=0.1)
+riskPerTrade = input.float(10.0, "Risk Per Trade (ref)",   minval=0.0, step=0.5)
+minSL        = input.float(0.2,  "Min SL %",               minval=0.0, step=0.1)
+maxSL        = input.float(3.0,  "Max SL %",               minval=0.0, step=0.1)
+showSession  = input.bool(true,  "Show Session High/Low")
+showBE       = input.bool(true,  "Show Breakeven SL (2R->1R)")
+
+// Session windows: each session = its first 15 min, times in UTC
+asiaSess   = input.string("0100-0115", "Asia (1st 15m, UTC)")
+londonSess = input.string("0800-0815", "London (1st 15m, UTC)")
+nyamSess   = input.string("1330-1345", "NY AM (1st 15m, UTC)")
+nypmSess   = input.string("1600-1615", "NY PM (1st 15m, UTC)")
+
+// ---------- EMAs ----------
+ema9  = ta.ema(close, 9)
+
+
+
+
+//VWAP
+
+
+Show_VWap = input(false, title = 'Show VWAP ', group = 'Show Settings', display = display.data_window)
+Show_VWap_band = input(false, title = 'Show VWAP Band ', group = 'Show Settings', display = display.data_window)
+hideonDWM = input(false, title = 'Hide VWAP on 1D or Above', group = 'VWAP Settings', display = display.data_window)
+var anchor = input.string(defval = 'Session', title = 'Anchor Period', options = ['Session', 'Week', 'Month', 'Quarter', 'Year', 'Decade', 'Century', 'Earnings', 'Dividends', 'Splits'], group = 'VWAP Settings')
+src = input(title = 'Source', defval = hlc3, group = 'VWAP Settings', display = display.data_window)
+offset = input.int(0, title = 'Offset', group = 'VWAP Settings', minval = 0, display = display.data_window)
+
+BANDS_GROUP = 'Bands Settings'
+CALC_MODE_TOOLTIP = 'Determines the units used to calculate the distance of the bands. When \'Percentage\' is selected, a multiplier of 1 means 1%.'
+calcModeInput = input.string('Standard Deviation', 'Bands Calculation Mode', options = ['Standard Deviation', 'Percentage'], group = BANDS_GROUP, tooltip = CALC_MODE_TOOLTIP, display = display.data_window)
+showBand_1 = input(false, title = '', group = BANDS_GROUP, inline = 'band_1', display = display.data_window)
+bandMult_1 = input.float(1.0, title = 'Bands Multiplier #1', group = BANDS_GROUP, inline = 'band_1', step = 0.5, minval = 0, display = display.data_window)
+showBand_2 = input(false, title = '', group = BANDS_GROUP, inline = 'band_2', display = display.data_window)
+bandMult_2 = input.float(2.0, title = 'Bands Multiplier #2', group = BANDS_GROUP, inline = 'band_2', step = 0.5, minval = 0, display = display.data_window)
+showBand_3 = input(false, title = '', group = BANDS_GROUP, inline = 'band_3', display = display.data_window)
+bandMult_3 = input.float(3.0, title = 'Bands Multiplier #3', group = BANDS_GROUP, inline = 'band_3', step = 0.5, minval = 0, display = display.data_window)
+
+if barstate.islast and ta.cum(volume) == 0
+    runtime.error('No volume is provided by the data vendor.')
+
+new_earnings = request.earnings(syminfo.tickerid, earnings.actual, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol = true)
+new_dividends = request.dividends(syminfo.tickerid, dividends.gross, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol = true)
+new_split = request.splits(syminfo.tickerid, splits.denominator, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol = true)
+
+isNewPeriod = switch anchor
+    'Earnings' => not na(new_earnings)
+    'Dividends' => not na(new_dividends)
+    'Splits' => not na(new_split)
+    'Session' => timeframe.change('D')
+    'Week' => timeframe.change('W')
+    'Month' => timeframe.change('M')
+    'Quarter' => timeframe.change('3M')
+    'Year' => timeframe.change('12M')
+    'Decade' => timeframe.change('12M') and year % 10 == 0
+    'Century' => timeframe.change('12M') and year % 100 == 0
+    => false
+
+isEsdAnchor = anchor == 'Earnings' or anchor == 'Dividends' or anchor == 'Splits'
+if na(src[1]) and not isEsdAnchor
+    isNewPeriod := true
+    isNewPeriod
+
+float vwapValue = na
+float upperBandValue1 = na
+float lowerBandValue1 = na
+float upperBandValue2 = na
+float lowerBandValue2 = na
+float upperBandValue3 = na
+float lowerBandValue3 = na
+
+if not(hideonDWM and timeframe.isdwm)
+    [_vwap, _stdevUpper, _] = ta.vwap(src, isNewPeriod, 1)
+    vwapValue := _vwap
+    stdevAbs = _stdevUpper - _vwap
+    bandBasis = calcModeInput == 'Standard Deviation' ? stdevAbs : _vwap * 0.01
+    upperBandValue1 := _vwap + bandBasis * bandMult_1
+    lowerBandValue1 := _vwap - bandBasis * bandMult_1
+    upperBandValue2 := _vwap + bandBasis * bandMult_2
+    lowerBandValue2 := _vwap - bandBasis * bandMult_2
+    upperBandValue3 := _vwap + bandBasis * bandMult_3
+    lowerBandValue3 := _vwap - bandBasis * bandMult_3
+    lowerBandValue3
+
+plot(vwapValue, title = 'VWAP', color = color.orange, offset = offset, style = plot.style_circles, linewidth = 2, display = Show_VWap ? display.all : display.none)
+
+upperBand_1 = plot(upperBandValue1, title = 'Upper Band #1', color = color.gray, offset = offset, display = showBand_1 and Show_VWap ? display.all : display.none)
+lowerBand_1 = plot(lowerBandValue1, title = 'Lower Band #1', color = color.gray, offset = offset, display = showBand_1 and Show_VWap ? display.all : display.none)
+//fill(upperBand_1, lowerBand_1, title="Bands Fill #1", color= color.new(color.green, 95)    , display = showBand_1 and Show_VWap_band ? display.all : display.none)
+
+upperBand_2 = plot(upperBandValue2, title = 'Upper Band #2', color = color.red, offset = offset, display = showBand_2 and Show_VWap ? display.all : display.none)
+upperBand_3 = plot(upperBandValue3, title = 'Upper Band #3', color = color.red, offset = offset, display = showBand_3 and Show_VWap ? display.all : display.none)
+fill(upperBand_2, upperBand_3, title = 'Bands Fill #2', color = color.new(color.red, 95), display = showBand_2 and Show_VWap_band ? display.all : display.none)
+
+
+
+lowerBand_2 = plot(lowerBandValue2, title = 'Lower Band #2', color = color.green, offset = offset, display = showBand_2 and Show_VWap ? display.all : display.none)
+lowerBand_3 = plot(lowerBandValue3, title = 'Lower Band #3', color = color.green, offset = offset, display = showBand_3 and Show_VWap ? display.all : display.none)
+fill(lowerBand_2, lowerBand_3, title = 'Bands Fill #3', color = color.new(color.green, 95), display = showBand_3 and Show_VWap_band ? display.all : display.none)
+
+
+
+
+// ---------- Session detection (first-15min window of each session, UTC) ----------
+inAsia   = not na(time("", asiaSess,   "UTC"))
+inLondon = not na(time("", londonSess, "UTC"))
+inNYAM   = not na(time("", nyamSess,   "UTC"))
+inNYPM   = not na(time("", nypmSess,   "UTC"))
+sessionIdx = inAsia ? 0 : inLondon ? 1 : inNYAM ? 2 : inNYPM ? 3 : -1
+
+// ---------- Session high / low (per-session, first-15min window) ----------
+var float sHigh = na
+var float sLow  = na
+var int   lastSession = -1
+prevSHigh = sHigh
+prevSLow  = sLow
+sessStart = sessionIdx >= 0 and (sessionIdx != lastSession or na(sHigh))
+if sessionIdx >= 0
+    if sessionIdx != lastSession or na(sHigh)
+        sHigh := high
+        sLow  := low
+        lastSession := sessionIdx
+    else
+        sHigh := math.max(sHigh, high)
+        sLow  := math.min(sLow, low)
+
+// ---------- Session boxes + labels ----------
+var array<color>  sessionColors = array.from(color.blue, color.purple, color.teal, color.orange)
+var array<string> sessionNames  = array.from("Asia", "London", "NY AM", "NY PM")
+var box[]   sessBoxes   = array.new_box()
+var label[] sessLabels  = array.new_label()
+var box     activeBox   = na
+var label   activeLabel = na
+var int     prevIdx     = -1
+
+if showSession
+    if sessionIdx >= 0 and sessionIdx != prevIdx
+        // new session: start a fresh box + name label, extending until the next session begins
+        col = array.get(sessionColors, sessionIdx)
+        nm  = array.get(sessionNames, sessionIdx)
+        activeBox   := box.new(bar_index, sHigh, bar_index, sLow, border_color=col, bgcolor=color.new(col, 90))
+        activeLabel := label.new(bar_index, sHigh, nm, style=label.style_label_down, color=col, textcolor=color.white, size=size.small)
+        array.push(sessBoxes, activeBox)
+        array.push(sessLabels, activeLabel)
+        if array.size(sessBoxes) > 250
+            box.delete(array.shift(sessBoxes))
+            label.delete(array.shift(sessLabels))
+    else if not na(activeBox)
+        // keep stretching the active session's high/low band until the next session starts
+        box.set_right(activeBox, bar_index)
+        box.set_top(activeBox, sHigh)
+        box.set_bottom(activeBox, sLow)
+        label.set_y(activeLabel, sHigh)
+prevIdx := sessionIdx
+
+// ---------- Volume Profile (session-based, tick rows + Value Area) ----------
+showVP     = input.bool(true,  "Show Volume Profile", group="Volume Profile")
+vpRowTicks = input.int(1,   "Row Size (Ticks)", minval=1, maxval=50, group="Volume Profile")
+vpValPct   = input.int(70,  "Value Area Volume %", minval=50, maxval=100, group="Volume Profile")
+vpWidth    = input.int(100, "Profile Width (%)", minval=10, maxval=100, group="Volume Profile")
+vpTransp   = input.int(40,  "Transparency", minval=0, maxval=90, group="Volume Profile")
+
+var int   vpStartBar = na
+var int   vpPrevSess = -1
+var box[] vpBoxes    = array.new_box()
+var line  vpVahLine  = na
+var line  vpValLine  = na
+var line  vpPocLine  = na
+var linefill vpVaFill   = na
+
+// Detect session start -> reset VP
+if sessionIdx >= 0 and sessionIdx != vpPrevSess
+    vpPrevSess := sessionIdx
+    vpStartBar := bar_index
+    // Delete old persistent objects from previous session
+    if not na(vpVahLine)
+        line.delete(vpVahLine)
+    if not na(vpValLine)
+        line.delete(vpValLine)
+    if not na(vpPocLine)
+        line.delete(vpPocLine)
+    if not na(vpVaFill)
+        linefill.delete(vpVaFill)
+    vpVahLine := na
+    vpValLine := na
+    vpPocLine := na
+    vpVaFill := na
+
+// Clear stale boxes at each bar
+if array.size(vpBoxes) > 0
+    for i = array.size(vpBoxes) - 1 to 0
+        box.delete(array.get(vpBoxes, i))
+array.clear(vpBoxes)
+// Delete previous bar's linefill before creating new one
+if not na(vpVaFill)
+    linefill.delete(vpVaFill)
+// Initialize persistent lines (created once, updated each bar — like ref.pine's f_drawLineX)
+if na(vpVahLine)
+    vpVahLine := line.new(na, na, na, na)
+if na(vpValLine)
+    vpValLine := line.new(na, na, na, na)
+if na(vpPocLine)
+    vpPocLine := line.new(na, na, na, na)
+
+// Only calculate VP on the last bar (barstate.islast) to avoid O(n²) recalculation
+// across chart history. Real-time updates still work since islast is true for current bar.
+if showVP and not na(vpStartBar) and barstate.islast
+    int lookback = bar_index - vpStartBar
+    float vh = high[lookback], vl = low[lookback]
+    for i = lookback to 0
+        vh := math.max(vh, high[i])
+        vl := math.min(vl, low[i])
+    float rng = vh - vl
+    float tick = syminfo.mintick
+    float rowSz = tick * vpRowTicks
+    if rng > 0 and rowSz > 0
+        int rows = int(math.max(1, math.ceil(rng / rowSz)))
+        float[] vols = array.new_float(rows, 0.0)
+        float mx = 0.0, total = 0.0
+        // Accumulate volume into tick-based price buckets
+        for i = lookback to 0
+            float hh = high[i], ll = low[i], vv = volume[i]
+            float cR = hh - ll
+            if cR <= 0
+                continue
+            for j = 0 to rows - 1
+                float rl = vl + j * rowSz
+                float rh = math.min(rl + rowSz, vh)
+                if hh >= rl and ll <= rh
+                    float ov = math.min(hh, rh) - math.max(ll, rl)
+                    if ov > 0
+                        array.set(vols, j, array.get(vols, j) + vv * (ov / cR))
+        // Peak volume + total
+        for j = 0 to rows - 1
+            float vvj = array.get(vols, j)
+            if vvj > mx
+                mx := vvj
+            total += vvj
+        // POC (Point of Control)
+        int pocIdx = 0
+        for j = 0 to rows - 1
+            if array.get(vols, j) > array.get(vols, pocIdx)
+                pocIdx := j
+        // Value Area — expand outward from POC until valPct% of total volume is reached
+        float target = total * vpValPct / 100.0
+        float cum = array.get(vols, pocIdx)
+        int vaL = pocIdx, vaH = pocIdx
+        bool[] usedArr = array.new_bool(rows, false)
+        array.set(usedArr, pocIdx, true)
+        int safety = rows
+        while cum < target and safety > 0
+            safety -= 1
+            int nL = vaL - 1, nH = vaH + 1
+            bool okL = nL >= 0 and not array.get(usedArr, nL)
+            bool okH = nH < rows and not array.get(usedArr, nH)
+            if not okL and not okH
+                break
+            if okL and (not okH or array.get(vols, nL) >= array.get(vols, nH))
+                array.set(usedArr, nL, true)
+                if array.get(vols, nL) > 0
+                    cum += array.get(vols, nL)
+                    vaL := nL
+            else
+                array.set(usedArr, nH, true)
+                if array.get(vols, nH) > 0
+                    cum += array.get(vols, nH)
+                    vaH := nH
+        color vpC =  color.new(color.blue, 90) 
+        float vahPx = vl + (vaH + 1) * rowSz
+        float valPx = vl + vaL * rowSz
+        float pocPx = vl + (pocIdx + 0.5) * rowSz
+        int leftEdge = vpStartBar
+        int profWidth = int(math.max(2, lookback * vpWidth / 100))
+        int rightEdge = int(leftEdge + profWidth + 2)
+        // --- Draw profile range background ---
+        //box bgBox = box.new(leftEdge, vh, rightEdge, vl,
+        //  bgcolor=color.new(vpC, 92), border_color=color.new(vpC, 85))
+        //array.push(vpBoxes, bgBox)
+        // --- Draw histogram boxes (ref.pine style: filled boxes, rightward from leftEdge) ---
+        if mx > 0
+            for j = 0 to rows - 1
+                float volj = array.get(vols, j)
+                if volj > 0
+                    int bw = int(math.max(1, (volj / mx) * profWidth))
+                    bool inVA = j >= vaL and j <= vaH
+                    color hc = inVA ? color.new(vpC, vpTransp) : color.new(color.gray, math.min(vpTransp + 30, 90))
+                    float btm = vl + (j + 0.1) * rowSz
+                    float top = vl + (j + 0.9) * rowSz
+                    box b = box.new(leftEdge, top, int(leftEdge + bw), btm,
+                      border_color=hc, bgcolor=hc)
+                    array.push(vpBoxes, b)
+        // --- VAH / VAL lines (persistent, updated in place — ref.pine style) ---
+        if total > 0 and vahPx > valPx
+            line.set_xy1(vpVahLine, leftEdge, vahPx)
+            line.set_xy2(vpVahLine, rightEdge, vahPx)
+            line.set_color(vpVahLine, color.new(vpC, 30))
+            line.set_width(vpVahLine, 6)
+            line.set_style(vpVahLine, line.style_dotted)
+            line.set_xy1(vpValLine, leftEdge, valPx)
+            line.set_xy2(vpValLine, rightEdge, valPx)
+            line.set_color(vpValLine, color.new(vpC, 30))
+            line.set_width(vpValLine, 6)
+            line.set_style(vpValLine, line.style_dotted)
+            // --- Value Area fill (between VAH and VAL) ---
+           // vpVaFill := linefill.new(vpVahLine, vpValLine, color.new(vpC, 90))
+        // --- POC line (solid red, persistent) ---
+        if total > 0
+            line.set_xy1(vpPocLine, leftEdge, pocPx)
+            line.set_xy2(vpPocLine, rightEdge, pocPx)
+            line.set_color(vpPocLine, color.new(color.red, 15))
+            line.set_width(vpPocLine, 6)
+            line.set_style(vpPocLine, line.style_dotted)
+
+bool validLong = false
+bool validShort = false
+// ---------- Sweep locks ----------
+var int longLock  = 0
+var int shortLock = 0
+
+var int longshort = 0
+
+//Long
+if low < lowerBandValue2 or (close[1] < vwapValue and close > vwapValue)
+    longshort := 1
+
+//Short
+if high > upperBandValue2 or (close[1] > vwapValue and close < vwapValue)
+    longshort := 2
+
+if sessStart
+    longLock  := 0
+    shortLock := 0
+
+if sessionIdx == -1
+    sweepLong  = low  < prevSLow  and prevSLow  != 0
+    sweepShort = high > prevSHigh and prevSHigh != 0
+    if sweepLong
+        longLock  := 1
+        shortLock := 0
+    if sweepShort
+        shortLock := 1
+        longLock  := 0
+    
+    // ---------- Entry conditions ----------
+    entryLong  = longLock == 1 and close > ema9 and low < ema9 and close > high[1] and close > prevSLow and math.min(low, low[1]) < prevSLow and longshort == 1
+    slLong     = math.min(low, low[1])
+    bpLong     = close
+    perSLLong  = (bpLong - slLong) / slLong * 100
+    validLong  := entryLong and perSLLong > minSL and perSLLong < maxSL
+    tpLong     = bpLong + tpMult * (bpLong - slLong)
+    qtyLong    = riskPerTrade / math.max(bpLong - slLong, 1e-9)
+    
+    entryShort = shortLock == 1 and close < ema9 and high > ema9 and close < low[1] and close < prevSHigh and math.max(high, high[1])  > prevSHigh and longshort == 2
+    slShort    = math.max(high, high[1])
+    bpShort    = close
+    perSLShort = (slShort - bpShort) / bpShort * 100
+    validShort := entryShort and perSLShort > minSL and perSLShort < maxSL
+    tpShort    = bpShort - tpMult * (slShort - bpShort)
+    qtyShort   = riskPerTrade / math.max(slShort - bpShort, 1e-9)
+    
+    // ---------- Virtual position + breakeven (2R -> 1R) ----------
+    var float posBP    = na
+    var float posSL    = na
+    var float posTP    = na
+    var int   posSide  = 0
+    var float activeSL = na
+    if validLong
+        posSide := 1
+        posBP := bpLong
+        posSL := slLong
+        posTP := tpLong
+        activeSL := na
+    if validShort
+        posSide := -1
+        posBP := bpShort
+        posSL := slShort
+        posTP := tpShort
+        activeSL := na
+    
+    if posSide == 1
+        beLevel = posBP + (posBP - posSL)      // 1R (new SL)
+        r2      = posBP + 2 * (posBP - posSL)
+        if high >= r2 and na(activeSL)
+            activeSL := beLevel
+        if low <= activeSL or low <= posSL or high >= posTP
+            posSide := 0
+            activeSL := na
+    if posSide == -1
+        beLevel = posBP - (posSL - posBP)      // 1R (new SL)
+        r2      = posBP - 2 * (posSL - posBP)
+        if low <= r2 and na(activeSL)
+            activeSL := beLevel
+        if high >= activeSL or high >= posSL or low <= posTP
+            posSide := 0
+            activeSL := na
+// ---------- Signals ----------
+plotshape(validLong,  "Long Entry",  shape.triangleup,   location.belowbar, color.green, size=size.small)
+plotshape(validShort, "Short Entry", shape.triangledown, location.abovebar, color.red,   size=size.small)
+
+
+// ---------- Alerts ----------
+alertcondition(validLong,  "Long Entry",  "HL Scalp Long entry")
+alertcondition(validShort, "Short Entry", "HL Scalp Short entry")
+
+    
+// ---------- Plots (indicators used by the long/short signals) ----------
+plot(ema9,  "EMA 9",  color.orange, linewidth=1)
+
+day_1 =request.security(syminfo.tickerid, "1D",close)
+
+// This sends the `sma` calculation for execution in the context of the "AAPL" symbol at a "240" (4 hours) timeframe.
+ema9_1d = request.security(syminfo.tickerid, "1D", ema9)
+color_line = color.white
+if day_1[1] > ema9_1d[1]
+    color_line := color.green 
+else
+    color_line := color.red
+
+plot(ema9_1d, color = color_line, title = 'daily_9ema')
+
+
+

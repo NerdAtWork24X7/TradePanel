@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-05 — clean startup paint and instant app close
+- Startup no longer flashes the raw shell (the skip link and unstyled controls) before
+  the stylesheet arrives. `frontend/index.html` carries critical first-paint CSS and a
+  theme-aware boot screen that `main.ts` fades out once the module has run; the Tauri
+  window paints `#1c1c1b` from its first frame (`backgroundColor`), so WebKit's white
+  canvas is never visible. The chart area is now opaque and keeps a small "Loading
+  charts" placeholder until the workspace bridge reports ready.
+- Closing the window could hang forever: `HyperliquidClient` built `hyperliquid.info.Info`
+  with the SDK's default websocket enabled, and `WebsocketManager` starts two **non-daemon**
+  threads (run_forever + ping) that `threading._shutdown` joins at interpreter exit. The
+  sidecar therefore never exited; the supervisor waited its 12 s grace and a force-closed
+  shell left orphaned backend processes behind. The SDK client is now REST-only
+  (`skip_ws=True`), `backend/sidecar.py` hard-exits after the graceful writer flush
+  (`os._exit`, so no library thread can wedge the process), and the Rust supervisor bounds
+  stdin writes with a 5 s timeout so a full pipe cannot block the exit path.
+- Verified: `trading.price_precision` (which initialises the SDK) followed by
+  `system.shutdown` now exits in 0.03 s with zero websocket threads; the real window closes
+  in 254 ms with no orphaned sidecar; boot screenshots (dark and light, CSS deliberately
+  blocked) show the branded splash only; 78 Python tests, 13 bridge + 21 sync Node tests,
+  12 Rust tests, frontend typecheck/build pass.
+
 ## 2026-11-05 — price-axis pan no longer rescales with indicators on
 - Dragging a chart vertically now translates the price range instead of refitting it. Overlay
   indicators (SMA/EMA/BB/VWAP/ribbon/HL EMA) are separate series on the same price scale; only the

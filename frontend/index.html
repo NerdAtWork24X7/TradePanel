@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>TradePanel</title>
+    <!-- Critical first-paint styles: the bundled stylesheet is injected by the
+         module script, so without these the raw markup (and the skip link)
+         flashes before the shell is styled. Keep in sync with tokens.css. -->
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #1c1c1b;
+        color: #f3f1e9;
+        overflow: hidden;
+      }
+      body[data-theme="light"] {
+        background: #ffffff;
+        color: #242423;
+      }
+      .skip-link {
+        position: absolute;
+        left: 12px;
+        top: -48px;
+      }
+      #boot-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        background: #1c1c1b;
+        color: #f3f1e9;
+        font: 600 12px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        transition: opacity 180ms ease;
+      }
+      body[data-theme="light"] #boot-screen {
+        background: #ffffff;
+        color: #242423;
+      }
+      body.app-ready #boot-screen {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #boot-screen .boot-mark {
+        display: grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        border-radius: 11px;
+        background: linear-gradient(145deg, #ffd43b, #f0c526);
+        color: #29230e;
+        font: 700 13px/1 "MesloLGS NFM", ui-monospace, monospace;
+        letter-spacing: 0.02em;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+      }
+      #boot-screen .boot-bar {
+        width: 116px;
+        height: 2px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.12);
+        overflow: hidden;
+      }
+      body[data-theme="light"] #boot-screen .boot-bar {
+        background: rgba(0, 0, 0, 0.12);
+      }
+      #boot-screen .boot-bar::after {
+        content: "";
+        display: block;
+        width: 42%;
+        height: 100%;
+        border-radius: 2px;
+        background: #ffd43b;
+        animation: boot-slide 1.1s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+      }
+      @keyframes boot-slide {
+        from {
+          transform: translateX(-110%);
+        }
+        to {
+          transform: translateX(310%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot-screen .boot-bar::after {
+          animation: none;
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <script>(function(){try{var t=localStorage.getItem("tp-theme"); if(t==="light") document.body.setAttribute("data-theme","light");}catch(e){}})();</script>
+    <div id="boot-screen" role="status" aria-live="polite">
+      <span class="boot-mark" aria-hidden="true">TP</span>
+      <span>Starting TradePanel</span>
+      <span class="boot-bar" aria-hidden="true"></span>
+    </div>
+    <a class="skip-link" href="#workspace-frame">Skip to charts</a>
+
+    <div class="app-shell">
+      <main class="workspace-shell">
+        <div id="backend-banner" class="banner" hidden>
+          <div class="banner-copy">
+            <strong id="banner-title">Backend unavailable</strong>
+            <span id="banner-detail">Trading controls are disabled. Charts keep their last data.</span>
+          </div>
+          <button id="banner-retry" class="ghost-btn" type="button">Retry backend</button>
+        </div>
+        <div class="workspace-stage">
+          <iframe
+            id="workspace-frame"
+            class="workspace-frame"
+            title="Multi-chart workspace"
+            allow="fullscreen; clipboard-read; clipboard-write"
+          ></iframe>
+          <div id="workspace-loading" class="workspace-loading" aria-busy="true">
+            <span class="loading-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span>Loading charts</span>
+          </div>
+          <div id="workspace-error" class="workspace-error" hidden>
+            <h2>Chart workspace unavailable</h2>
+            <p id="workspace-error-message">The workspace could not be loaded.</p>
+            <button id="workspace-reload" class="primary-btn" type="button">Reload workspace</button>
+          </div>
+        </div>
+      </main>
+
+      <aside id="trade-sidebar" class="trade-sidebar" aria-label="Trade panel">
+        <div class="sidebar-rail" id="sidebar-rail">
+          <button
+            id="sidebar-expand"
+            class="icon-btn rail-btn"
+            type="button"
+            aria-expanded="false"
+            aria-controls="sidebar-body"
+            aria-label="Expand trade panel"
+            title="Expand trade panel (Ctrl+Shift+T)"
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 6l-6 6 6 6"/></svg>
+          </button>
+          <span id="backend-dot" class="backend-dot pending" role="status" aria-label="Backend status: connecting"></span>
+          <span class="rail-sep" aria-hidden="true"></span>
+          <button id="center-chart-rail" class="icon-btn rail-btn" type="button" aria-label="Center focused chart" title="Center focused chart">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+          </button>
+          <button id="refresh-coins-rail" class="icon-btn rail-btn" type="button" aria-label="Refresh coin list" title="Refresh coin list">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4.5h-4.5"/></svg>
+          </button>
+          <button id="open-browser-rail" class="icon-btn rail-btn" type="button" aria-label="Open Hyperliquid trade page" title="Open Hyperliquid trade page">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4l-8.5 8.5"/><path d="M18 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></svg>
+          </button>
+          <button id="hyperliquid-rail" class="rail-btn rail-toggle mono" type="button" aria-pressed="false" aria-label="Hyperliquid mode" title="Hyperliquid mode">HL</button>
+          <span class="rail-spacer" aria-hidden="true"></span>
+          <button id="settings-btn-rail" class="icon-btn rail-btn" type="button" aria-label="Open settings" title="Settings (Ctrl+,)">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h6M14 7h6M4 17h10M18 17h2"/><circle cx="12" cy="7" r="2"/><circle cx="16" cy="17" r="2"/></svg>
+          </button>
+        </div>
+
+        <div class="sidebar-body" id="sidebar-body">
+          <div class="sidebar-head">
+            <div class="brand">
+              <span class="brand-mark" aria-hidden="true"></span>
+              <div class="brand-text">
+                <strong>TradePanel</strong>
+                <span id="app-version" class="brand-version">terminal</span>
+              </div>
+            </div>
+            <button id="theme-toggle" class="icon-btn collapse-btn" type="button" aria-label="Toggle light/dark theme" title="Toggle theme">◐</button>
+            <button
+              id="sidebar-collapse"
+              class="icon-btn collapse-btn"
+              type="button"
+              aria-expanded="true"
+              aria-controls="sidebar-body"
+              aria-label="Collapse trade panel"
+              title="Collapse trade panel (Ctrl+Shift+T)"
+            >
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6l6 6-6 6"/></svg>
+            </button>
+          </div>
+
+          <div class="sidebar-scroll">
+            <section class="sidebar-section" aria-labelledby="instrument-label">
+              <span id="instrument-label" class="card-label">Instrument</span>
+              <div class="field-row">
+                <div class="field">
+                  <label for="coin">Coin</label>
+                  <select id="coin" class="mono" aria-label="Coin"></select>
+                </div>
+                <div class="field compact">
+                  <label for="tf">TF</label>
+                  <select id="tf" class="mono" aria-label="Timeframe"></select>
+                </div>
+              </div>
+              <div class="chip-row">
+                <button id="center-chart" class="ghost-btn grow" type="button" title="Center focused chart" aria-label="Center focused chart">⌂ Center</button>
+                <button id="refresh-coins" class="ghost-btn" type="button" title="Refresh coin list from Hyperliquid + Binance">Refresh</button>
+              </div>
+              <div class="chip-row">
+                <label class="check" for="hyperliquid">
+                  <input id="hyperliquid" type="checkbox" />
+                  <span>Hyperliquid</span>
+                </label>
+                <button id="open-browser" class="ghost-btn" type="button" title="Open Hyperliquid trade page">Open ↗</button>
+              </div>
+            </section>
+
+            <section class="sidebar-section" aria-labelledby="ticket-label">
+              <span id="ticket-label" class="card-label">Ticket</span>
+              <div class="field-row">
+                <div class="field"><label for="qty">QTY</label><input id="qty" class="mono" inputmode="decimal" autocomplete="off" /></div>
+                <div class="field"><label for="risk">RISK</label><input id="risk" class="mono" inputmode="decimal" value="10" autocomplete="off" /></div>
+              </div>
+              <div class="chip-row">
+                <button id="direction" class="direction long" type="button" aria-pressed="false" title="Toggle long/short (does not submit)">
+                  <span class="direction-dot" aria-hidden="true"></span><span id="direction-label">LONG</span>
+                </button>
+                <button id="read-order" class="ghost-btn" type="button" title="Load the open Hyperliquid position for this coin">Read order</button>
+              </div>
+              <div class="field">
+                <label for="limit">LIM</label>
+                <input id="limit" class="mono" inputmode="decimal" autocomplete="off" />
+              </div>
+              <div class="field-row">
+                <div class="field"><label for="tp">TP</label><input id="tp" class="mono" inputmode="decimal" autocomplete="off" /></div>
+                <div class="field"><label for="sl">SL</label><input id="sl" class="mono" inputmode="decimal" autocomplete="off" /></div>
+              </div>
+              <div class="order-actions">
+                <button id="update-order" class="ghost-btn" type="button">Update Order</button>
+                <button id="set-order" class="primary-btn" type="button">Set Order</button>
+              </div>
+              <p class="ticket-note" id="ticket-note">Levels come from the selected position box. Orders use the current LIM / TP / SL / QTY.</p>
+            </section>
+
+            <section class="sidebar-section">
+              <button id="set-alert" class="ghost-btn block" type="button" title="Save FVG alert levels for this coin">FVG alert levels</button>
+            </section>
+          </div>
+
+          <footer class="sidebar-foot">
+            <span id="backend-pill" class="pill pending" role="status" aria-live="polite">Connecting…</span>
+            <button id="settings-btn" class="icon-btn" type="button" aria-label="Open settings" title="Settings (Ctrl+,)">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h6M14 7h6M4 17h10M18 17h2"/><circle cx="12" cy="7" r="2"/><circle cx="16" cy="17" r="2"/></svg>
+            </button>
+          </footer>
+        </div>
+      </aside>
+
+    </div>
+
+    <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+    <div id="modal-root"></div>
+    <script>
+      (function () {
+        const btn = document.getElementById("theme-toggle");
+        if (!btn) return;
+        btn.addEventListener("click", function () {
+          const light = document.body.getAttribute("data-theme") === "light";
+          if (light) {
+            document.body.removeAttribute("data-theme");
+            try { localStorage.setItem("tp-theme", "dark"); } catch (e) {}
+          } else {
+            document.body.setAttribute("data-theme", "light");
+            try { localStorage.setItem("tp-theme", "light"); } catch (e) {}
+          }
+        });
+      })();
+    </script>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

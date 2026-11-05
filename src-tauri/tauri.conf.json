@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TradePanel",
+  "version": "0.1.0",
+  "identifier": "com.nerdatwork.tradepanel",
+  "build": {
+    "beforeDevCommand": "node scripts/frontend.mjs dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "node scripts/frontend.mjs build",
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "TradePanel — Multi-Chart",
+        "width": 1600,
+        "height": 980,
+        "minWidth": 1280,
+        "minHeight": 720,
+        "resizable": true,
+        "backgroundColor": "#1c1c1b",
+        "center": true,
+        "fullscreen": false,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; frame-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'none'; form-action 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline' http://localhost:5173; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173; frame-src 'self' http://localhost:5173; frame-ancestors 'self'; object-src 'none'; base-uri 'none'; form-action 'none'",
+      "capabilities": ["default"]
+    },
+    "enableGTKAppId": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "backend-dist/tradepanel-backend": "backend"
+    },
+    "createUpdaterArtifacts": false,
+    "category": "Finance",
+    "shortDescription": "Hyperliquid trading panel with a multi-chart workspace",
+    "longDescription": "TradePanel is a desktop trading panel for Hyperliquid with a synchronized multi-chart analysis workspace covering eight public crypto exchanges. Trading logic runs in a supervised Python sidecar; the desktop shell is Tauri 2."
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://updates.example.com/tradepanel/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "pubkey": ""
+    }
+  }
+}

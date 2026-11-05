@@ -1,6 +1,4 @@
 python-dotenv
-PySide6
-pyside6-essentials
 hyperliquid-python-sdk
 requests
 pandas

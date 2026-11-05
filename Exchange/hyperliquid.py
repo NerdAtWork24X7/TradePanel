@@ -22,6 +22,19 @@ from Core.models import OrderParams
 log = logging.getLogger(__name__)
 
 
+def _make_info(base_url: str) -> Info:
+    """Build a REST-only SDK client.
+
+    ``Info`` starts a ``WebsocketManager`` thread (and its ping thread) unless
+    ``skip_ws`` is set. Those threads are non-daemon, so the interpreter can
+    never exit while they are alive — which used to leave the sidecar running
+    forever and hang application shutdown. This backend only uses the HTTP
+    endpoints (meta, mids, user state, open orders), so the socket is wasted
+    anyway.
+    """
+    return Info(base_url, skip_ws=True)
+
+
 @dataclass
 class UpdateTpSlResult:
     """Result of updating TP/SL on an existing position."""
@@ -92,7 +105,7 @@ class HyperliquidClient:
             raise RuntimeError(
                 "Failed to initialize Hyperliquid wallet (private key invalid)"
             ) from e
-        self._info = Info(hl_constants.TESTNET_API_URL)
+        self._info = _make_info(hl_constants.TESTNET_API_URL)
         self._exchange = Exchange(wallet, hl_constants.TESTNET_API_URL)
         self._address = config.HL_ADDRESS
         self._ensure_sz_decimals()
@@ -117,7 +130,7 @@ class HyperliquidClient:
         try:
             info = getattr(cls._instance, "_info", None) if cls._instance is not None else None
             if info is None:
-                info = Info(hl_constants.TESTNET_API_URL)
+                info = _make_info(hl_constants.TESTNET_API_URL)
             meta = info.meta()
         except Exception as e:
             log.error("Failed to fetch szDecimals meta: %s", e)

@@ -21,16 +21,23 @@ else:
     _INTERNAL = _BASE_DIR
 
 # Credentials live in keys/ (gitignored). Fall back to the legacy root .env.
-KEYS_DIR = _BASE_DIR / "keys"
-_env_file = KEYS_DIR / ".env"
-if not _env_file.exists():
-    _env_file = _BASE_DIR / ".env"
-if _env_file.exists():
-    load_dotenv(_env_file)
+# The Tauri shell sets TRADEPANEL_KEYS_DIR and TRADEPANEL_IGNORE_ENV_FILE so
+# secrets come from the OS keyring instead of the plaintext file.
+_env_keys_dir = os.environ.get("TRADEPANEL_KEYS_DIR")
+KEYS_DIR = Path(_env_keys_dir).expanduser() if _env_keys_dir else _BASE_DIR / "keys"
+if os.environ.get("TRADEPANEL_IGNORE_ENV_FILE") != "1":
+    _env_file = KEYS_DIR / ".env"
+    if not _env_file.exists():
+        _env_file = _BASE_DIR / ".env"
+    if _env_file.exists():
+        load_dotenv(_env_file)
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 ROOT_DIR = _BASE_DIR
-DATA_DIR = ROOT_DIR / "data"
+# The Tauri shell owns the writable data directory (OS app-data location) and
+# passes it to the sidecar. Unset means the legacy layout next to the code/exe.
+_data_override = os.environ.get("TRADEPANEL_DATA_DIR")
+DATA_DIR = Path(_data_override).expanduser() if _data_override else ROOT_DIR / "data"
 WEB_DIR = ROOT_DIR / "UI" / "web"            # writable web dir (next to exe)
 BUNDLED_WEB_DIR = _INTERNAL / "UI" / "web"     # bundled web assets (read-only in frozen)
 COINS_FILE = DATA_DIR / "coins.json"

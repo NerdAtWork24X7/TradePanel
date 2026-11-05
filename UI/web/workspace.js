@@ -740,6 +740,10 @@
 
     /* ── Chart lifecycle ──────────────────────────────────────────────────── */
 
+    // Right-scale padding; temporarily zeroed while a vertical price drag is
+    // active so the frozen range maps 1:1 to the pane (see capturePanBase).
+    var PRICE_SCALE_MARGINS = { top: 0.08, bottom: 0.22 };
+
     function chartOptions() {
         return {
             layout: {
@@ -759,7 +763,7 @@
             },
             rightPriceScale: {
                 borderColor: '#2A2A2A',
-                scaleMargins: { top: 0.08, bottom: 0.22 },
+                scaleMargins: { top: PRICE_SCALE_MARGINS.top, bottom: PRICE_SCALE_MARGINS.bottom },
                 minimumWidth: 72
             },
             timeScale: {
@@ -789,6 +793,7 @@
             absRange: null,
             priceOffset: 0,
             pricePan: null,
+            panBase: null,
             hasMore: true,
             loadingOlder: false,
             loadSeq: 0,
@@ -961,31 +966,54 @@
         return series;
     }
 
-    function installAutoscaleProvider(entry) {
-        if (!entry.mainSeries) return;
-        entry.mainSeries.applyOptions({
-            autoscaleInfoProvider: function (original) {
-                var offset = Number(entry.priceOffset) || 0;
-                if (entry.absRange && entry.config.priceScaleMode === 'absolute') {
-                    return {
-                        priceRange: {
-                            minValue: entry.absRange.min + offset,
-                            maxValue: entry.absRange.max + offset
-                        },
-                        margins: { above: 0, below: 0 }
-                    };
-                }
-                var info = original();
-                if (!info || !info.priceRange || !offset) return info;
+    /**
+     * Autoscale provider shared by every series on the right price scale.
+     * Overlay indicators (SMA/EMA/BB/VWAP/ribbon) contribute their own
+     * autoscale ranges; offsetting the main series alone would grow the
+     * union while panning and rescale the axis.  Applying the same offset
+     * (or the same frozen window while the manual price scale is active) to
+     * every series keeps the scale a pure translation.
+     */
+    function priceScaleRangeProvider(entry) {
+        return function (original) {
+            var offset = Number(entry.priceOffset) || 0;
+            if (entry.panBase) {
                 return {
                     priceRange: {
-                        minValue: info.priceRange.minValue + offset,
-                        maxValue: info.priceRange.maxValue + offset
+                        minValue: entry.panBase.min + offset,
+                        maxValue: entry.panBase.max + offset
                     },
-                    margins: info.margins
+                    margins: { above: 0, below: 0 }
                 };
             }
-        });
+            if (entry.absRange && entry.config.priceScaleMode === 'absolute') {
+                return {
+                    priceRange: {
+                        minValue: entry.absRange.min + offset,
+                        maxValue: entry.absRange.max + offset
+                    },
+                    margins: { above: 0, below: 0 }
+                };
+            }
+            var info = original();
+            if (!info || !info.priceRange || !offset) return info;
+            return {
+                priceRange: {
+                    minValue: info.priceRange.minValue + offset,
+                    maxValue: info.priceRange.maxValue + offset
+                },
+                margins: info.margins
+            };
+        };
+    }
+
+    function attachPriceScaleProvider(entry, series) {
+        if (!series || !series.applyOptions) return;
+        series.applyOptions({ autoscaleInfoProvider: priceScaleRangeProvider(entry) });
+    }
+
+    function installAutoscaleProvider(entry) {
+        attachPriceScaleProvider(entry, entry.mainSeries);
     }
 
     /**
@@ -1023,10 +1051,57 @@
         scheduleDraw(entry);
     }
 
+    /**
+     * Freeze the visible price range when a vertical pan starts.  The frozen
+     * window (plus the pan offset) is returned by every series on the right
+     * scale, so time pans/zooms and live updates translate the chart without
+     * rescaling it; it stays in effect as a manual price scale until reset
+     * (double-click the price axis, Center, symbol/timeframe/mode change) or a
+     * price-axis gesture.  Lightweight Charts applies scaleMargins on top of
+     * the provider range, so the captured display range is only 1:1 with the
+     * scale margins zeroed.
+     */
+    function capturePanBase(entry) {
+        if (!entry || entry.destroyed || !entry.mainSeries || entry.panBase) return;
+        var box = plotBox(entry);
+        if (!box || !isFinite(box.h) || box.h < 1) return;
+        var top = entry.mainSeries.coordinateToPrice(0);
+        var bottom = entry.mainSeries.coordinateToPrice(Math.max(1, box.h - 1));
+        if (top == null || bottom == null || !isFinite(top) || !isFinite(bottom) || top <= bottom) return;
+        // The captured range already includes any previous offset.
+        entry.priceOffset = 0;
+        entry.panBase = { min: bottom, max: top };
+        // Zero the scale padding so the frozen range maps 1:1 to the pane
+        // (LWC applies scaleMargins on top of the provider range).
+        entry.chart.priceScale('right').applyOptions({ scaleMargins: { top: 0, bottom: 0 } });
+    }
+
+    function restoreScaleMargins(entry) {
+        try {
+            entry.chart.priceScale('right').applyOptions({
+                scaleMargins: { top: PRICE_SCALE_MARGINS.top, bottom: PRICE_SCALE_MARGINS.bottom }
+            });
+        } catch (err) { /* ignore */ }
+    }
+
+    function releasePanBase(entry) {
+        if (!entry || entry.destroyed || !entry.panBase) return;
+        entry.panBase = null;
+        restoreScaleMargins(entry);
+        refreshPriceOffset(entry, true);
+    }
+
+    function clearPanBase(entry) {
+        pricePanTargets(entry).forEach(releasePanBase);
+    }
+
     function resetPricePan(entry) {
         pricePanTargets(entry).forEach(function (target) {
             if (!target || target.destroyed) return;
+            var hadPanBase = !!target.panBase;
             target.priceOffset = 0;
+            target.panBase = null;
+            if (hadPanBase) restoreScaleMargins(target);
             refreshPriceOffset(target, true);
         });
     }
@@ -1035,6 +1110,8 @@
         if (!entry || !isFinite(delta) || Math.abs(delta) < 1e-12) return;
         pricePanTargets(entry).forEach(function (target) {
             if (!target || target.destroyed) return;
+            capturePanBase(target);
+            if (!target.panBase) return;
             target.priceOffset = (Number(target.priceOffset) || 0) + delta;
             refreshPriceOffset(target);
         });
@@ -1303,6 +1380,8 @@
             if (mode !== 'percentage' && mode !== 'indexed') return;
             var ref = referenceCandle(entry);
             if (!ref || (entry.refPrice && ref.close === entry.refPrice)) return;
+            // The display units are re-based; a frozen price window is stale.
+            resetPricePan(entry);
             rebuildDisplay(entry, { preserve: true });
             refreshIndicators(entry);
         }, 180);
@@ -1805,6 +1884,7 @@
             lastValueVisible: false,
             crosshairMarkerVisible: false
         });
+        attachPriceScaleProvider(entry, series);
         entry.overlays[key] = series;
         return series;
     }
@@ -4424,7 +4504,13 @@
         var host = entry.host;
         var onHostDown = function () { entry.allowBackfill = true; startDrawSync(entry); };
         var onDocUp = function () { stopDrawSync(entry); };
-        var onWheel = function () { entry.allowBackfill = true; scheduleDraw(entry); };
+        var onWheel = function (ev) {
+            entry.allowBackfill = true;
+            var point = hostPoint(ev);
+            var box = plotBox(entry);
+            if (point.x >= box.w - 2 && point.y < box.h - 2) clearPanBase(entry);
+            scheduleDraw(entry);
+        };
         host.addEventListener('pointerdown', onHostDown, { passive: true, capture: true });
         document.addEventListener('pointerup', onDocUp, { passive: true, capture: true });
         document.addEventListener('pointercancel', onDocUp, { passive: true, capture: true });
@@ -4548,8 +4634,10 @@
             var point = hostPoint(ev);
             var box = plotBox(entry);
             if (!box.w || box.h < 20 || !entry.mainSeries) return;
-            // Leave the price and time axes to LWC's own scale handling.
-            if (point.x >= box.w - 2 || point.y >= box.h - 2) return;
+            // Leave the axes to LWC's own scale handling.  A price-axis
+            // gesture switches to a manual scale, so drop the frozen window.
+            if (point.x >= box.w - 2) { clearPanBase(entry); return; }
+            if (point.y >= box.h - 2) return;
             entry.pricePan = { startX: point.x, startY: point.y, lastY: point.y, active: false };
             pricePanMove = function (moveEv) {
                 var pan = entry.pricePan;

@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-05 — price-axis pan no longer rescales with indicators on
+- Dragging a chart vertically now translates the price range instead of refitting it. Overlay
+  indicators (SMA/EMA/BB/VWAP/ribbon/HL EMA) are separate series on the same price scale; only the
+  main series applied the pan offset, so the autoscale union grew and the axis stretched as soon as
+  an indicator was visible. The right-scale autoscale provider is now shared by every series, and a
+  vertical pan freezes the visible range (captured from the current mapping with the scale margins
+  zeroed) so time pans, zooms and live tick updates keep the exact same span. The frozen window
+  persists as a manual price scale; double-clicking the price axis, Center, symbol/timeframe/price-
+  mode/reference changes, or a price-axis drag/wheel reset it back to autoscale.
+- Verified in the browser harness (SMA+EMA+BB+VWAP on): pure and diagonal drags hold the span at
+  9927.144772 through the gesture and after release, live ticks do not change it, percentage and
+  absolute group modes keep span plus offset sync across two charts, and a following price-axis drag
+  re-captures cleanly. 50 Python tests, 21 Node sync tests, compileall/import and the offscreen Qt
+  smoke (verticalPan moved, offset -351.8) pass.
+
 ## 2026-11-04 — remove Daily EMA and HL Scalp indicators
 - Deleted `Indicator/daily_ema.py` and `Indicator/hl_scalp.py` with their `Indicator` exports,
   `DEFAULT_CONFIG` sections, workspace indicator defaults, config-dialog groups, Python study

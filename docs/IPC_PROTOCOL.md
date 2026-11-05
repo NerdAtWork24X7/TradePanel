@@ -182,7 +182,7 @@ WebView has **no** shell, filesystem, HTTP or updater capability.
 
 | Operation | Default |
 |---|---|
-| `market.get_candles` | 40 s |
+| `market.get_candles`, `trading.coins` | 40 s |
 | `market.get_tick` / `search_symbols` | 25 s / 30 s |
 | `indicator.compute` | 45 s |
 | `workspace.save` | 20 s |

@@ -16,19 +16,13 @@ pub fn emit_status(app: &AppHandle, status: &BackendStatus) {
 }
 
 pub fn emit_backend_notification(app: &AppHandle, method: &str, params: serde_json::Value) {
-    if let Err(error) = app.emit(
-        BACKEND_EVENT,
-        json!({ "method": method, "params": params }),
-    ) {
+    if let Err(error) = app.emit(BACKEND_EVENT, json!({ "method": method, "params": params })) {
         log::warn!("Cannot emit backend notification: {error}");
     }
 }
 
 pub fn emit_notice(app: &AppHandle, level: &str, message: &str) {
-    if let Err(error) = app.emit(
-        NOTICE_EVENT,
-        json!({ "level": level, "message": message }),
-    ) {
+    if let Err(error) = app.emit(NOTICE_EVENT, json!({ "level": level, "message": message })) {
         log::warn!("Cannot emit notice: {error}");
     }
 }

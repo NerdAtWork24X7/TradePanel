@@ -29,7 +29,11 @@ pub struct RpcErrorPayload {
 
 impl RpcErrorPayload {
     pub fn new(code: i64, message: impl Into<String>) -> Self {
-        Self { code, message: message.into(), data: None }
+        Self {
+            code,
+            message: message.into(),
+            data: None,
+        }
     }
 
     pub fn with_data(mut self, data: Value) -> Self {
@@ -42,8 +46,11 @@ impl RpcErrorPayload {
     }
 
     pub fn timeout(method: &str, timeout_ms: u64) -> Self {
-        Self::new(ERR_TIMEOUT, format!("Request timed out after {timeout_ms} ms"))
-            .with_data(serde_json::json!({ "method": method, "retryable": false }))
+        Self::new(
+            ERR_TIMEOUT,
+            format!("Request timed out after {timeout_ms} ms"),
+        )
+        .with_data(serde_json::json!({ "method": method, "retryable": false }))
     }
 
     /// A timed-out or interrupted order may still have reached the exchange.
@@ -177,7 +184,10 @@ pub fn parse_incoming(line: &str) -> Incoming {
             };
         };
         return match serde_json::from_value::<RpcErrorPayload>(error.clone()) {
-            Ok(payload) => Incoming::Response { id, result: Err(payload) },
+            Ok(payload) => Incoming::Response {
+                id,
+                result: Err(payload),
+            },
             Err(_) => Incoming::Response {
                 id,
                 result: Err(RpcErrorPayload::new(
@@ -194,7 +204,10 @@ pub fn parse_incoming(line: &str) -> Incoming {
                 error: RpcErrorPayload::new(ERR_INVALID_REQUEST, "Result frame without id"),
             };
         };
-        return Incoming::Response { id, result: Ok(result.clone()) };
+        return Incoming::Response {
+            id,
+            result: Ok(result.clone()),
+        };
     }
     if let Some(method) = object.get("method").and_then(Value::as_str) {
         if method.is_empty() || method.len() > 120 {
@@ -317,7 +330,10 @@ mod tests {
             "system.ping",
             "unknown.method",
         ] {
-            assert!(!is_frontend_method(forbidden), "{forbidden} must not be callable");
+            assert!(
+                !is_frontend_method(forbidden),
+                "{forbidden} must not be callable"
+            );
         }
     }
 

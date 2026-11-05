@@ -1,16 +1,12 @@
 """Shared utilities for the core package.
 
-Pure helper functions used by candle_service and indicators.
+Pure helper functions used by the indicator modules.
 """
 
 from __future__ import annotations
 
 import re
 import sqlite3
-import threading
-import weakref
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures.thread import _threads_queues, _worker
 
 import pandas as pd
 
@@ -69,44 +65,3 @@ def load_candles_df(
         conn.close()
 
     return df
-
-
-class DaemonThreadPoolExecutor(ThreadPoolExecutor):
-    """ThreadPoolExecutor whose workers run as daemon threads.
-
-    Python's default ThreadPoolExecutor creates non-daemon workers. On
-    application shutdown those workers can block the interpreter's ``_shutdown``
-    routine if they are still running (e.g. stuck on a network request). Daemon
-    workers avoid this because they do not participate in the interpreter-wide
-    thread join during shutdown.
-    """
-
-    def _adjust_thread_count(self) -> None:
-        # Replicates the upstream logic but creates daemon threads before they
-        # start. A thread's daemon flag can only be set before start() is called.
-        if self._idle_semaphore.acquire(timeout=0):
-            return
-
-        def weakref_cb(_, q=self._work_queue):
-            try:
-                q.put(None)
-            except Exception:
-                pass
-
-        num_threads = len(self._threads)
-        if num_threads < self._max_workers:
-            thread_name = "%s_%d" % (self._thread_name_prefix or self, num_threads)
-            t = threading.Thread(
-                name=thread_name,
-                target=_worker,
-                args=(
-                    weakref.ref(self, weakref_cb),
-                    self._work_queue,
-                    self._initializer,
-                    self._initargs,
-                ),
-            )
-            t.daemon = True
-            t.start()
-            self._threads.add(t)
-            _threads_queues[t] = self._work_queue

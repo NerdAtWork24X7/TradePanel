@@ -165,7 +165,7 @@ chmod +x TradePanel_0.1.0_amd64.AppImage
 ## 6. Windows release
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
+powershell -ExecutionPolicy Bypass -File backend\scripts\build-windows.ps1
 # options: -SkipBackend  (reuse the staged sidecar)
 #          -Install      (force npm ci for shell and frontend)
 ```

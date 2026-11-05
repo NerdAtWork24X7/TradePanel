@@ -18,9 +18,8 @@ use tauri::{AppHandle, State};
 use tauri_plugin_updater::UpdaterExt;
 
 use crate::protocol::{
-    is_frontend_method, is_order_method, BackendStatus, RpcErrorPayload,
-    ERR_DUPLICATE_REQUEST, ERR_EXECUTION_UNKNOWN, ERR_INTERNAL, ERR_INVALID_REQUEST,
-    ERR_UNAVAILABLE,
+    is_frontend_method, is_order_method, BackendStatus, RpcErrorPayload, ERR_DUPLICATE_REQUEST,
+    ERR_EXECUTION_UNKNOWN, ERR_INTERNAL, ERR_INVALID_REQUEST, ERR_UNAVAILABLE,
 };
 use crate::security::{CredentialField, CredentialSaveResult, SecretStore};
 use crate::sidecar::SidecarManager;
@@ -244,9 +243,7 @@ pub async fn backend_rpc(
             ))
         }
     };
-    let timeout = Duration::from_millis(
-        timeout_ms.unwrap_or(30_000).clamp(1_000, 120_000),
-    );
+    let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000).clamp(1_000, 120_000));
 
     if is_order_method(&method) {
         let _gate = state.orders.acquire().await?;
@@ -325,7 +322,10 @@ pub async fn credentials_save(
     };
 
     if let Err(error) = state.sidecar.set_credentials(values, clear).await {
-        log::warn!("Credentials stored but not applied to the running backend: {}", error.message);
+        log::warn!(
+            "Credentials stored but not applied to the running backend: {}",
+            error.message
+        );
         crate::events::emit_notice(
             &app,
             "warn",
@@ -386,7 +386,11 @@ pub async fn credentials_legacy_status() -> Result<LegacyCredentials, RpcErrorPa
                 keys,
             })
         }
-        None => Ok(LegacyCredentials { found: false, path: None, keys: Vec::new() }),
+        None => Ok(LegacyCredentials {
+            found: false,
+            path: None,
+            keys: Vec::new(),
+        }),
     }
 }
 
@@ -430,7 +434,10 @@ pub async fn credentials_import_legacy(
         .collect();
     let values = load_values(&state.credentials, &keys);
     if let Err(error) = state.sidecar.set_credentials(values, Vec::new()).await {
-        log::warn!("Imported credentials could not be applied live: {}", error.message);
+        log::warn!(
+            "Imported credentials could not be applied live: {}",
+            error.message
+        );
     }
     Ok(CredentialSaveResult { keys, fields })
 }
@@ -456,7 +463,10 @@ pub struct AppInfo {
 }
 
 #[tauri::command]
-pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> Result<AppInfo, RpcErrorPayload> {
+pub async fn app_info(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<AppInfo, RpcErrorPayload> {
     Ok(AppInfo {
         version: app.package_info().version.to_string(),
         protocol_version: crate::protocol::PROTOCOL_VERSION,
@@ -467,10 +477,7 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> Result<AppI
 #[tauri::command]
 pub async fn open_trade_page(coin: String) -> Result<(), RpcErrorPayload> {
     let coin = coin.trim();
-    if coin.is_empty()
-        || coin.len() > 20
-        || !coin.chars().all(|ch| ch.is_ascii_alphanumeric())
-    {
+    if coin.is_empty() || coin.len() > 20 || !coin.chars().all(|ch| ch.is_ascii_alphanumeric()) {
         return Err(RpcErrorPayload::new(ERR_INVALID_REQUEST, "Invalid coin"));
     }
     let url = format!("https://app.hyperliquid.xyz/trade/{coin}");

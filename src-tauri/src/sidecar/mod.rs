@@ -28,8 +28,8 @@ use tokio::sync::{oneshot, Mutex as AsyncMutex};
 
 use crate::events::{emit_backend_notification, emit_status};
 use crate::protocol::{
-    is_order_method, request_frame, BackendStatus, Incoming, RpcErrorPayload, ERR_PROTOCOL_MISMATCH,
-    ERR_UNAVAILABLE, MAX_MESSAGE_BYTES, PROTOCOL_VERSION,
+    is_order_method, request_frame, BackendStatus, Incoming, RpcErrorPayload,
+    ERR_PROTOCOL_MISMATCH, ERR_UNAVAILABLE, MAX_MESSAGE_BYTES, PROTOCOL_VERSION,
 };
 use crate::security::SecretStore;
 
@@ -110,7 +110,10 @@ impl SidecarManager {
     }
 
     pub fn start(self: &Arc<Self>) {
-        log::info!("Starting Python sidecar supervisor ({})", self.binary.display());
+        log::info!(
+            "Starting Python sidecar supervisor ({})",
+            self.binary.display()
+        );
         Self::monitor(self.clone());
         let this = self.clone();
         tauri::async_runtime::spawn(async move {
@@ -376,11 +379,7 @@ impl SidecarManager {
         }
     }
 
-    fn spawn_stdout_reader(
-        self: Arc<Self>,
-        stdout: tokio::process::ChildStdout,
-        generation: u64,
-    ) {
+    fn spawn_stdout_reader(self: Arc<Self>, stdout: tokio::process::ChildStdout, generation: u64) {
         tauri::async_runtime::spawn(async move {
             let mut reader = BufReader::with_capacity(32 * 1024, stdout);
             let mut buffer: Vec<u8> = Vec::with_capacity(8 * 1024);
@@ -394,7 +393,9 @@ impl SidecarManager {
                         }
                     }
                     Ok(ReadLine::Oversized) => {
-                        log::error!("Dropping oversized backend frame (> {MAX_MESSAGE_BYTES} bytes)");
+                        log::error!(
+                            "Dropping oversized backend frame (> {MAX_MESSAGE_BYTES} bytes)"
+                        );
                     }
                     Ok(ReadLine::Eof) => break,
                     Err(error) => {
@@ -420,11 +421,7 @@ impl SidecarManager {
         let code = {
             let mut guard = self.child.lock().await;
             match guard.as_mut() {
-                Some(child) => child
-                    .wait()
-                    .await
-                    .ok()
-                    .and_then(|status| status.code()),
+                Some(child) => child.wait().await.ok().and_then(|status| status.code()),
                 None => None,
             }
         };
@@ -472,7 +469,10 @@ impl SidecarManager {
         let (sender, receiver) = oneshot::channel();
         self.pending.lock().unwrap().insert(
             id.clone(),
-            Pending { method: method.to_string(), sender },
+            Pending {
+                method: method.to_string(),
+                sender,
+            },
         );
 
         let frame = request_frame(&id, method, &params);
@@ -480,7 +480,10 @@ impl SidecarManager {
             self.pending.lock().unwrap().remove(&id);
             return Err(RpcErrorPayload::new(
                 crate::protocol::ERR_INVALID_REQUEST,
-                format!("Request '{method}' exceeds the {} byte limit", MAX_MESSAGE_BYTES),
+                format!(
+                    "Request '{method}' exceeds the {} byte limit",
+                    MAX_MESSAGE_BYTES
+                ),
             ));
         }
         if let Err(error) = self.write_frame(&frame).await {
@@ -503,10 +506,7 @@ impl SidecarManager {
                         "the backend did not answer before the deadline",
                     ))
                 } else {
-                    Err(RpcErrorPayload::timeout(
-                        method,
-                        timeout.as_millis() as u64,
-                    ))
+                    Err(RpcErrorPayload::timeout(method, timeout.as_millis() as u64))
                 }
             }
         }
@@ -592,15 +592,13 @@ impl SidecarManager {
             exit_code,
             delay.as_millis()
         );
-        self.set_status(
-            BackendStatus::new("restarting").with_message(format!(
+        self.set_status(BackendStatus::new("restarting").with_message(format!(
                 "Backend exited (code {}). Reconnecting in {:.0}s — trading is disabled.",
                 exit_code
                     .map(|code| code.to_string())
                     .unwrap_or_else(|| "signal".to_string()),
                 delay.as_secs_f32()
-            )),
-        );
+            )));
 
         let this = self.clone();
         tauri::async_runtime::spawn(async move {
@@ -684,7 +682,11 @@ async fn read_bounded_line<R: tokio::io::AsyncBufRead + Unpin>(
             if out.is_empty() && !oversized {
                 return Ok(ReadLine::Eof);
             }
-            return Ok(if oversized { ReadLine::Oversized } else { ReadLine::Line });
+            return Ok(if oversized {
+                ReadLine::Oversized
+            } else {
+                ReadLine::Line
+            });
         }
         if let Some(index) = available.iter().position(|byte| *byte == b'\n') {
             if !oversized {
@@ -696,7 +698,11 @@ async fn read_bounded_line<R: tokio::io::AsyncBufRead + Unpin>(
                 }
             }
             reader.consume(index + 1);
-            return Ok(if oversized { ReadLine::Oversized } else { ReadLine::Line });
+            return Ok(if oversized {
+                ReadLine::Oversized
+            } else {
+                ReadLine::Line
+            });
         }
         let available_len = available.len();
         if !oversized {

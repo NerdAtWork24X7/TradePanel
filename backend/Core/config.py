@@ -15,11 +15,9 @@ from dotenv import load_dotenv
 if getattr(sys, "frozen", False):
     # Running as PyInstaller bundle
     _BASE_DIR = Path(sys.executable).resolve().parent          # dir next to exe (writable)
-    _INTERNAL = Path(sys._MEIPASS).resolve()                   # bundled read-only files
 else:
     # backend/Core/config.py → repo root (data/, keys/ and frontend/ live there)
     _BASE_DIR = Path(__file__).resolve().parents[2]
-    _INTERNAL = _BASE_DIR
 
 # Credentials live in keys/ (gitignored). Fall back to the legacy root .env.
 # The Tauri shell sets TRADEPANEL_KEYS_DIR and TRADEPANEL_IGNORE_ENV_FILE so
@@ -39,8 +37,6 @@ ROOT_DIR = _BASE_DIR
 # passes it to the sidecar. Unset means the legacy layout next to the code/exe.
 _data_override = os.environ.get("TRADEPANEL_DATA_DIR")
 DATA_DIR = Path(_data_override).expanduser() if _data_override else ROOT_DIR / "data"
-WEB_DIR = ROOT_DIR / "frontend" / "web"      # writable web dir (next to exe)
-BUNDLED_WEB_DIR = _INTERNAL / "frontend" / "web"  # bundled web assets (read-only in frozen)
 COINS_FILE = DATA_DIR / "coins.json"
 ALERTS_FILE = DATA_DIR / "alerts.json"
 
@@ -60,14 +56,7 @@ def candles_db_path(timeframe: str) -> Path:
         raise ValueError(f"Invalid timeframe: {timeframe!r}")
     return DATA_DIR / f"candles_{timeframe}.db"
 
-# ── Window defaults ──────────────────────────────────────────────────────────
-WINDOW_TITLE = "Trade Panel"
-WINDOW_WIDTH = 1920
-WINDOW_HEIGHT = 1080
-
 # ── Trading defaults ─────────────────────────────────────────────────────────
-DEFAULT_RISK = 10.0
-DEFAULT_TIMEFRAME = "5m"
 TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"]
 
 # Percentage offsets for quick Long/Short buttons
@@ -93,6 +82,3 @@ def refresh_credentials() -> None:
 
 
 refresh_credentials()
-
-# ── Chart ────────────────────────────────────────────────────────────────────
-REALTIME_UPDATE_INTERVAL_MS = 2000

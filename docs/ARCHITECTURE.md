@@ -102,7 +102,7 @@ imports and no network requests.
 |---|---|---|
 | Coins, alerts, window state, indicator config | `<app-data>/data/` | existing JSON schemas |
 | Workspaces (layouts, charts, drawings) | `<app-data>/data/workspaces.json` | schema v1, validated and atomic |
-| Candle cache | `<app-data>/data/candles_<tf>.db` | existing SQLite + WAL |
+| Legacy candle cache | `<app-data>/data/candles_<tf>.db` | written by the pre-Tauri app, imported copy-only; the sidecar only reads it as an indicator fallback |
 | Order-uncertain marker | `<app-data>/data/trading_state.json` | `{"uncertain": bool}` |
 | Secrets | OS credential store | service `TradePanel`, account = env key |
 | Logs | OS log dir (plus stderr) | `tradepanel.log` |

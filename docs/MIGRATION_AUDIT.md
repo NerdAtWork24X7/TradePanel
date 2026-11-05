@@ -1,5 +1,11 @@
 # TradePanel — PySide6 → Tauri 2 Migration Audit
 
+> **Historical document.** Phase 0 deliverable, written before the migration. It
+> describes the PySide6 application that has since been deleted: files and modules it
+> names (`main.py`, `UI/`, `Core.candle_service.py`) no longer exist. Kept as the audit
+> trail for the trading-behaviour and dependency review. Current design:
+> [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
 Status: Phase 0 deliverable. No application source was modified to produce this document.
 Audit date: 2026-11-05. Audited commit: `7ded81b` (`main`), branch `feature/tauri2-migration`.
 

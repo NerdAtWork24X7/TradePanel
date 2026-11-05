@@ -8,12 +8,12 @@ backend/scripts/test.sh            # everything below (except the packaged-sidec
 
 | Suite | Command | Count | Status |
 |---|---|---|---|
-| Python backend / IPC | `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'` | 69 | pass |
+| Python backend / IPC | `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'` | 78 | pass |
 | Chart synchronisation | `node --test tests/chart_sync.test.mjs` | 21 | pass |
-| Workspace bridge adapter | `node --test frontend/tests/tauri_bridge.test.mjs` | 8 | pass |
+| Workspace bridge adapter | `node --test frontend/tests/tauri_bridge.test.mjs` | 13 | pass |
 | Rust protocol/security/orders | `(cd src-tauri && cargo test)` | 12 | pass |
 | Frontend types | `npm --prefix frontend run typecheck` | — | pass |
-| Frontend production build | `npm --prefix frontend run build` | — | pass (41 KB JS, 13 KB gzip) |
+| Frontend production build | `npm --prefix frontend run build` | — | pass (59 KB JS, 17 KB gzip) |
 | Dependency audit (prod) | `npm audit --omit=dev` (root + frontend) | — | 0 vulnerabilities |
 
 Run date: 2026-11-05. Environment: Ubuntu 24.04, Python 3.12.13, Rust 1.98.1,
@@ -26,7 +26,7 @@ only, not the application.
 
 ### What the suites cover
 
-**Python (69)** — existing market-data parsers/aggregation, workspace store and indicator
+**Python (78)** — existing market-data parsers/aggregation, workspace store and indicator
 tests, credential file tests, plus the new sidecar suite:
 
 * framing: request/notification shapes, malformed JSON, oversize frames, numeric ids;
@@ -41,7 +41,7 @@ tests, credential file tests, plus the new sidecar suite:
 * trading without credentials returns `-32001` and writes nothing;
 * graceful shutdown exits 0 and every stdout line is valid JSON.
 
-**JS adapter (8)** — inert outside an iframe; readiness announcement; QWebChannel-shaped
+**JS adapter (13)** — inert outside an iframe; readiness announcement; QWebChannel-shaped
 sync calls via JSON callback; `reqId` correlation through `dataReady`; `{ok:false,error}`
 mapping; workspace signals become host events; host commands queue until boot; foreign
 frame/origin messages ignored.

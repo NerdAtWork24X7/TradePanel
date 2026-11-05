@@ -49,12 +49,6 @@ _config_lock = threading.Lock()
 _config_signature: str | None = None
 
 SESSION_FLAGS = ("session_asian", "session_london", "session_ny_am", "session_ny_pm")
-SESSION_KEYS = {
-    "session_asian": "asian",
-    "session_london": "london",
-    "session_ny_am": "ny_am",
-    "session_ny_pm": "ny_pm",
-}
 ALL_FLAGS = set(SESSION_FLAGS) | {
     "fvg", "ribbon", "vp", "daily_vp", "session_vp",
     "hl_ema", "adx",

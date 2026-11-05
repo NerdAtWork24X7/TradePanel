@@ -40,7 +40,6 @@ pub const FIELDS: [FieldSpec; 2] = [
     },
 ];
 
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CredentialField {
@@ -67,7 +66,7 @@ impl SecretStore {
     }
 
     fn entry(key: &str) -> Result<Entry, String> {
-        Entry::new(SERVICE, key).map_err(|error| store_error(error))
+        Entry::new(SERVICE, key).map_err(store_error)
     }
 
     /// Secret values for sidecar startup. Missing entries are skipped.
@@ -80,7 +79,10 @@ impl SecretStore {
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    log::warn!("Credential store unavailable ({error}); continuing without {}", spec.key)
+                    log::warn!(
+                        "Credential store unavailable ({error}); continuing without {}",
+                        spec.key
+                    )
                 }
             }
         }
@@ -99,13 +101,10 @@ impl SecretStore {
     pub fn status(&self) -> Result<Vec<CredentialField>, String> {
         let mut fields = Vec::with_capacity(FIELDS.len());
         for spec in FIELDS {
-            let set = match Self::entry(spec.key) {
-                Ok(entry) => match entry.get_password() {
-                    Ok(_) => true,
-                    Err(KeyringError::NoEntry) => false,
-                    Err(error) => return Err(store_error(error)),
-                },
-                Err(error) => return Err(error),
+            let set = match Self::entry(spec.key)?.get_password() {
+                Ok(_) => true,
+                Err(KeyringError::NoEntry) => false,
+                Err(error) => return Err(store_error(error)),
             };
             fields.push(CredentialField {
                 key: spec.key.to_string(),
@@ -148,9 +147,7 @@ impl SecretStore {
             }
             validate(spec.key, &value)?;
             let entry = Self::entry(spec.key)?;
-            entry
-                .set_password(&value)
-                .map_err(|error| store_error(error))?;
+            entry.set_password(&value).map_err(store_error)?;
             changed.push(spec.key.to_string());
         }
 
@@ -158,7 +155,10 @@ impl SecretStore {
         changed.dedup();
         let fields = self.status()?;
         log::info!("Credential store updated: {}", changed.join(", "));
-        Ok(CredentialSaveResult { keys: changed, fields })
+        Ok(CredentialSaveResult {
+            keys: changed,
+            fields,
+        })
     }
 
     /// Copy credentials from a legacy `keys/.env` file into the keyring.
@@ -258,7 +258,11 @@ fn parse_env(text: &str) -> Vec<(String, String)> {
             continue;
         };
         let key = key.trim();
-        if key.is_empty() || !key.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+        if key.is_empty()
+            || !key
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
             continue;
         }
         let mut value = raw.trim().to_string();

@@ -100,7 +100,3 @@ export function openModal(options: ModalOptions): ModalHandle {
 
   return { close, root: dialog };
 }
-
-export function closeActiveModal(): void {
-  active?.close();
-}

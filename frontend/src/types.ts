@@ -154,13 +154,6 @@ export interface BackendStatus {
 
 export type Direction = "long" | "short";
 
-export interface TradeLevels {
-  entry: number;
-  tp: number;
-  sl: number;
-  short: boolean;
-}
-
 export interface IndicatorComputeResult {
   ok: boolean;
   [key: string]: unknown;

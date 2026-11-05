@@ -24,15 +24,17 @@ pub fn prepare(app: &AppHandle) -> Result<AppPaths, String> {
     let data_dir = root.join("data");
     let keys_dir = root.join("keys");
     for dir in [&root, &data_dir, &keys_dir] {
-        fs::create_dir_all(dir).map_err(|error| {
-            format!("Cannot create {}: {error}", dir.display())
-        })?;
+        fs::create_dir_all(dir)
+            .map_err(|error| format!("Cannot create {}: {error}", dir.display()))?;
     }
     restrict_permissions(&keys_dir);
 
     if let Some(legacy) = find_legacy_data_dir(&data_dir) {
         match copy_missing(&legacy, &data_dir) {
-            Ok(0) => log::info!("Legacy data directory already imported: {}", legacy.display()),
+            Ok(0) => log::info!(
+                "Legacy data directory already imported: {}",
+                legacy.display()
+            ),
             Ok(count) => log::warn!(
                 "Imported {count} file(s) from legacy data directory {} into {}",
                 legacy.display(),
@@ -66,12 +68,21 @@ pub fn sidecar_binary(app: &AppHandle) -> Result<PathBuf, String> {
     }
     if let Ok(resource_dir) = app.path().resource_dir() {
         candidates.push(resource_dir.join("backend").join(name));
-        candidates.push(resource_dir.join("backend-dist").join("tradepanel-backend").join(name));
+        candidates.push(
+            resource_dir
+                .join("backend-dist")
+                .join("tradepanel-backend")
+                .join(name),
+        );
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join("backend").join(name));
-            candidates.push(dir.join("backend-dist").join("tradepanel-backend").join(name));
+            candidates.push(
+                dir.join("backend-dist")
+                    .join("tradepanel-backend")
+                    .join(name),
+            );
         }
     }
     // Development and CI: `cargo run --release` does not stage bundle resources.

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { BackendStatus, UnknownRecord } from "../types";
+import type { AppInfo, BackendStatus, UnknownRecord } from "../types";
 
 /** Stable error shape shared by the Rust command layer and the sidecar. */
 export class RpcError extends Error {
@@ -125,11 +125,7 @@ export async function onAppNotice(
   return listen<AppNotice>("app:notice", (event) => handler(event.payload));
 }
 
-export async function getAppInfo(): Promise<{
-  version: string;
-  protocolVersion: number;
-  dataDir: string;
-}> {
+export async function getAppInfo(): Promise<AppInfo> {
   try {
     return await invoke("app_info");
   } catch (error) {

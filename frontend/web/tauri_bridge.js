@@ -1,10 +1,9 @@
 /**
  * Tauri compatibility adapter for the chart workspace.
  *
- * Loaded before workspace.js in every host. When the page is embedded in the
- * TradePanel shell's iframe (Tauri WebView) it exposes a QWebChannel-shaped
- * stub on `window.__WS_STUB__`, so `workspace.js` runs unmodified. In the
- * legacy Qt app (parent === window) it does nothing and QWebChannel is used.
+ * Loaded before workspace.js. When the page is embedded in the TradePanel
+ * shell's iframe it exposes a QWebChannel-shaped stub on `window.__WS_STUB__`,
+ * so `workspace.js` runs unmodified; outside an iframe it stays inert.
  *
  * Transport: same-origin postMessage envelopes understood by
  * `frontend/src/workspace-host.ts`. No QWebChannel or Tauri API is required

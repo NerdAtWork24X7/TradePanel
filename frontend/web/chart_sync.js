@@ -107,12 +107,6 @@
         return pick;
     }
 
-    function rangeEquals(a, b, tolerance) {
-        if (!a || !b) return false;
-        var tol = tolerance || 0;
-        return Math.abs(a.from - b.from) <= tol && Math.abs(a.to - b.to) <= tol;
-    }
-
     /**
      * @param {Object} [options]
      * @param {Object} [options.settings]

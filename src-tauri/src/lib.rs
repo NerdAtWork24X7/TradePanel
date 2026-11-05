@@ -39,10 +39,7 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
-                .targets([
-                    Target::new(TargetKind::Stderr),
-                    log_dir_target,
-                ])
+                .targets([Target::new(TargetKind::Stderr), log_dir_target])
                 .build(),
         );
 
@@ -57,10 +54,7 @@ pub fn run() {
     let app = builder
         .setup(|app| {
             let paths = config::prepare(app.handle()).map_err(|error| {
-                Box::<dyn std::error::Error>::from(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    error,
-                ))
+                Box::<dyn std::error::Error>::from(std::io::Error::other(error))
             })?;
             let credentials = Arc::new(SecretStore::new());
             let version = app.package_info().version.to_string();

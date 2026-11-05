@@ -3,7 +3,7 @@
  *
  * Vanilla JS (the project has no front-end framework). One Lightweight Charts
  * instance per panel; ChartSyncManager (chart_sync.js) owns synchronization.
- * All exchange I/O is delegated to Python through QWebChannel.
+ * All exchange I/O is delegated to Python through the host bridge.
  * ═══════════════════════════════════════════════════════════════════════════ */
 (function () {
     'use strict';

@@ -6,10 +6,12 @@ __pycache__/
 *.so
 *.egg
 *.egg-info/
-build/
 dist/
 .eggs/
 pip-wheel-metadata/
+
+# PyInstaller work dir; backend/build/ itself holds the tracked backend.spec
+backend/build/work/
 
 # ── Virtual environments ─────────────────────────────────────────────────────
 .venv/

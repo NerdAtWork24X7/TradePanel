@@ -33,7 +33,6 @@ TradePanel/
 │   │   ├── components/        # toasts, modals, settings, alerts
 │   │   ├── services/          # backend, trading, market-data, account,
 │   │   │                      # indicators, workspace, credentials, settings
-│   │   ├── state/             # shell state helpers
 │   │   └── styles/            # Pi Scope tokens, fonts, shell CSS
 │   ├── web/                   # shared chart workspace (served by Vite/Tauri)
 │   │   │                      # workspace.html/js, chart_sync.js, LWC 4.2.2,
@@ -215,7 +214,6 @@ Details: [`docs/SECURITY.md`](docs/SECURITY.md) and
 | [`docs/SECURITY.md`](docs/SECURITY.md) | threat model, credentials, CSP/capabilities, order safety, updates |
 | [`docs/BUILD.md`](docs/BUILD.md) | prerequisites, dev/build commands, packaging, updater, troubleshooting |
 | [`docs/TESTING.md`](docs/TESTING.md) | suites, E2E evidence, performance, manual cross-platform checklist |
-| [`docs/MIGRATION_STATUS.md`](docs/MIGRATION_STATUS.md) | phase log and definition-of-done status |
 
 ## Known limitations
 
@@ -234,7 +232,7 @@ Details: [`docs/SECURITY.md`](docs/SECURITY.md) and
 
 * **Core stays Qt-free** — all business logic is testable headlessly and reused by the
   sidecar; the UI layer is replaceable.
-* **One chart implementation** — both apps share `frontend/web`; no forked workspace.
+* **One chart implementation** — `frontend/web` is the only workspace copy; no fork.
 * **The renderer is untrusted** — no secrets, no shell, no filesystem, no direct stdio.
 * **Fail closed** — missing credentials, incompatible protocol, unavailable keyring and
   unsigned updates all stop the relevant operation instead of degrading silently.

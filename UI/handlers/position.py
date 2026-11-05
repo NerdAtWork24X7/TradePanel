@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import json
 import logging
-from Core import calculations
+from Core import calculations, trading_service
 from Core.utils import DaemonThreadPoolExecutor
-from Exchange.hyperliquid import HyperliquidClient
 
 log = logging.getLogger(__name__)
 
@@ -43,25 +42,18 @@ class PositionHandler:
 
         def _fetch():
             try:
-                client = HyperliquidClient()
-                pos = client.get_position(coin)
-                if pos.has_position:
+                payload = trading_service.position_snapshot(coin)
+                if payload["has_position"]:
                     log.info(
                         "Loaded HL position for %s: entry=%s size=%s tp=%s sl=%s pnl=%s",
-                        coin, pos.entry_price, pos.size,
-                        pos.tp_price, pos.sl_price, pos.unrealized_pnl,
+                        coin, payload["entry"], payload["size"],
+                        payload["tp"], payload["sl"], payload["pnl"],
                     )
-                    payload = json.dumps({
-                        "coin": pos.coin,
-                        "entry": pos.entry_price,
-                        "tp": pos.tp_price,
-                        "sl": pos.sl_price,
-                        "size": pos.size,
-                        "pnl": pos.unrealized_pnl,
-                    })
-                    self._position_signal.emit(payload)
+                    self._position_signal.emit(json.dumps(payload))
                 else:
                     log.info("No open position for %s on Hyperliquid.", coin)
+            except trading_service.TradingUnavailable as e:
+                log.warning("Cannot load %s position: %s", coin, e)
             except Exception as e:
                 log.error("Failed to load position from Hyperliquid: %s", e)
 

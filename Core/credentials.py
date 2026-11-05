@@ -68,6 +68,17 @@ def status() -> list[dict]:
     return out
 
 
+def validate(key: str, value: str) -> None:
+    """Validate a credential value without writing it anywhere.
+
+    Public wrapper used by the sidecar, which stores secrets in the OS keyring
+    (Rust side) and only mirrors them into the process environment.
+    """
+    if key not in _KNOWN_KEYS:
+        raise CredentialError(f"Unknown credential: {key}")
+    _validate(key, value)
+
+
 def _validate(key: str, value: str) -> None:
     label = next(lbl for k, lbl, _s, _g in FIELDS if k == key)
     if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):

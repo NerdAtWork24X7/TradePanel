@@ -21,13 +21,14 @@ def fetch_common_coins() -> list[str]:
     hl_resp = requests.post(
         "https://api.hyperliquid.xyz/info",
         json={"type": "metaAndAssetCtxs"},
+        timeout=15,
     )
     hl_resp.raise_for_status()
     hl_data = hl_resp.json()
     hl_coins = [asset["name"] for asset in hl_data[0]["universe"]]
 
     # Binance USDT coins
-    bn_resp = requests.get("https://api.binance.com/api/v3/exchangeInfo")
+    bn_resp = requests.get("https://api.binance.com/api/v3/exchangeInfo", timeout=15)
     bn_resp.raise_for_status()
     bn_data = bn_resp.json()
     bn_coins = [

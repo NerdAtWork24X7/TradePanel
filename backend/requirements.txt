@@ -1,0 +1,7 @@
+# Runtime dependencies for the TradePanel sidecar only (no Qt).
+# The desktop shell (Tauri/Rust) is built separately.
+python-dotenv>=1.0
+requests>=2.31
+pandas>=2.2
+pandas_ta>=0.3.14b0
+hyperliquid-python-sdk>=0.16

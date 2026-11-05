@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from Exchange import hyperliquid
+from backend.Exchange import hyperliquid
 
 
 class SdkClientWiringTests(unittest.TestCase):

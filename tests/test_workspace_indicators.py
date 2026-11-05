@@ -6,8 +6,8 @@ import math
 import unittest
 from unittest import mock
 
-from Core import workspace_indicators as wi
-from Indicator import config as indicator_config
+from backend.Core import workspace_indicators as wi
+from backend.Indicator import config as indicator_config
 
 
 def make_candles(count: int = 500, step: int = 300, base: float = 100.0) -> list[dict]:

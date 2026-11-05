@@ -13,7 +13,7 @@ import logging
 import os
 import threading
 
-from Core import config, credentials, trading_service
+from backend.Core import config, credentials, trading_service
 
 log = logging.getLogger(__name__)
 

@@ -25,7 +25,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from queue import Full, Queue
 from typing import BinaryIO
 
-from Core import credentials, market_data, trading_service
+from backend.Core import credentials, market_data, trading_service
 
 from .credentials import CredentialStore
 from .methods import METHODS, Context, MethodSpec

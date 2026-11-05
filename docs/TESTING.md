@@ -3,7 +3,7 @@
 ## 1. Automated suites
 
 ```bash
-scripts/test.sh            # everything below (except the packaged-sidecar check)
+backend/scripts/test.sh            # everything below (except the packaged-sidecar check)
 ```
 
 | Suite | Command | Count | Status |

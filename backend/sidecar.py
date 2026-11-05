@@ -84,7 +84,7 @@ def _configure_logging() -> None:
 def _self_check() -> int:
     from backend.ipc import methods
     from backend.ipc.protocol import PROTOCOL_VERSION
-    from Core import market_data, workspace_store
+    from backend.Core import market_data, workspace_store
 
     exchanges = market_data.exchanges_meta()
     layouts = list(workspace_store.LAYOUTS)

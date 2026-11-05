@@ -80,7 +80,7 @@ export class WorkspaceHost {
       }
       this.handlers.failed(
         "The chart workspace started but its bridge did not initialise. " +
-        "Check that UI/web/workspace.js and UI/web/tauri_bridge.js were bundled.",
+        "Check that frontend/web/workspace.js and frontend/web/tauri_bridge.js were bundled.",
       );
     }, 20_000);
   }

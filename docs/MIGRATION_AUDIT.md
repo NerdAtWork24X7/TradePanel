@@ -8,12 +8,12 @@ Audit date: 2026-11-05. Audited commit: `7ded81b` (`main`), branch `feature/taur
 TradePanel is a PySide6 6.x desktop application whose entire trading stack is already
 UI-independent:
 
-- `Core/` (market data, persistence, calculations, credentials file I/O) and `Indicator/`
+- `backend/Core/` (market data, persistence, calculations, credentials file I/O) and `backend/Indicator/`
   import **no Qt at all** (verified by grep and by reading every module's import block).
-- `Exchange/hyperliquid.py` is a thin wrapper over `hyperliquid-python-sdk` (testnet endpoints,
+- `backend/Exchange/hyperliquid.py` is a thin wrapper over `hyperliquid-python-sdk` (testnet endpoints,
   hard-coded in the current implementation).
 - The whole UI surface is `UI/` (~1.9k lines of Python) plus a vanilla-JS multi-chart
-  workspace (`UI/web/workspace.js`, 5.2k lines) that talks to Python through **one**
+  workspace (`frontend/web/workspace.js`, 5.2k lines) that talks to Python through **one**
   QWebChannel object (`bridge`) and renders with Lightweight Charts 4.2.2.
 
 Consequences:
@@ -37,7 +37,7 @@ main.py
   └─ QApplication → configure_app() → MainWindow (QMainWindow)
        ├─ Toolbar (QWidget)                coin / TF / trade inputs / favourites
        ├─ WorkspaceWidget (QWidget)        QWebEngineView + QWebChannel bridge
-       │    └─ UI/web/workspace.html
+       │    └─ frontend/web/workspace.html
        │         ├─ workspace.js           panels, layouts, drawings, indicators, sync
        │         ├─ chart_sync.js          ChartSyncManager (timestamp based)
        │         └─ lightweight-charts.standalone.production.js (v4.2.2)
@@ -45,10 +45,10 @@ main.py
        ├─ PositionHandler                  background position read → toolbar
        └─ IndicatorConfigDialog            advanced study parameters
 
-Core/        config, models, calculations, coin/candle/market data, workspace store,
-             workspace indicators, credentials file, alerts, window state, utils
-Indicator/   fvg, vwap, sessions, ema_ribbon, hl_ema, adx, volume_profile, config
-Exchange/    hyperliquid.py (Info/Exchange SDK wrapper, singleton)
+backend/Core/        config, models, calculations, coin/candle/market data, workspace store,
+                     workspace indicators, credentials file, alerts, window state, utils
+backend/Indicator/   fvg, vwap, sessions, ema_ribbon, hl_ema, adx, volume_profile, config
+backend/Exchange/    hyperliquid.py (Info/Exchange SDK wrapper, singleton)
 keys/.env    HL_PRIVATE_KEY, HL_ADDRESS (plaintext, gitignored)
 data/        JSON state + per-timeframe SQLite candle caches (gitignored)
 ```
@@ -57,7 +57,7 @@ data/        JSON state + per-timeframe SQLite candle caches (gitignored)
 
 1. `main.py` sets QtWebEngine GPU env vars, configures `logging` to stderr, creates
    `QApplication`, applies the QSS theme.
-2. `MainWindow.__init__`: loads alerts + coins (`Core/alert_service`, `Core/coin_service`),
+2. `MainWindow.__init__`: loads alerts + coins (`backend/Core/alert_service`, `backend/Core/coin_service`),
    builds toolbar and workspace, creates two daemon thread pools (orders max 4, positions max 2).
 3. `WorkspaceWidget.__init__`: copies missing web assets from the bundled dir into the
    writable web dir, creates `QWebEngineView`, registers `WorkspaceBridge` on a `QWebChannel`,
@@ -94,13 +94,13 @@ Indicator.* ──► pandas, pandas_ta, Core.config, Core.utils (no Qt)
 | `UI/toolbar.py` | `QComboBox`, `QPlainTextEdit`, `QCheckBox`, `QPushButton`, `QTimer`, 12 signals |
 | `UI/config_dialog.py` | `QDialog`, `QGroupBox`, `QScrollArea`, inputs |
 | `UI/styles.py` | QSS/QFont helpers |
-| `UI/web/workspace.html` | `qrc:///qtwebchannel/qwebchannel.js` script tag |
-| `UI/web/workspace.js` | `QWebChannel`/`qt.webChannelTransport` bootstrap inside `Bridge` |
+| `frontend/web/workspace.html` | `qrc:///qtwebchannel/qwebchannel.js` script tag |
+| `frontend/web/workspace.js` | `QWebChannel`/`qt.webChannelTransport` bootstrap inside `Bridge` |
 | `Trade_Panel.spec`, `build.py` | PyInstaller packaging of the Qt app |
 
 ### Qt-independent modules (reused by the sidecar as-is)
 
-`Core/*` (all 14 modules), `Indicator/*` (all 9 modules), `Exchange/hyperliquid.py`,
+`backend/Core/*` (all 14 modules), `backend/Indicator/*` (all 9 modules), `backend/Exchange/hyperliquid.py`,
 `UI/handlers/trade.py` and `UI/handlers/position.py` logic (pure Python; the two files
 import no Qt and can be called directly once the toolbar dependency is replaced by a
 plain settings object — see §9).
@@ -275,8 +275,8 @@ Tauri 2 (Rust)                    Python sidecar                    Exchanges
 
 ## 11. Recommended changes to the migration brief
 
-1. **Keep one chart workspace source tree.** Instead of copying `UI/web` into
-   `frontend/web`, point the Vite `publicDir` at the existing `UI/web` and add a single
+1. **Keep one chart workspace source tree.** Instead of copying `frontend/web` into
+   `frontend/web`, point the Vite `publicDir` at the existing `frontend/web` and add a single
    adapter file there. This removes a 5.2k-line duplicate that would immediately drift.
 2. **Tray icon:** the current app has no `QSystemTrayIcon`; do not add one.
 3. **Native menus/dialogs:** the Qt app uses `QMessageBox` only for order results and load

@@ -60,8 +60,8 @@ uv sync
 ## 3. Python sidecar
 
 ```bash
-scripts/build-backend.sh          # Linux/macOS
-powershell -File scripts/build-backend.ps1   # Windows
+backend/scripts/build-backend.sh          # Linux/macOS
+powershell -File backend/scripts/build-backend.ps1   # Windows
 ```
 
 What it does:
@@ -95,7 +95,7 @@ Notes:
 ```bash
 ./start.sh                  # deps + sidecar (if missing) + tauri dev
 ./start.sh --rebuild-backend   # force a fresh PyInstaller sidecar first
-scripts/dev.sh              # same launcher without the toolchain checks
+backend/scripts/dev.sh              # same launcher without the toolchain checks
 ```
 
 `./start.sh` is safe from any working directory: it installs `node_modules` when missing,
@@ -106,7 +106,7 @@ builds `src-tauri/backend-dist/tradepanel-backend` when missing (or when
 Manual equivalent:
 
 ```bash
-scripts/build-backend.sh
+backend/scripts/build-backend.sh
 npx tauri dev
 ```
 
@@ -125,7 +125,7 @@ npx tauri dev
 
 ```bash
 ./build.sh                    # AppImage + deb (targets from tauri.linux.conf.json)
-scripts/build-linux.sh        # thin wrapper over ./build.sh
+backend/scripts/build-linux.sh        # thin wrapper over ./build.sh
 ```
 
 `./build.sh` options:
@@ -227,7 +227,7 @@ they will be refused by design.
 |---|---|
 | Blank window in a direct release run | build with `--features custom-protocol` (already default in Cargo.toml) or `npx tauri build` |
 | `Could not connect to localhost: Connection refused` | debug binary built without Vite: run `npx tauri dev` or start Vite |
-| `Python backend executable not found` | run `scripts/build-backend.sh`; path is printed in the error |
+| `Python backend executable not found` | run `backend/scripts/build-backend.sh`; path is printed in the error |
 | Backend restarts repeatedly | check `tradepanel.log`; a protocol mismatch never auto-restarts. Remove stale `target/release/backend` and rebuild |
 | `libtbb.so.12` during AppImage bundling | stale resource staging; delete `target/release/backend` and rebuild the sidecar |
 | Credential save fails | keyring/Secret Service is locked or unavailable; unlock it. Plaintext fallback is intentionally not provided |

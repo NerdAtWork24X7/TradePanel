@@ -57,4 +57,4 @@ command -v cargo >/dev/null 2>&1 || {
   exit 1
 }
 
-exec "$ROOT/scripts/dev.sh" "$@"
+exec "$ROOT/backend/scripts/dev.sh" "$@"

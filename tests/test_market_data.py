@@ -11,7 +11,7 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-from Core import market_data as md
+from backend.Core import market_data as md
 
 
 class AggregationTests(unittest.TestCase):

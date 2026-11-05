@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.nerdatwork.tradepanel",
   "build": {
-    "beforeDevCommand": "node scripts/frontend.mjs dev",
+    "beforeDevCommand": "node backend/scripts/frontend.mjs dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "node scripts/frontend.mjs build",
+    "beforeBuildCommand": "node backend/scripts/frontend.mjs build",
     "frontendDist": "../frontend/dist"
   },
   "app": {

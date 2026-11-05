@@ -87,7 +87,7 @@ pub fn sidecar_binary(app: &AppHandle) -> Result<PathBuf, String> {
         }
     }
     Err(format!(
-        "Python backend executable not found. Build it with `scripts/build-backend.sh` (or the PowerShell equivalent). Tried: {}",
+        "Python backend executable not found. Build it with `backend/scripts/build-backend.sh` (or the PowerShell equivalent). Tried: {}",
         candidates
             .iter()
             .map(|path| path.display().to_string())

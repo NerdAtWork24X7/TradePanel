@@ -11,7 +11,7 @@ import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
-const adapterSource = fs.readFileSync(path.join(repoRoot, "UI", "web", "tauri_bridge.js"), "utf8");
+const adapterSource = fs.readFileSync(path.join(repoRoot, "frontend", "web", "tauri_bridge.js"), "utf8");
 
 function createHarness() {
   const posted = [];

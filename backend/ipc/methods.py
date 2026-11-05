@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from Core import (
+from backend.Core import (
     alert_service,
     coin_service,
     config,
@@ -27,7 +27,7 @@ from Core import (
     workspace_indicators,
     workspace_store,
 )
-from Indicator import config as indicator_config
+from backend.Indicator import config as indicator_config
 
 from .credentials import CredentialStore
 from .protocol import (

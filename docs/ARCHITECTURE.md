@@ -27,7 +27,7 @@
 * The sidecar never writes to stdout except JSON-RPC frames. `backend/sidecar.py`
   duplicates fd 1 for the protocol writer and redirects the original descriptor to
   stderr before importing backend modules.
-* No Qt import is reachable from the sidecar; the legacy `UI/` package is not packaged.
+* No Qt import is reachable from the sidecar; only `backend/` is packaged.
 
 ## 2. Layers
 
@@ -35,10 +35,10 @@
 |---|---|---|
 | Desktop shell | `src-tauri/src` | window lifecycle, process supervision, IPC validation, credential store, updates, OS integration |
 | Shell UI | `frontend/src` | typed services, toolbar/trade ticket, settings/credentials/alerts dialogs, connection state |
-| Workspace adapter | `UI/web/tauri_bridge.js` | exposes the existing QWebChannel contract over `postMessage` |
-| Chart workspace | `UI/web/*` | charts, layouts, sync, drawings, indicators, workspace persistence (unchanged logic) |
+| Workspace adapter | `frontend/web/tauri_bridge.js` | exposes the existing QWebChannel contract over `postMessage` |
+| Chart workspace | `frontend/web/*` | charts, layouts, sync, drawings, indicators, workspace persistence (unchanged logic) |
 | Sidecar | `backend/` | JSON-RPC server, method registry, credential mirror, shutdown drain |
-| Trading core | `Core/`, `Indicator/`, `Exchange/` | market data, indicators, persistence, Hyperliquid execution |
+| Trading core | `backend/Core/`, `backend/Indicator/`, `backend/Exchange/` | market data, indicators, persistence, Hyperliquid execution |
 
 ## 3. Startup sequence
 
@@ -127,8 +127,8 @@ legacy visibility flags and future keys survive.
 
 ## 8. Deliberate deviations from the brief
 
-1. **`frontend/web` is not a copy of `UI/web`.** Vite's `publicDir` points at `UI/web`, so
-   the chart workspace has one source of truth and the legacy Qt app keeps working.
+1. **`frontend/web` is shared, not duplicated.** Vite's `publicDir` points at
+   `frontend/web`, so the chart workspace has one source of truth.
 2. **No tray icon, no native menus.** The Qt app used neither.
 3. **One-folder sidecar** instead of one-file: deterministic single-process supervision.
 4. **Hyperliquid stays on testnet** exactly as the audited code; making it configurable is

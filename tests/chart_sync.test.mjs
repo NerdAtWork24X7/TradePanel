@@ -1,13 +1,23 @@
 /**
- * Unit tests for UI/web/chart_sync.js — run with `node --test tests/`.
+ * Unit tests for frontend/web/chart_sync.js — run with `node --test tests/`.
  * Charts are mocks: no DOM, no Lightweight Charts, no network.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import vm from 'node:vm';
 
-const require = createRequire(import.meta.url);
-const { ChartSyncManager, findNearestCandle } = require('../UI/web/chart_sync.js');
+// `frontend/web` sits inside an ESM package ("type": "module"), so require()
+// would treat this classic UMD script as ESM. Evaluate it the way a CommonJS
+// loader would — wrapped in (module, exports) — but in this realm so object
+// literals still satisfy deepStrictEqual.
+const source = fs.readFileSync(new URL('../frontend/web/chart_sync.js', import.meta.url), 'utf8');
+const factory = vm.runInThisContext(`(function (module, exports) {\n${source}\n})`, {
+    filename: 'chart_sync.js',
+});
+const chartSyncModule = { exports: {} };
+factory(chartSyncModule, chartSyncModule.exports);
+const { ChartSyncManager, findNearestCandle } = chartSyncModule.exports;
 
 const M5 = 300;
 const H1 = 3600;

@@ -110,7 +110,7 @@ Command validation:
 | Unknown execution status | `-32004` + "Execution status unknown" modal + "Check open orders" + explicit re-enable |
 | Backend/exchange disconnection | trading controls disabled on any non-running status; reconnect never submits |
 | Shutdown during submission | backend drains in-flight calls up to 10 s, rejects new trading calls; shell waits 12 s before kill |
-| Order semantics unchanged | `Core/trading_service.py` is the extracted, behaviour-preserving implementation used by both UIs |
+| Order semantics unchanged | `backend/Core/trading_service.py` is the extracted, behaviour-preserving implementation used by both UIs |
 | No live test orders | regression suite never reaches the order path; the client remains on Hyperliquid **testnet** |
 
 ## 6. Updates

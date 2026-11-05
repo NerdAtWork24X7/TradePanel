@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from Core import config, credentials
+from backend.Core import config, credentials
 
 KEY = "ab" * 32
 ADDRESS = "0x" + "cd" * 20

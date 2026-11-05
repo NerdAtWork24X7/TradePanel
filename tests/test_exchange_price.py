@@ -5,8 +5,8 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from Core import calculations, trading_service
-from Exchange.hyperliquid import HyperliquidClient
+from backend.Core import calculations, trading_service
+from backend.Exchange.hyperliquid import HyperliquidClient
 
 
 class ExchangePricePrecisionTests(unittest.TestCase):

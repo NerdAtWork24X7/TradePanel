@@ -21,7 +21,7 @@ untouched and still runs.
 
 ### Application
 - [x] Tauri 2 desktop application launches (Linux dev + release + AppImage).
-- [ ] Windows build works — scripted (`scripts/build-windows.ps1`) and configured; **not executed** (no Windows host).
+- [ ] Windows build works — scripted (`backend/scripts/build-windows.ps1`) and configured; **not executed** (no Windows host).
 - [x] Linux build works (AppImage + deb).
 - [x] Python backend starts automatically.
 - [x] Backend crashes are detected and restart with bounded backoff.

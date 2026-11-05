@@ -10,7 +10,7 @@
 #
 # Bundling targets come from src-tauri/tauri.<platform>.conf.json unless
 # --bundles is given. Windows (Git Bash/MSYS) hands off to
-# scripts/build-windows.ps1, which owns the native toolchain.
+# backend/scripts/build-windows.ps1, which owns the native toolchain.
 
 set -euo pipefail
 
@@ -52,8 +52,8 @@ done
 
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    echo "Windows detected — delegating to scripts/build-windows.ps1"
-    exec powershell -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/build-windows.ps1"
+    echo "Windows detected — delegating to backend/scripts/build-windows.ps1"
+    exec powershell -NoProfile -ExecutionPolicy Bypass -File "$ROOT/backend/scripts/build-windows.ps1"
     ;;
 esac
 
@@ -76,10 +76,10 @@ fi
 # ── Python sidecar ──────────────────────────────────────────────────────────
 SIDECAR="src-tauri/backend-dist/tradepanel-backend/tradepanel-backend"
 if [[ $SKIP_BACKEND -eq 1 ]]; then
-  [[ -f "$SIDECAR" ]] || { echo "--skip-backend given but $SIDECAR is missing; run scripts/build-backend.sh." >&2; exit 1; }
+  [[ -f "$SIDECAR" ]] || { echo "--skip-backend given but $SIDECAR is missing; run backend/scripts/build-backend.sh." >&2; exit 1; }
   echo "Reusing staged sidecar: $SIDECAR"
 else
-  scripts/build-backend.sh
+  backend/scripts/build-backend.sh
 fi
 
 # Tauri overlays resources instead of pruning them: stale sidecar files (e.g. a

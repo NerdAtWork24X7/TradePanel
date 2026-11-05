@@ -35,35 +35,36 @@ TradePanel/
 │   │   │                      # indicators, workspace, credentials, settings
 │   │   ├── state/             # shell state helpers
 │   │   └── styles/            # Pi Scope tokens, fonts, shell CSS
+│   ├── web/                   # shared chart workspace (served by Vite/Tauri)
+│   │   │                      # workspace.html/js, chart_sync.js, LWC 4.2.2,
+│   │   │                      # tauri_bridge.js (compatibility adapter), fonts/
 │   ├── tests/                 # bridge adapter contract tests
 │   ├── index.html
 │   └── package.json
 │
-├── backend/                   # Python sidecar
+├── backend/                   # Python sidecar + trading/analysis engine
 │   ├── sidecar.py             # entry, stdout defence, signals
 │   ├── ipc/                   # JSON-RPC server, methods, credentials, protocol
 │   ├── build/                 # PyInstaller spec + build requirements
-│   └── requirements.txt       # pinned sidecar runtime
+│   ├── requirements.txt       # pinned sidecar runtime
+│   ├── Core/                  # Qt-free business logic (market data, persistence,
+│   │   ├── trading_service.py #   calculations, shared trading operations)
+│   │   ├── config.py          # data-dir / keyring env overrides
+│   │   ├── market_data.py
+│   │   ├── workspace_store.py
+│   │   └── workspace_indicators.py
+│   ├── Indicator/             # technical studies
+│   ├── Exchange/              # exchange integrations (Hyperliquid)
+│   ├── strategies/            # strategy scripts/assets
+│   └── scripts/               # dev/build-backend/build-release/test entry points
 │
-├── Core/                      # Qt-free business logic (market data, persistence,
-│   ├── trading_service.py     #   calculations, shared trading operations)
-│   ├── config.py              # data-dir / keyring env overrides
-│   ├── market_data.py
-│   ├── workspace_store.py
-│   └── workspace_indicators.py
-├── Indicator/                 # technical studies
-├── Exchange/hyperliquid.py    # Hyperliquid SDK wrapper (testnet)
-├── UI/                        # shared chart workspace (web assets)
-│   └── web/                   # workspace.html/js, chart_sync.js, LWC 4.2.2,
-│                              # tauri_bridge.js (compatibility adapter), fonts/
 ├── docs/                      # audit, architecture, IPC, security, build, testing
 ├── start.sh                   # launcher (deps + sidecar + tauri dev)
 ├── build.sh                   # reproducible release build for this platform
-├── scripts/                   # dev/build-backend/build-release/test entry points
 └── data/                      # legacy runtime data (migrated on first run)
 ```
 
-The workspace HTML/JS lives in exactly one place (`UI/web`) and is served to Tauri.
+The workspace HTML/JS lives in exactly one place (`frontend/web`) and is served to Tauri.
 Only a 7 KB adapter file is new.
 
 ## Quick start
@@ -83,21 +84,21 @@ Release bundles:
 ./build.sh                      # current platform (AppImage+.deb / dmg / NSIS)
 ./build.sh --debug              # debug bundle
 ./build.sh --skip-backend       # reuse the staged sidecar
-powershell -File scripts/build-windows.ps1   # native Windows release
+powershell -File backend/scripts/build-windows.ps1   # native Windows release
 ```
 
 Manual steps behind the scripts:
 
 ```bash
 npm install && npm --prefix frontend install
-scripts/build-backend.sh        # PyInstaller sidecar → src-tauri/backend-dist
+backend/scripts/build-backend.sh        # PyInstaller sidecar → src-tauri/backend-dist
 npx tauri dev                   # or: npx tauri build
 ```
 
 Tests:
 
 ```bash
-scripts/test.sh
+backend/scripts/test.sh
 ```
 
 ## Desktop shell
@@ -123,7 +124,7 @@ one WebView for all charts, timestamp-based synchronization, groups, layouts (`1
 `2v`, `4`, `6`, `8`, custom), drawings, position projections, measure tool, price-axis
 modes (independent/absolute/percentage/indexed) and per-symbol drawing persistence.
 
-It shares the shell's Pi Scope tokens (`UI/web/workspace.html` mirrors
+It shares the shell's Pi Scope tokens (`frontend/web/workspace.html` mirrors
 `frontend/src/styles/tokens.css`) and follows the light/dark toggle: the shell writes
 `tp-theme` to the shared origin's localStorage, the workspace picks it up through the
 `storage` event and repaints the charts from the `--chart-*` tokens.
@@ -132,7 +133,7 @@ Live data comes from Binance, Bybit, OKX, Coinbase, Kraken, KuCoin, Gate.io, Bit
 Hyperliquid public endpoints. Python owns all exchange I/O; the WebView performs no network
 requests (enforced by CSP).
 
-### Synchronization (`UI/web/chart_sync.js`)
+### Synchronization (`frontend/web/chart_sync.js`)
 
 Crosshair, visible time range, scroll, zoom and (optionally) timeframe are synchronized by
 **timestamp**, never by array index. Nearest-candle policy is configurable with a drift cap;
@@ -233,7 +234,7 @@ Details: [`docs/SECURITY.md`](docs/SECURITY.md) and
 
 * **Core stays Qt-free** — all business logic is testable headlessly and reused by the
   sidecar; the UI layer is replaceable.
-* **One chart implementation** — both apps share `UI/web`; no forked workspace.
+* **One chart implementation** — both apps share `frontend/web`; no forked workspace.
 * **The renderer is untrusted** — no secrets, no shell, no filesystem, no direct stdio.
 * **Fail closed** — missing credentials, incompatible protocol, unavailable keyring and
   unsigned updates all stop the relevant operation instead of degrading silently.

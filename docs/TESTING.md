@@ -35,7 +35,7 @@ tests, credential file tests, plus the new sidecar suite:
 * duplicate request id (`-32012`), 12 concurrent correlated requests;
 * shutdown drains in-flight work; serialized handlers never overlap;
 * workspace store round-trip in the overridden data directory;
-* window-state/alerts round-trip (unknown keys dropped, legacy keys merged);
+* window-state round-trip (unknown keys dropped, legacy keys merged);
 * indicator config round-trip;
 * secrets never echoed or logged; invalid key rejected;
 * trading without credentials returns `-32001` and writes nothing;
@@ -68,9 +68,8 @@ All runs used `Xvfb` (no physical display) and a temporary `XDG_DATA_HOME`.
 | Backend loss UI | reconnect banner + trading controls disabled while status ≠ running; no order path touched |
 | Status event race | stale `starting` event ignored via `updatedAtMs`; UI stays `running` |
 | Credential absence | `trading.place_order` and `account.position` return `-32001`; no file/order written |
-| Persistence | `workspaces.json`, `window_state.json`, `alerts.json`, `indicator_config.json` written in the app-data dir; legacy values preserved |
+| Persistence | `workspaces.json`, `window_state.json`, `indicator_config.json` written in the app-data dir; legacy values preserved |
 | Settings UI | settings dialog opens (Ctrl+,), indicator save persists `fvg.gap_pct=0.75` to disk |
-| Alert UI | Ctrl+Shift+A dialog saves `SOL` high/low into the existing `alerts.json` schema |
 | Packaged sidecar studies | all eight advanced studies non-null over 800 candles |
 | Legacy data import | 19 files copied from repo `data/` into app data; source untouched |
 

@@ -38,8 +38,6 @@ ROOT_DIR = _BASE_DIR
 _data_override = os.environ.get("TRADEPANEL_DATA_DIR")
 DATA_DIR = Path(_data_override).expanduser() if _data_override else ROOT_DIR / "data"
 COINS_FILE = DATA_DIR / "coins.json"
-ALERTS_FILE = DATA_DIR / "alerts.json"
-
 
 
 _SAFE_TF_RE = re.compile(r"^[A-Za-z0-9]+$")

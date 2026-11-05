@@ -8,7 +8,7 @@
 │  ┌────────────────────────────┐   postMessage    ┌────────────────────────────┐  │
 │  │ shell UI (TypeScript)     │◄────────────────►│ workspace iframe           │  │
 │  │ toolbar / trade ticket    │   typed RPC       │ workspace.html + workspace │  │
-│  │ settings / alerts / toasts│                   │ .js (unchanged)            │  │
+│  │ settings / toasts        │                   │ .js (unchanged)            │  │
 │  └─────────────┬──────────────┘                   └────────────────────────────┘  │
 │                │ Tauri IPC (invoke / events)                                     │
 │  ┌─────────────▼──────────────┐    JSON-RPC 2.0 over stdio    ┌────────────────┐ │
@@ -34,7 +34,7 @@
 | Layer | Location | Responsibility |
 |---|---|---|
 | Desktop shell | `src-tauri/src` | window lifecycle, process supervision, IPC validation, credential store, updates, OS integration |
-| Shell UI | `frontend/src` | typed services, toolbar/trade ticket, settings/credentials/alerts dialogs, connection state |
+| Shell UI | `frontend/src` | typed services, toolbar/trade ticket, settings/credentials dialogs, connection state |
 | Workspace adapter | `frontend/web/tauri_bridge.js` | exposes the existing QWebChannel contract over `postMessage` |
 | Chart workspace | `frontend/web/*` | charts, layouts, sync, drawings, indicators, workspace persistence (unchanged logic) |
 | Sidecar | `backend/` | JSON-RPC server, method registry, credential mirror, shutdown drain |
@@ -100,7 +100,7 @@ imports and no network requests.
 
 | Data | Location | Format |
 |---|---|---|
-| Coins, alerts, window state, indicator config | `<app-data>/data/` | existing JSON schemas |
+| Coins, window state, indicator config | `<app-data>/data/` | existing JSON schemas |
 | Workspaces (layouts, charts, drawings) | `<app-data>/data/workspaces.json` | schema v1, validated and atomic |
 | Legacy candle cache | `<app-data>/data/candles_<tf>.db` | written by the pre-Tauri app, imported copy-only; the sidecar only reads it as an indicator fallback |
 | Order-uncertain marker | `<app-data>/data/trading_state.json` | `{"uncertain": bool}` |

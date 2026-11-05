@@ -429,13 +429,6 @@ class SidecarEndToEndTests(unittest.TestCase):
         self.assertIs(loaded["sidebar_collapsed"], True)
         self.assertNotIn("unknown_field", loaded)
 
-        self.assertTrue(
-            self.sidecar.rpc("alerts.set", {"coin": "ETH", "high": 2600, "low": 2400})["result"]["ok"]
-        )
-        alert = self.sidecar.rpc("alerts.get", {"coin": "ETH"})["result"]
-        self.assertEqual((alert["high"], alert["low"]), (2600.0, 2400.0))
-        self.assertIsNone(self.sidecar.rpc("alerts.get", {"coin": "BTC"})["result"]["high"])
-
     def test_indicator_config_roundtrip(self):
         config = self.sidecar.rpc("indicator.get_config")["result"]["config"]
         self.assertIn("fvg", config)

@@ -98,7 +98,7 @@
     </style>
   </head>
   <body>
-    <script>(function(){try{var t=localStorage.getItem("tp-theme"); if(t==="light") document.body.setAttribute("data-theme","light");}catch(e){}})();</script>
+    <script>(function(){try{var t=localStorage.getItem("tp-theme"); if(t==="light") document.body.setAttribute("data-theme","light");var w=parseInt(localStorage.getItem("tp-sidebar-width")||"",10); if(w>=248) document.documentElement.style.setProperty("--sidebar-width",Math.min(w,560)+"px");}catch(e){}})();</script>
     <div id="boot-screen" role="status" aria-live="polite">
       <span class="boot-mark" aria-hidden="true">TP</span>
       <span>Starting TradePanel</span>
@@ -135,6 +135,18 @@
       </main>
 
       <aside id="trade-sidebar" class="trade-sidebar" aria-label="Trade panel">
+        <div
+          id="sidebar-resizer"
+          class="sidebar-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize trade panel (drag, or use arrow keys)"
+          aria-controls="sidebar-body"
+          aria-valuemin="248"
+          aria-valuemax="560"
+          aria-valuenow="296"
+          tabindex="0"
+        ></div>
         <div class="sidebar-rail" id="sidebar-rail">
           <button
             id="sidebar-expand"
@@ -191,21 +203,23 @@
           <div class="sidebar-scroll">
             <section class="sidebar-section" aria-labelledby="instrument-label">
               <span id="instrument-label" class="card-label">Instrument</span>
-              <div class="field-row">
+              <div class="field-row instrument-row">
                 <div class="field">
                   <label for="coin">Coin</label>
                   <select id="coin" class="mono" aria-label="Coin"></select>
                 </div>
-                <div class="field compact">
+                <div class="field">
                   <label for="tf">TF</label>
                   <select id="tf" class="mono" aria-label="Timeframe"></select>
                 </div>
+                <button id="refresh-coins" class="icon-btn field-action" type="button" aria-label="Refresh coin list" title="Refresh coin list from Hyperliquid + Binance">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4.5h-4.5"/></svg>
+                </button>
               </div>
-              <div class="chip-row">
-                <button id="center-chart" class="ghost-btn grow" type="button" title="Center focused chart" aria-label="Center focused chart">⌂ Center</button>
-                <button id="refresh-coins" class="ghost-btn" type="button" title="Refresh coin list from Hyperliquid + Binance">Refresh</button>
-              </div>
-              <div class="chip-row">
+              <div class="chip-row instrument-actions">
+                <button id="center-chart" class="icon-btn" type="button" aria-label="Center focused chart" title="Center focused chart">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+                </button>
                 <label class="check" for="hyperliquid">
                   <input id="hyperliquid" type="checkbox" />
                   <span>Hyperliquid</span>
@@ -215,20 +229,22 @@
             </section>
 
             <section class="sidebar-section" aria-labelledby="ticket-label">
-              <span id="ticket-label" class="card-label">Ticket</span>
+              <div class="section-head">
+                <span id="ticket-label" class="card-label">Ticket</span>
+                <button id="read-order" class="ghost-btn mini" type="button" title="Load the open Hyperliquid position for this coin">Read order</button>
+              </div>
               <div class="field-row">
                 <div class="field"><label for="qty">QTY</label><input id="qty" class="mono" inputmode="decimal" autocomplete="off" /></div>
                 <div class="field"><label for="risk">RISK</label><input id="risk" class="mono" inputmode="decimal" value="10" autocomplete="off" /></div>
               </div>
-              <div class="chip-row">
+              <div class="field-row direction-row">
                 <button id="direction" class="direction long" type="button" aria-pressed="false" title="Toggle long/short (does not submit)">
                   <span class="direction-dot" aria-hidden="true"></span><span id="direction-label">LONG</span>
                 </button>
-                <button id="read-order" class="ghost-btn" type="button" title="Load the open Hyperliquid position for this coin">Read order</button>
-              </div>
-              <div class="field">
-                <label for="limit">LIM</label>
-                <input id="limit" class="mono" inputmode="decimal" autocomplete="off" />
+                <div class="field">
+                  <label for="limit">LIM</label>
+                  <input id="limit" class="mono" inputmode="decimal" autocomplete="off" />
+                </div>
               </div>
               <div class="field-row">
                 <div class="field"><label for="tp">TP</label><input id="tp" class="mono" inputmode="decimal" autocomplete="off" /></div>
@@ -239,10 +255,6 @@
                 <button id="set-order" class="primary-btn" type="button">Set Order</button>
               </div>
               <p class="ticket-note" id="ticket-note">Levels come from the selected position box. Orders use the current LIM / TP / SL / QTY.</p>
-            </section>
-
-            <section class="sidebar-section">
-              <button id="set-alert" class="ghost-btn block" type="button" title="Save FVG alert levels for this coin">FVG alert levels</button>
             </section>
           </div>
 

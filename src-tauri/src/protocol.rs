@@ -257,8 +257,6 @@ pub const FRONTEND_METHODS: &[&str] = &[
     "trading.calc_qty",
     "trading.sz_decimals",
     "trading.coins",
-    "alerts.get",
-    "alerts.set",
     "settings.window_state.get",
     "settings.window_state.save",
 ];

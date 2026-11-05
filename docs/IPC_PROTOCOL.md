@@ -141,12 +141,10 @@ Semantics are unchanged from the audited application:
 * No partial retry exists anywhere. A timeout or process exit while a call is in flight is
   reported as `-32004` and persisted in `trading_state.json`.
 
-### alerts / settings
+### settings
 
 | Method | Params | Result |
 |---|---|---|
-| `alerts.get` | `coin` | `{coin, high, low}` (nulls when unset) |
-| `alerts.set` | `coin, high, low` | `{ok, coin, high, low}` (existing `alerts.json` schema) |
 | `settings.window_state.get` | — | `{state}` |
 | `settings.window_state.save` | `state` | `{ok}`; merges into the existing file |
 

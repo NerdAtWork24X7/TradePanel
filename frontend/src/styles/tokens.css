@@ -38,6 +38,7 @@
   --radius-button: 8px;
   --radius-card: 12px;
   --radius-panel: 16px;
+  --sidebar-width: 296px;
   --font-body: "Satoshi", "Clash Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: "Clash Grotesk", "Satoshi", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "MesloLGS NFM", "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;

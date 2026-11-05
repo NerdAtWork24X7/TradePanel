@@ -30,7 +30,7 @@ TradePanel/
 ├── frontend/                  # shell UI (TypeScript + Vite, no framework)
 │   ├── src/
 │   │   ├── app/               # controller, startup, reconnect handling
-│   │   ├── components/        # toasts, modals, settings, alerts
+│   │   ├── components/        # toasts, modals, settings
 │   │   ├── services/          # backend, trading, market-data, account,
 │   │   │                      # indicators, workspace, credentials, settings
 │   │   └── styles/            # Pi Scope tokens, fonts, shell CSS
@@ -104,14 +104,16 @@ backend/scripts/test.sh
 
 * Pi Scope theme: warm near-black surfaces, one amber accent, Clash Grotesk /
   Satoshi / Meslo type, light + dark toggle (persisted in `localStorage`).
-* Collapsible trade sidebar: Coin/TF, Center, Refresh, Hyperliquid toggle, Open ↗,
-  QTY/RISK/direction, LIM/TP/SL, Read order, Update Order, Set Order, FVG alert
-  levels. Collapsed it becomes a floating rail that parks off-screen (revealed at
-  the right edge or by keyboard focus) so the charts own the full window.
+* Resizable, collapsible trade sidebar: Coin/TF + refresh icon, Center /
+  Hyperliquid / Open ↗ on one line, QTY/RISK, direction + LIM, TP/SL, Read order,
+  Update Order, Set Order. Drag the inner edge (or focus it and use the arrow
+  keys) to resize; the width persists in `localStorage`. The Coin/TF row follows
+  the focused chart. Collapsed it becomes a floating rail that parks off-screen
+  (revealed at the right edge or by keyboard focus) so the charts own the full
+  window.
 * Backend status pill and banner. Any non-running backend disables trading controls;
   reconnection never submits an order.
 * Settings (Ctrl+,): advanced indicator parameters, credential management, signed updates.
-* Alerts (Ctrl+Shift+A): per-coin FVG high/low, stored in the existing `alerts.json`.
 * Ctrl+Shift+T collapses the sidebar to the floating rail (the workspace's
   **Trade** button does the same).
 * Preferences persist in the existing window-state JSON (merged, never reset).

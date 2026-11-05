@@ -1,5 +1,4 @@
 import * as account from "../services/account";
-import * as alerts from "../services/alerts";
 import * as backend from "../services/backend";
 import * as credentials from "../services/credentials";
 import * as indicators from "../services/indicators";
@@ -8,7 +7,6 @@ import * as settingsStore from "../services/settings";
 import * as shell from "../services/shell";
 import * as trading from "../services/trading";
 import * as updates from "../services/updates";
-import { openAlertDialog } from "../components/alerts";
 import { formatExchangePrice } from "../lib/exchange-price";
 import { openModal } from "../components/modal";
 import { openSettings } from "../components/settings";
@@ -28,6 +26,11 @@ import type {
 const FALLBACK_TIMEFRAMES = [
   "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M",
 ];
+
+const SIDEBAR_MIN_WIDTH = 248;
+const SIDEBAR_MAX_WIDTH = 560;
+const SIDEBAR_DEFAULT_WIDTH = 296;
+const SIDEBAR_WIDTH_KEY = "tp-sidebar-width";
 
 function must<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -73,7 +76,6 @@ class AppController {
   private readonly refreshCoins = must<HTMLButtonElement>("refresh-coins");
   private readonly centerChart = must<HTMLButtonElement>("center-chart");
   private readonly openBrowser = must<HTMLButtonElement>("open-browser");
-  private readonly setAlert = must<HTMLButtonElement>("set-alert");
   private readonly pill = must<HTMLElement>("backend-pill");
   private readonly banner = must<HTMLElement>("backend-banner");
   private readonly bannerTitle = must<HTMLElement>("banner-title");
@@ -81,6 +83,7 @@ class AppController {
   private readonly bannerRetry = must<HTMLButtonElement>("banner-retry");
   private readonly sidebar = must<HTMLElement>("trade-sidebar");
   private readonly sidebarBody = must<HTMLElement>("sidebar-body");
+  private readonly sidebarResizer = must<HTMLElement>("sidebar-resizer");
   private readonly sidebarCollapse = must<HTMLButtonElement>("sidebar-collapse");
   private readonly sidebarExpand = must<HTMLButtonElement>("sidebar-expand");
   private readonly backendDot = must<HTMLElement>("backend-dot");
@@ -113,6 +116,7 @@ class AppController {
   private indicatorConfig: IndicatorConfig | null = null;
   private bootstrapped = false;
   private sidebarCollapsed = false;
+  private sidebarWidth = SIDEBAR_DEFAULT_WIDTH;
   private bootstrapPromise: Promise<void> | null = null;
   private saveTimer: number | null = null;
   private orderPending = false;
@@ -485,7 +489,6 @@ class AppController {
     this.updateOrder.addEventListener("click", () => void this.submitOrder("update"));
     this.centerChart.addEventListener("click", () => this.host.centerFocused());
     this.openBrowser.addEventListener("click", () => void this.openBrowserPage());
-    this.setAlert.addEventListener("click", () => void this.openAlerts());
     this.settingsBtn.addEventListener("click", () => void this.openSettingsDialog());
     this.settingsRail.addEventListener("click", () => void this.openSettingsDialog());
     this.sidebarCollapse.addEventListener("click", () => this.toggleSidebar(false));
@@ -505,6 +508,8 @@ class AppController {
       this.hyperliquid.dispatchEvent(new Event("change"));
     });
 
+    this.bindSidebarResize();
+
     window.addEventListener("keydown", (event) => {
       if (event.key === "F11") {
         event.preventDefault();
@@ -517,10 +522,6 @@ class AppController {
       if (event.ctrlKey && !event.shiftKey && event.key === ",") {
         event.preventDefault();
         void this.openSettingsDialog();
-      }
-      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "a") {
-        event.preventDefault();
-        void this.openAlerts();
       }
     });
 
@@ -540,6 +541,109 @@ class AppController {
 
   private toggleSidebar(force?: boolean): void {
     this.setSidebarCollapsed(force === undefined ? !this.sidebarCollapsed : !force);
+  }
+
+  // ── Sidebar resize ────────────────────────────────────────────────────
+
+  private sidebarMaxWidth(): number {
+    return Math.max(
+      SIDEBAR_MIN_WIDTH,
+      Math.min(SIDEBAR_MAX_WIDTH, window.innerWidth - 360),
+    );
+  }
+
+  private applySidebarWidth(width: number, persist: boolean): void {
+    const clamped = Math.round(
+      Math.min(Math.max(width, SIDEBAR_MIN_WIDTH), this.sidebarMaxWidth()),
+    );
+    this.sidebarWidth = clamped;
+    document.documentElement.style.setProperty("--sidebar-width", `${clamped}px`);
+    this.sidebarResizer.setAttribute("aria-valuenow", String(clamped));
+    this.sidebarResizer.setAttribute("aria-valuemax", String(this.sidebarMaxWidth()));
+    if (persist) {
+      try {
+        localStorage.setItem(SIDEBAR_WIDTH_KEY, String(clamped));
+      } catch {
+        /* storage can be unavailable; width still applies for this session */
+      }
+    }
+  }
+
+  private bindSidebarResize(): void {
+    // Restore the persisted width before any interaction. The inline script in
+    // index.html already prevents a first-paint jump; this normalises it
+    // against the current viewport.
+    let stored = NaN;
+    try {
+      stored = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    } catch {
+      /* storage unavailable */
+    }
+    const initial = Number.isFinite(stored) && stored > 0
+      ? stored
+      : this.sidebar.getBoundingClientRect().width || SIDEBAR_DEFAULT_WIDTH;
+    this.applySidebarWidth(initial, false);
+
+    let dragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    const stop = (): void => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove("is-resizing");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      window.removeEventListener("blur", stop);
+      this.applySidebarWidth(this.sidebarWidth, true);
+    };
+    // The sidebar is docked on the right: dragging its inner edge left grows it.
+    const move = (event: PointerEvent): void => {
+      if (!dragging) return;
+      this.applySidebarWidth(startWidth + (startX - event.clientX), false);
+    };
+
+    this.sidebarResizer.addEventListener("pointerdown", (event) => {
+      if (this.sidebarCollapsed || event.button !== 0) return;
+      event.preventDefault();
+      dragging = true;
+      startX = event.clientX;
+      startWidth = this.sidebar.getBoundingClientRect().width;
+      document.body.classList.add("is-resizing");
+      try {
+        this.sidebarResizer.setPointerCapture(event.pointerId);
+      } catch {
+        /* synthetic pointers */
+      }
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", stop);
+      window.addEventListener("pointercancel", stop);
+      window.addEventListener("blur", stop);
+    });
+
+    this.sidebarResizer.addEventListener("keydown", (event) => {
+      if (this.sidebarCollapsed) return;
+      let next: number | null = null;
+      if (event.key === "ArrowLeft") next = this.sidebarWidth + 16;
+      else if (event.key === "ArrowRight") next = this.sidebarWidth - 16;
+      else if (event.key === "Home") next = SIDEBAR_DEFAULT_WIDTH;
+      else if (event.key === "End") next = this.sidebarMaxWidth();
+      if (next === null) return;
+      event.preventDefault();
+      this.applySidebarWidth(next, true);
+    });
+
+    this.sidebarResizer.addEventListener("dblclick", () => {
+      this.applySidebarWidth(SIDEBAR_DEFAULT_WIDTH, true);
+    });
+
+    // Keep the docked sidebar within reach after the window shrinks.
+    window.addEventListener("resize", () => {
+      if (this.sidebarWidth > this.sidebarMaxWidth()) {
+        this.applySidebarWidth(this.sidebarMaxWidth(), false);
+      }
+    });
   }
 
   /** Native window fullscreen keeps the shell (and this sidebar) in the layout. */
@@ -579,6 +683,10 @@ class AppController {
     this.directionBtn.classList.toggle("long", !short);
     this.directionBtn.classList.toggle("short", short);
     this.directionBtn.setAttribute("aria-pressed", String(short));
+    this.directionBtn.setAttribute(
+      "aria-label",
+      `Direction: ${short ? "short" : "long"} (click to toggle)`,
+    );
     this.directionLabel.textContent = short ? "SHORT" : "LONG";
     this.directionBtn.title =
       `Direction: ${short ? "short" : "long"} (does not submit an order)`;
@@ -987,7 +1095,7 @@ class AppController {
   // ── Other actions ─────────────────────────────────────────────────────
 
   private async refreshCoinList(): Promise<void> {
-    this.refreshCoins.disabled = true;
+    this.setRefreshBusy(true);
     try {
       const coins = await trading.getCoins(true);
       this.applyCoins(coins);
@@ -995,7 +1103,15 @@ class AppController {
     } catch (error) {
       toast(`Coin refresh failed: ${(error as Error).message}`, "error");
     } finally {
-      this.refreshCoins.disabled = false;
+      this.setRefreshBusy(false);
+    }
+  }
+
+  private setRefreshBusy(busy: boolean): void {
+    for (const button of [this.refreshCoins, this.refreshRail]) {
+      button.disabled = busy;
+      button.classList.toggle("is-busy", busy);
+      button.setAttribute("aria-busy", String(busy));
     }
   }
 
@@ -1004,23 +1120,6 @@ class AppController {
     if (!coin) return;
     try {
       await shell.openTradePage(coin);
-    } catch (error) {
-      toast((error as Error).message, "error");
-    }
-  }
-
-  private async openAlerts(): Promise<void> {
-    const coin = this.coin.value;
-    if (!coin) {
-      toast("Select a coin first", "error");
-      return;
-    }
-    try {
-      await openAlertDialog({
-        coin,
-        load: () => alerts.getAlert(coin),
-        save: (high, low) => alerts.setAlert(coin, high, low),
-      });
     } catch (error) {
       toast((error as Error).message, "error");
     }

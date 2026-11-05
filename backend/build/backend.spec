@@ -38,7 +38,6 @@ hiddenimports += [
     "backend.Core.calculations",
     "backend.Core.coin_service",
     "backend.Core.credentials",
-    "backend.Core.alert_service",
     "backend.Core.window_state",
     "backend.Core.market_data",
     "backend.Core.workspace_store",

@@ -2605,6 +2605,7 @@
         resetPricePan(entry);
         entry.loadSeq++;
         loadData(entry, { resetView: true, view: view });
+        if (WS.focused === entry.id) notifyFocused(entry);
         if (WS.sync) {
             WS.sync.updateRegistration(entry.id, { timeframe: tf, barSeconds: barSeconds(tf) });
             if (!fromSync) WS.sync.notifyTimeframeChange(entry.id, tf);
@@ -2625,6 +2626,9 @@
         entry.positions = loadPositions(entry);
         updateTypicalHeading(entry);
         forceRefetch(entry);
+        // Keep the shell's instrument row on the chart that is actually shown
+        // (symbol changes do not move focus, so notify explicitly).
+        if (WS.focused === entry.id) notifyFocused(entry);
         scheduleSave();
     }
 

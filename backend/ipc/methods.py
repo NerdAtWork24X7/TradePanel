@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from backend.Core import (
-    alert_service,
     coin_service,
     config,
     credentials,
@@ -313,30 +312,6 @@ def _coins(params: dict, ctx: Context) -> dict:
     return {"coins": coins}
 
 
-def _alerts_get(params: dict, ctx: Context) -> dict:
-    coin = _text(params, "coin", max_len=20)
-    with ctx.state_lock:
-        alerts = alert_service.load_alerts()
-    alert = alerts.get(coin)
-    return {
-        "coin": coin,
-        "high": alert.fvg.high if alert and alert.fvg.high else None,
-        "low": alert.fvg.low if alert and alert.fvg.low else None,
-    }
-
-
-def _alerts_set(params: dict, ctx: Context) -> dict:
-    coin = _text(params, "coin", max_len=20)
-    high = _number(params, "high")
-    low = _number(params, "low")
-    with ctx.state_lock:
-        alerts = alert_service.load_alerts()
-        alert_service.get_or_create_alert(alerts, coin)
-        alert_service.update_fvg(alerts, coin, high, low)
-        alert_service.save_alerts(alerts)
-    return {"ok": True, "coin": coin, "high": high, "low": low}
-
-
 def _window_state_get(params: dict, ctx: Context) -> dict:
     with ctx.state_lock:
         return {"state": window_state.load_window_state()}
@@ -384,8 +359,6 @@ METHODS: dict[str, MethodSpec] = {
     "trading.sz_decimals": MethodSpec(_sz_decimals),
     "trading.price_precision": MethodSpec(_price_precision),
     "trading.coins": MethodSpec(_coins),
-    "alerts.get": MethodSpec(_alerts_get),
-    "alerts.set": MethodSpec(_alerts_set),
     "settings.window_state.get": MethodSpec(_window_state_get),
     "settings.window_state.save": MethodSpec(_window_state_save),
 }

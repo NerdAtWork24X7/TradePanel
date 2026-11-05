@@ -83,8 +83,11 @@ button[aria-disabled="true"] {
 /* ── Trade sidebar ───────────────────────────────────────────────────────── */
 
 .trade-sidebar {
+  position: relative;
   flex: 0 0 auto;
-  width: 296px;
+  width: var(--sidebar-width, 296px);
+  min-width: 248px;
+  max-width: 560px;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -98,6 +101,63 @@ button[aria-disabled="true"] {
   transition: width 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Drag handle on the inner edge. The strip is invisible until hover/focus. */
+.sidebar-resizer {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 5;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 34px;
+  border-radius: 2px;
+  background: var(--border);
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  transition: opacity var(--micro), background var(--micro), box-shadow var(--micro);
+}
+
+.sidebar-resizer:hover::after,
+.sidebar-resizer:focus-visible::after {
+  opacity: 1;
+}
+
+.sidebar-resizer:focus-visible {
+  outline: none;
+}
+
+.sidebar-resizer:focus-visible::after {
+  background: var(--accent);
+  box-shadow: var(--glow-accent);
+}
+
+.trade-sidebar.collapsed .sidebar-resizer {
+  display: none;
+}
+
+/* While dragging, kill the width transition and keep the pointer stable over
+   the chart iframe. */
+body.is-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.is-resizing .trade-sidebar {
+  transition: none;
+}
+
+body.is-resizing iframe {
+  pointer-events: none;
+}
+
 /* Collapsed = a floating rail that parks off-screen so the workspace frame owns
    the whole window (a docked rail would cover the price axis). Visibility is
    controlled by the Trade button; keyboard focus still reveals it. */
@@ -108,6 +168,7 @@ button[aria-disabled="true"] {
   bottom: 0;
   z-index: 30;
   width: 46px;
+  min-width: 0;
   background:
     linear-gradient(180deg, var(--glass-bg-strong), var(--glass-bg)),
     var(--surface);
@@ -133,7 +194,7 @@ body[data-theme="light"] .trade-sidebar.collapsed {
 .sidebar-body {
   display: flex;
   flex-direction: column;
-  width: 296px;
+  width: 100%;
   min-width: 0;
   height: 100%;
   min-height: 0;
@@ -349,6 +410,46 @@ body[data-theme="light"] .trade-sidebar.collapsed {
   gap: 8px;
 }
 
+/* Coin / TF / refresh icon on one line. The action button aligns with the
+   inputs, not with the labels above them. */
+.instrument-row {
+  grid-template-columns: minmax(0, 1fr) 62px 31px;
+  align-items: end;
+  gap: 6px;
+}
+
+.instrument-row .field-action {
+  width: 31px;
+  height: 31px;
+}
+
+.instrument-actions {
+  justify-content: space-between;
+}
+
+.instrument-actions .check {
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.instrument-actions .ghost-btn {
+  flex: 0 0 auto;
+}
+
+/* Direction toggle shares a line with LIM; bottom-align with the input. */
+.direction-row {
+  align-items: end;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 21px;
+}
+
 .chip-row {
   display: flex;
   align-items: center;
@@ -446,13 +547,24 @@ body[data-theme="light"] .trade-sidebar.collapsed {
   transform: translateY(1px);
 }
 
-.ghost-btn.grow {
-  flex: 1 1 auto;
+.ghost-btn.mini {
+  height: 21px;
+  padding: 0 8px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
 }
 
-.ghost-btn.block,
-.primary-btn.block {
-  width: 100%;
+.instrument-actions .ghost-btn,
+.instrument-actions .icon-btn {
+  height: 31px;
+}
+
+.icon-btn.is-busy svg {
+  animation: icon-spin 900ms linear infinite;
+}
+
+@keyframes icon-spin {
+  to { transform: rotate(360deg); }
 }
 
 .icon-btn {
@@ -946,16 +1058,6 @@ body[data-theme="light"] .trade-sidebar.collapsed {
 
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 
-@media (max-width: 1280px) {
-  .trade-sidebar {
-    width: 280px;
-  }
-
-  .sidebar-body {
-    width: 280px;
-  }
-}
-
 @media (max-width: 980px) {
   .app-shell {
     position: relative;
@@ -977,9 +1079,9 @@ body[data-theme="light"] .trade-sidebar.collapsed {
     gap: 6px;
   }
 
-  .trade-sidebar,
-  .sidebar-body {
-    width: min(296px, calc(100vw - 20px));
+  .trade-sidebar {
+    width: min(var(--sidebar-width, 296px), calc(100vw - 20px));
+    min-width: 0;
   }
 
   .modal .grid {

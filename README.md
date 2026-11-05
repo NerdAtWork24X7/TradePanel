@@ -6,7 +6,6 @@ integrations, indicators and chart workspace are the existing Python/JavaScript
 implementation, running unchanged behind a supervised Python sidecar.
 
 Target platforms: **Windows 10/11** and **Linux** (Ubuntu / Linux Mint).
-The legacy PySide6 app is still present and runnable during the migration.
 
 ## Architecture
 
@@ -35,7 +34,7 @@ TradePanel/
 │   │   ├── services/          # backend, trading, market-data, account,
 │   │   │                      # indicators, workspace, credentials, settings
 │   │   ├── state/             # shell state helpers
-│   │   └── styles/            # Amber Terminal Noir tokens + shell CSS
+│   │   └── styles/            # Pi Scope tokens, fonts, shell CSS
 │   ├── tests/                 # bridge adapter contract tests
 │   ├── index.html
 │   └── package.json
@@ -54,16 +53,18 @@ TradePanel/
 │   └── workspace_indicators.py
 ├── Indicator/                 # technical studies
 ├── Exchange/hyperliquid.py    # Hyperliquid SDK wrapper (testnet)
-├── UI/                        # legacy PySide6 app + shared chart workspace
+├── UI/                        # shared chart workspace (web assets)
 │   └── web/                   # workspace.html/js, chart_sync.js, LWC 4.2.2,
-│                              # tauri_bridge.js (compatibility adapter)
+│                              # tauri_bridge.js (compatibility adapter), fonts/
 ├── docs/                      # audit, architecture, IPC, security, build, testing
-├── scripts/                   # dev/build/test entry points
+├── start.sh                   # launcher (deps + sidecar + tauri dev)
+├── build.sh                   # reproducible release build for this platform
+├── scripts/                   # dev/build-backend/build-release/test entry points
 └── data/                      # legacy runtime data (migrated on first run)
 ```
 
-The workspace HTML/JS lives in exactly one place (`UI/web`) and is served to both apps:
-Vite copies it for Tauri, Qt loads it from disk. Only a 7 KB adapter file is new.
+The workspace HTML/JS lives in exactly one place (`UI/web`) and is served to Tauri.
+Only a 7 KB adapter file is new.
 
 ## Quick start
 
@@ -72,17 +73,25 @@ dependencies (`libwebkit2gtk-4.1-dev`, `libsoup-3.0-dev`, …). Full details:
 [`docs/BUILD.md`](docs/BUILD.md).
 
 ```bash
-npm install
-npm --prefix frontend install
-scripts/build-backend.sh        # PyInstaller sidecar → src-tauri/backend-dist
-scripts/dev.sh                  # Vite + Tauri with hot reload
+./start.sh                      # deps + PyInstaller sidecar (if missing) + tauri dev
+./start.sh --rebuild-backend    # force a fresh sidecar, then launch
 ```
 
 Release bundles:
 
 ```bash
-scripts/build-linux.sh          # AppImage + .deb
-powershell -File scripts/build-windows.ps1   # NSIS installer
+./build.sh                      # current platform (AppImage+.deb / dmg / NSIS)
+./build.sh --debug              # debug bundle
+./build.sh --skip-backend       # reuse the staged sidecar
+powershell -File scripts/build-windows.ps1   # native Windows release
+```
+
+Manual steps behind the scripts:
+
+```bash
+npm install && npm --prefix frontend install
+scripts/build-backend.sh        # PyInstaller sidecar → src-tauri/backend-dist
+npx tauri dev                   # or: npx tauri build
 ```
 
 Tests:
@@ -91,33 +100,33 @@ Tests:
 scripts/test.sh
 ```
 
-Legacy desktop app (still available until the new shell is signed off):
-
-```bash
-uv sync
-source .venv/bin/activate
-python main.py
-```
-
 ## Desktop shell
 
-* Amber Terminal Noir toolbar: coin/TF selectors, center-chart, Hyperliquid toggle,
-  Open Browser, QTY/RISK/direction, LIM/TP/SL, Read order, Update Order, Set Order,
-  favourites, FVG alert levels.
+* Pi Scope theme: warm near-black surfaces, one amber accent, Clash Grotesk /
+  Satoshi / Meslo type, light + dark toggle (persisted in `localStorage`).
+* Collapsible trade sidebar: Coin/TF, Center, Refresh, Hyperliquid toggle, Open ↗,
+  QTY/RISK/direction, LIM/TP/SL, Read order, Update Order, Set Order, FVG alert
+  levels. Collapsed it becomes a floating rail that parks off-screen (revealed at
+  the right edge or by keyboard focus) so the charts own the full window.
 * Backend status pill and banner. Any non-running backend disables trading controls;
   reconnection never submits an order.
 * Settings (Ctrl+,): advanced indicator parameters, credential management, signed updates.
 * Alerts (Ctrl+Shift+A): per-coin FVG high/low, stored in the existing `alerts.json`.
-* Ctrl+Shift+T hides the toolbar (the workspace's **Trade** button does the same).
+* Ctrl+Shift+T collapses the sidebar to the floating rail (the workspace's
+  **Trade** button does the same).
 * Preferences persist in the existing window-state JSON (merged, never reset).
 
 ## Multi-chart workspace
 
-The workspace fills the chart area and is the only chart view. It is unchanged from the
-audited application: Lightweight Charts 4.2.2, one WebView for all charts, timestamp-based
-synchronization, groups, layouts (`1`, `2h`, `2v`, `4`, `6`, `8`, custom), drawings,
-position projections, measure tool, price-axis modes (independent/absolute/percentage/
-indexed) and per-symbol drawing persistence.
+The workspace fills the chart area and is the only chart view: Lightweight Charts 4.2.2,
+one WebView for all charts, timestamp-based synchronization, groups, layouts (`1`, `2h`,
+`2v`, `4`, `6`, `8`, custom), drawings, position projections, measure tool, price-axis
+modes (independent/absolute/percentage/indexed) and per-symbol drawing persistence.
+
+It shares the shell's Pi Scope tokens (`UI/web/workspace.html` mirrors
+`frontend/src/styles/tokens.css`) and follows the light/dark toggle: the shell writes
+`tp-theme` to the shared origin's localStorage, the workspace picks it up through the
+`storage` event and repaints the charts from the `--chart-*` tokens.
 
 Live data comes from Binance, Bybit, OKX, Coinbase, Kraken, KuCoin, Gate.io, Bitget and
 Hyperliquid public endpoints. Python owns all exchange I/O; the WebView performs no network

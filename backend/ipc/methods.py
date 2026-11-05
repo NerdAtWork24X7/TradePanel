@@ -302,6 +302,11 @@ def _sz_decimals(params: dict, ctx: Context) -> dict:
     return {"coin": coin, "sz_decimals": trading_service.sz_decimals(coin)}
 
 
+def _price_precision(params: dict, ctx: Context) -> dict:
+    coin = _text(params, "coin", max_len=20)
+    return trading_service.price_precision(coin)
+
+
 def _coins(params: dict, ctx: Context) -> dict:
     refresh = _boolean(params, "refresh", required=False, default=False)
     coins = coin_service.refresh_coins() if refresh else coin_service.load_coins()
@@ -342,7 +347,7 @@ def _window_state_save(params: dict, ctx: Context) -> dict:
     # Only known, non-secret fields are persisted.
     allowed = {
         "coin", "timeframe", "favorites", "risk", "is_short", "hyperliquid",
-        "limit", "tp", "sl", "fvg_enabled", "vwap_visible",
+        "limit", "tp", "sl", "sidebar_collapsed", "fvg_enabled", "vwap_visible",
         "session_asian_visible", "session_london_visible",
         "session_ny_am_visible", "session_ny_pm_visible",
         "fvg_chart_visible",
@@ -377,6 +382,7 @@ METHODS: dict[str, MethodSpec] = {
     "trading.update_tp_sl": MethodSpec(_update_tp_sl, serialized=True),
     "trading.calc_qty": MethodSpec(_calc_qty),
     "trading.sz_decimals": MethodSpec(_sz_decimals),
+    "trading.price_precision": MethodSpec(_price_precision),
     "trading.coins": MethodSpec(_coins),
     "alerts.get": MethodSpec(_alerts_get),
     "alerts.set": MethodSpec(_alerts_set),

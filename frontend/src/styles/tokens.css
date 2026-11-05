@@ -1,28 +1,159 @@
+/* Pi Scope warm theme tokens (dark default). Light override below. */
 :root {
-  --bg: #0a0a0a;
-  --surface: #121212;
-  --surface-alt: #141414;
-  --surface-3: #171b22;
-  --text: #ffffff;
-  --text-2: #a1a1aa;
-  --text-3: #71717a;
-  --muted: #52525b;
-  --border: #2a2a2a;
-  --hairline: rgba(255, 255, 255, 0.09);
-  --accent: #f5c400;
-  --accent-soft: rgba(245, 196, 0, 0.12);
-  --accent-line: rgba(245, 196, 0, 0.42);
-  --danger: #dc2626;
-  --danger-soft: rgba(220, 38, 38, 0.12);
-  --success: #10b981;
-  --success-soft: rgba(16, 185, 129, 0.12);
-  --coral: #ff5a3c;
+  --bg: #1c1c1b;
+  --surface: #222220;
+  --surface-alt: #232321;
+  --surface-3: #272725;
+  --field-bg: #2e2e2a;
+  --text: #f3f1e9;
+  --text-2: #b1b0a7;
+  --text-3: #a09f95;
+  --muted: #7a7970;
+  --border: #3b3b36;
+  --border-strong: #4a4a42;
+  --hairline: rgba(255, 255, 255, 0.055);
+  --hairline-strong: rgba(255, 255, 255, 0.12);
+  --accent: #ffd43b;
+  --accent-rgb: 255, 212, 59;
+  --accent-soft: #48401e;
+  --accent-strong: #f5ca2f;
+  --accent-ink: #f3d778;
+  --accent-hover: #29271f;
+  --accent-line: rgba(255, 212, 59, 0.35);
+  --danger: #ff9e96;
+  --danger-soft: rgba(255, 158, 150, 0.14);
+  --success: #83cf9c;
+  --success-soft: rgba(131, 207, 156, 0.14);
+  --coral: #e3b24f;
+  --orange: #e3b24f;
+  --purple: #ad8cf2;
+  --cyan: #6aa2f0;
+  --row-hover: #31312e;
+  --hover-wash: rgba(255, 255, 255, 0.04);
+  --pill-bg: #31312e;
+  --tint-green: rgba(131, 207, 156, 0.14);
+  --tint-red: rgba(255, 158, 150, 0.14);
+  --focus: #e4be37;
   --radius-control: 6px;
   --radius-button: 8px;
   --radius-card: 12px;
-  --font-body: "Satoshi", "Inter", "Noto Sans", "DejaVu Sans", system-ui, sans-serif;
-  --font-display: "Clash Grotesk", "Inter", "Noto Sans", "DejaVu Sans", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "DejaVu Sans Mono", "Consolas", "Liberation Mono", monospace;
+  --radius-panel: 16px;
+  --font-body: "Satoshi", "Clash Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Clash Grotesk", "Satoshi", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "MesloLGS NFM", "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --micro: 160ms cubic-bezier(0.2, 0.7, 0.3, 1);
   --macro: 700ms cubic-bezier(0.22, 1, 0.36, 1);
+  --emoji: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  --glass-bg: rgba(28, 28, 27, 0.72);
+  --glass-bg-strong: rgba(34, 34, 32, 0.94);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 24px 64px rgba(0, 0, 0, 0.60);
+  --grid-line: rgba(255, 255, 255, 0.022);
+  --shadow-panel: 0 0 0 1px var(--hairline), 0 24px 64px rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 0 0 1px var(--hairline), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --glow-accent: 0 0 24px rgba(var(--accent-rgb), 0.25);
+  --bg-gradient: linear-gradient(180deg, #232321 0%, #1c1c1b 42%, #171716 100%);
+}
+
+body[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #fbfbfa;
+  --surface-alt: #f5f5f3;
+  --surface-3: #ffffff;
+  --field-bg: #efefec;
+  --text: #242423;
+  --text-2: #656560;
+  --text-3: #71716c;
+  --muted: #71716c;
+  --border: #e3e3df;
+  --border-strong: #d3d3cc;
+  --hairline: rgba(36, 36, 35, 0.055);
+  --hairline-strong: rgba(36, 36, 35, 0.12);
+  --accent: #ffd43b;
+  --accent-rgb: 255, 212, 59;
+  --accent-soft: #fff1b6;
+  --accent-strong: #f5ca2f;
+  --accent-ink: #554400;
+  --accent-hover: #fffcf1;
+  --accent-line: rgba(255, 212, 59, 0.45);
+  --danger: #b03535;
+  --danger-soft: rgba(176, 53, 53, 0.07);
+  --success: #237345;
+  --success-soft: rgba(35, 115, 69, 0.10);
+  --coral: #a8700a;
+  --orange: #a8700a;
+  --purple: #7a4fc7;
+  --cyan: #2f6fc7;
+  --row-hover: #f1f1ef;
+  --hover-wash: rgba(36, 36, 35, 0.05);
+  --pill-bg: #f1f1ef;
+  --tint-green: #eaf4ee;
+  --tint-red: #fbeceb;
+  --focus: #8b6c00;
+  --glass-bg: rgba(255, 255, 255, 0.74);
+  --glass-bg-strong: rgba(255, 255, 255, 0.94);
+  --glass-border: rgba(36, 36, 35, 0.08);
+  --glass-shadow: 0 24px 64px rgba(36, 36, 35, 0.12);
+  --grid-line: rgba(36, 36, 35, 0.028);
+  --shadow-panel: 0 0 0 1px var(--hairline), 0 24px 64px rgba(36, 36, 35, 0.10);
+  --shadow-card: 0 0 0 1px var(--hairline), 0 2px 5px rgba(36, 36, 35, 0.025), 0 8px 24px rgba(36, 36, 35, 0.035);
+  --glow-accent: 0 0 24px rgba(var(--accent-rgb), 0.25);
+  --bg-gradient: linear-gradient(180deg, #fffbee 0%, #ffffff 42%, #f7f7f4 100%);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+    var(--bg-gradient, var(--bg));
+  background-size: 24px 24px, 24px 24px, auto;
+  color: var(--text);
+  font-family: var(--font-body), var(--emoji);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled,
+button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

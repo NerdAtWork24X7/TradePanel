@@ -97,7 +97,7 @@ export interface AppInfo {
 export interface WindowState {
   coin?: string;
   timeframe?: string;
-  favorites?: string[];
+  sidebar_collapsed?: boolean;
   risk?: string;
   is_short?: boolean;
   hyperliquid?: boolean;

@@ -281,7 +281,7 @@ export async function openSettings(ctx: SettingsContext): Promise<void> {
   const legacy = legacyResult.status === "fulfilled" ? legacyResult.value : null;
   if (legacy?.found) {
     const legacyBox = el("div", "section");
-    legacyBox.style.borderTop = "1px solid rgba(255,255,255,0.09)";
+    legacyBox.style.borderTop = "1px solid var(--hairline)";
     legacyBox.style.paddingTop = "10px";
     legacyBox.appendChild(
       el(

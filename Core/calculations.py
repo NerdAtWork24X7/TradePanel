@@ -35,6 +35,28 @@ def detect_price_precision(price: float) -> int:
     return 10
 
 
+# Hyperliquid perp price rules: at most 5 significant figures and at most
+# ``PERP_PRICE_DECIMALS - szDecimals`` decimal places.
+PRICE_SIG_FIGS = 5
+PERP_PRICE_DECIMALS = 6
+
+
+def price_decimals(sz_decimals: int) -> int:
+    """Decimal places allowed for a perp price given the coin's size decimals."""
+    return max(0, PERP_PRICE_DECIMALS - int(sz_decimals))
+
+
+def round_exchange_price(price: float, sz_decimals: int) -> float:
+    """Round a price to Hyperliquid's perp tick.
+
+    Mirrors the SDK's own wire formatting (5 significant figures, then
+    ``6 - szDecimals`` decimals) so levels drawn or typed in the UI survive
+    exchange validation unchanged.
+    """
+    decimals = price_decimals(sz_decimals)
+    return round(float(f"{price:.{PRICE_SIG_FIGS}g}"), decimals)
+
+
 def round_price(price: float, reference: float | None = None) -> float:
     """Round price to the same precision as *reference* (or *price* itself).
 

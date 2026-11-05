@@ -39,6 +39,9 @@ const HEALTH_FAILURE_LIMIT: u32 = 3;
 const MAX_RESTART_ATTEMPTS: u32 = 6;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(12);
+/// The backend reads its stdin continuously; a write that takes longer means
+/// the pipe is stuck (backend hung) and must not block the supervisor.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct Pending {
     method: String,
@@ -514,8 +517,23 @@ impl SidecarManager {
         let stdin = guard
             .as_mut()
             .ok_or_else(|| "Backend is not running".to_string())?;
-        stdin.write_all(frame).await.map_err(|error| error.to_string())?;
-        stdin.flush().await.map_err(|error| error.to_string())
+        // A backend that stopped reading leaves the pipe full, and an unbounded
+        // `write_all` would then block the supervisor forever (including the
+        // window-close path). Bound it: a wedged pipe is a dead backend.
+        let write = async {
+            stdin.write_all(frame).await?;
+            stdin.flush().await
+        };
+        tokio::time::timeout(WRITE_TIMEOUT, write)
+            .await
+            .map_err(|_| {
+                format!(
+                    "Backend did not accept a {} byte frame within {} ms",
+                    frame.len(),
+                    WRITE_TIMEOUT.as_millis()
+                )
+            })?
+            .map_err(|error| error.to_string())
     }
 
     fn fail_pending(&self, reason: &str, code: i64) {

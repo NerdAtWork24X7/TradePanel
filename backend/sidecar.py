@@ -44,6 +44,22 @@ def _defend_stdout() -> BinaryIO:
     return os.fdopen(protocol_fd, "wb", buffering=0)
 
 
+def _exit_now(code: int) -> None:
+    """Terminate without Python's interpreter shutdown join.
+
+    Threads created by third-party libraries (e.g. the Hyperliquid SDK's
+    websocket manager) are non-daemon; ``threading._shutdown`` waits for them
+    forever and the supervisor would have to SIGKILL the sidecar. Every byte
+    that matters has already been flushed by the RPC server at this point, so
+    exiting hard is the reliable option for a supervised child process.
+    """
+    try:
+        sys.stderr.flush()
+    except Exception:
+        pass
+    os._exit(code)
+
+
 def _ensure_project_root_on_path() -> None:
     """Dev mode: ``python backend/sidecar.py`` needs the repo root importable."""
     if getattr(sys, "frozen", False):
@@ -139,4 +155,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _exit_now(main())

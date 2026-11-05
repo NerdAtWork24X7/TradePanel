@@ -12,8 +12,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# Enabled for release builds only: embeds frontend/dist instead of loading
+# `build.devUrl`. Without this split `tauri dev` ignores the Vite server and
+# always serves whatever was compiled into the binary.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
-tauri = { version = "2", features = ["custom-protocol"] }
+tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-log = "2"

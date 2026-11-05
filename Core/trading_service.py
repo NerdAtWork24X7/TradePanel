@@ -69,14 +69,11 @@ def _positive(name: str, value: Any) -> float:
     return number
 
 
-def _round_to_mid(client: HyperliquidClient, coin: str, *prices: float) -> tuple[float, ...]:
-    """Round prices using the precision implied by the live mid price."""
-    mid = client.get_mid_price(coin)
-    if not mid or mid <= 0:
-        return prices
-    precision = calculations.detect_price_precision(mid)
-    rounded = tuple(round(p, precision) for p in prices)
-    log.info("Rounded prices to %d decimals (mid=%s): %s", precision, mid, rounded)
+def _round_to_exchange(coin: str, *prices: float) -> tuple[float, ...]:
+    """Round prices to the coin's Hyperliquid perp tick (5 sig figs, 6-szDecimals dp)."""
+    sz = HyperliquidClient.get_sz_decimals(coin)
+    rounded = tuple(calculations.round_exchange_price(p, sz) for p in prices)
+    log.info("Rounded prices to HL precision (szDecimals=%d): %s", sz, rounded)
     return rounded
 
 
@@ -100,9 +97,17 @@ def place_order(
         raise TradingInputError("Entry and stop-loss must differ")
 
     client = _client()
-    limit_price, tp_price, sl_price = _round_to_mid(
-        client, coin, limit_price, tp_price, sl_price
+    limit_price, tp_price, sl_price = _round_to_exchange(
+        coin, limit_price, tp_price, sl_price
     )
+    if sl_price == limit_price:
+        raise TradingInputError(
+            "Entry and stop-loss collapse at the exchange price tick — widen the levels"
+        )
+    if tp_price in (limit_price, sl_price):
+        raise TradingInputError(
+            "Take-profit is too close to another level for the exchange price tick"
+        )
     params = OrderParams(
         coin=coin,
         is_buy=bool(is_buy),
@@ -133,7 +138,11 @@ def update_tp_sl(coin: str, is_short: bool, tp: float, sl: float) -> tuple[bool,
     if qty <= 0:
         return False, f"No open position for {coin}"
 
-    tp, sl = _round_to_mid(client, coin, tp, sl)
+    tp, sl = _round_to_exchange(coin, tp, sl)
+    if tp == sl:
+        raise TradingInputError(
+            "TP and SL collapse at the exchange price tick — widen the levels"
+        )
     result = client.update_tp_sl(coin, not bool(is_short), qty, tp, sl)
     if result.success:
         msg = f"TP/SL updated for {coin}: tp={tp} sl={sl}"
@@ -207,6 +216,18 @@ def open_orders(coin: str) -> list[dict]:
 
 def sz_decimals(coin: str) -> int:
     return HyperliquidClient.get_sz_decimals(str(coin or "").strip())
+
+
+def price_precision(coin: str) -> dict[str, int | str]:
+    """Exchange price precision for *coin*, shared with the UI formatters."""
+    name = str(coin or "").strip()
+    sz = HyperliquidClient.get_sz_decimals(name)
+    return {
+        "coin": name,
+        "sz_decimals": sz,
+        "price_decimals": calculations.price_decimals(sz),
+        "price_sig_figs": calculations.PRICE_SIG_FIGS,
+    }
 
 
 def calculate_qty(risk: float, entry: float, sl: float, is_short: bool, coin: str) -> float:

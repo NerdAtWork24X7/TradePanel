@@ -23,6 +23,13 @@ export interface QtyResult {
   sz_decimals: number;
 }
 
+export interface ExchangePricePrecision {
+  coin: string;
+  sz_decimals: number;
+  price_decimals: number;
+  price_sig_figs: number;
+}
+
 /** Identical submissions are serialised in the shell; the backend also guards. */
 const inFlight = new Set<string>();
 
@@ -65,6 +72,10 @@ export function calculateQty(
     is_short: isShort,
     coin,
   });
+}
+
+export function getPricePrecision(coin: string): Promise<ExchangePricePrecision> {
+  return rpc<ExchangePricePrecision>("trading.price_precision", { coin });
 }
 
 export async function orderUncertain(): Promise<boolean> {

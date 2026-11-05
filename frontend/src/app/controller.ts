@@ -9,6 +9,7 @@ import * as shell from "../services/shell";
 import * as trading from "../services/trading";
 import * as updates from "../services/updates";
 import { openAlertDialog } from "../components/alerts";
+import { formatExchangePrice } from "../lib/exchange-price";
 import { openModal } from "../components/modal";
 import { openSettings } from "../components/settings";
 import { toast } from "../components/toast";
@@ -27,7 +28,6 @@ import type {
 const FALLBACK_TIMEFRAMES = [
   "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M",
 ];
-const MAX_FAVORITES = 12;
 
 function must<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -46,7 +46,7 @@ function roundTripState(state: WindowState): WindowState {
   return {
     coin: state.coin,
     timeframe: state.timeframe,
-    favorites: state.favorites,
+    sidebar_collapsed: state.sidebar_collapsed,
     risk: state.risk,
     is_short: state.is_short,
     hyperliquid: state.hyperliquid,
@@ -74,20 +74,27 @@ class AppController {
   private readonly centerChart = must<HTMLButtonElement>("center-chart");
   private readonly openBrowser = must<HTMLButtonElement>("open-browser");
   private readonly setAlert = must<HTMLButtonElement>("set-alert");
-  private readonly addFavorite = must<HTMLButtonElement>("add-favorite");
-  private readonly favorites = must<HTMLElement>("favorites");
   private readonly pill = must<HTMLElement>("backend-pill");
   private readonly banner = must<HTMLElement>("backend-banner");
   private readonly bannerTitle = must<HTMLElement>("banner-title");
   private readonly bannerDetail = must<HTMLElement>("banner-detail");
   private readonly bannerRetry = must<HTMLButtonElement>("banner-retry");
-  private readonly shellBar = must<HTMLElement>("shell-bar");
-  private readonly restoreBar = must<HTMLButtonElement>("restore-bar");
+  private readonly sidebar = must<HTMLElement>("trade-sidebar");
+  private readonly sidebarBody = must<HTMLElement>("sidebar-body");
+  private readonly sidebarCollapse = must<HTMLButtonElement>("sidebar-collapse");
+  private readonly sidebarExpand = must<HTMLButtonElement>("sidebar-expand");
+  private readonly backendDot = must<HTMLElement>("backend-dot");
   private readonly settingsBtn = must<HTMLButtonElement>("settings-btn");
+  private readonly settingsRail = must<HTMLButtonElement>("settings-btn-rail");
+  private readonly centerRail = must<HTMLButtonElement>("center-chart-rail");
+  private readonly refreshRail = must<HTMLButtonElement>("refresh-coins-rail");
+  private readonly openBrowserRail = must<HTMLButtonElement>("open-browser-rail");
+  private readonly hyperliquidRail = must<HTMLButtonElement>("hyperliquid-rail");
   private readonly frame = must<HTMLIFrameElement>("workspace-frame");
   private readonly workspaceError = must<HTMLElement>("workspace-error");
   private readonly workspaceErrorMessage = must<HTMLElement>("workspace-error-message");
   private readonly workspaceReload = must<HTMLButtonElement>("workspace-reload");
+  private readonly workspaceLoading = must<HTMLElement>("workspace-loading");
   private readonly versionLabel = must<HTMLElement>("app-version");
 
   private readonly host: WorkspaceHost;
@@ -102,15 +109,20 @@ class AppController {
   };
   private direction: Direction = "long";
   private coinList: string[] = [];
-  private favoriteList: string[] = [];
   private meta: MarketMeta | null = null;
   private indicatorConfig: IndicatorConfig | null = null;
   private bootstrapped = false;
+  private sidebarCollapsed = false;
   private bootstrapPromise: Promise<void> | null = null;
   private saveTimer: number | null = null;
   private orderPending = false;
   private lastReadyPid: number | null = null;
   private qtyRequest = 0;
+  private readonly pricePrecision = new Map<string, trading.ExchangePricePrecision>();
+  private readonly precisionRequests = new Map<
+    string,
+    Promise<trading.ExchangePricePrecision | null>
+  >();
 
   constructor() {
     this.host = new WorkspaceHost(this.frame, {
@@ -119,11 +131,15 @@ class AppController {
       positionDrawing: (direction, entry, tp, sl) =>
         this.applyLevels(direction, entry, tp, sl),
       configRequested: () => void this.openSettingsDialog(),
-      toggleTopBar: () => this.toggleShellBar(),
+      toggleTopBar: () => this.toggleSidebar(),
+      toggleFullscreen: () => void this.toggleFullscreen(),
       fullscreen: (enabled) => {
-        void shell.setFullscreen(enabled).catch((error) => {
-          toast(`Fullscreen failed: ${(error as Error).message}`, "error");
-        });
+        void shell
+          .setFullscreen(enabled)
+          .then(() => this.host.setFullscreenState(enabled))
+          .catch((error) => {
+            toast(`Fullscreen failed: ${(error as Error).message}`, "error");
+          });
       },
       ready: () => this.onWorkspaceReady(),
       failed: (message) => this.showWorkspaceError(message),
@@ -207,6 +223,11 @@ class AppController {
               ? "Backend stopped"
               : "Backend offline";
     this.pill.title = status.message ?? `Protocol ${status.protocolVersion ?? "?"}`;
+    this.backendDot.className = `backend-dot ${
+      running ? "ok" : status.state === "starting" || status.state === "restarting" ? "pending" : "error"
+    }`;
+    this.backendDot.title = this.pill.textContent ?? "Backend status";
+    this.backendDot.setAttribute("aria-label", `Backend status: ${this.pill.textContent ?? "unknown"}`);
 
     this.banner.hidden = running;
     this.banner.dataset.tone = status.state === "starting" || status.state === "restarting" ? "warn" : "error";
@@ -238,7 +259,10 @@ class AppController {
       // state overwrite). Charts resume polling on their own; positions are
       // refreshed read-only so the ticket reflects the exchange.
       toast("Backend reconnected. Verify the position before trading.", "info");
-      if (this.coin.value) void this.refreshPosition(false);
+      if (this.coin.value) {
+        void this.refreshPrecisionFor(this.coin.value);
+        void this.refreshPosition(false);
+      }
       return;
     }
     this.bootstrapPromise = this.bootstrap();
@@ -280,10 +304,14 @@ class AppController {
       this.indicatorConfig = configResult.value;
     }
 
+    // Never block startup on exchange metadata: format immediately with the
+    // fallback, then re-apply the real tick when the backend answers.
+    this.normalizeLevels();
+    void this.refreshPrecisionFor(this.coin.value);
+
     shell.logFrontend(
       "info",
-      `bootstrap complete: ${this.coinList.length} coins, ${this.favoriteList.length} favourites, ` +
-        `tf=${this.tf.value || "?"}`,
+      `bootstrap complete: ${this.coinList.length} coins, tf=${this.tf.value || "?"}`,
     );
     void trading
       .orderUncertain()
@@ -297,7 +325,6 @@ class AppController {
         }
       })
       .catch(() => undefined);
-    this.renderFavorites();
     this.bootstrapped = true;
     this.host.start();
   }
@@ -305,6 +332,7 @@ class AppController {
   private async onWorkspaceReady(): Promise<void> {
     shell.logFrontend("info", "workspace ready: chart bridge connected");
     this.workspaceError.hidden = true;
+    this.workspaceLoading.hidden = true;
     if (this.indicatorConfig) {
       this.host.setIndicatorConfig(this.indicatorConfig as unknown as UnknownRecord);
     }
@@ -315,6 +343,7 @@ class AppController {
 
   private showWorkspaceError(message: string): void {
     this.workspaceErrorMessage.textContent = message;
+    this.workspaceLoading.hidden = true;
     this.workspaceError.hidden = false;
     shell.logFrontend("error", `workspace: ${message}`);
   }
@@ -330,11 +359,9 @@ class AppController {
     if (typeof state.sl === "string") this.sl.value = state.sl;
     this.direction = state.is_short ? "short" : "long";
     this.hyperliquid.checked = Boolean(state.hyperliquid);
-    this.favoriteList = Array.isArray(state.favorites)
-      ? state.favorites.filter((coin): coin is string => typeof coin === "string")
-      : [];
+    this.setSidebarCollapsed(state.sidebar_collapsed === true, false);
     this.updateDirection();
-    this.renderFavorites();
+    this.updateRailState();
   }
 
   private scheduleSave(): void {
@@ -351,7 +378,7 @@ class AppController {
     const state: WindowState = roundTripState({
       coin: this.coin.value,
       timeframe: this.tf.value,
-      favorites: this.favoriteList,
+      sidebar_collapsed: this.sidebarCollapsed,
       risk: this.risk.value,
       is_short: this.direction === "short",
       hyperliquid: this.hyperliquid.checked,
@@ -385,6 +412,7 @@ class AppController {
       const first = unique[0] ?? "";
       if (first) this.coin.value = first;
     }
+    this.updateRailState();
   }
 
   private applyTimeframes(timeframes: string[]): void {
@@ -416,28 +444,6 @@ class AppController {
     }
   }
 
-  private renderFavorites(): void {
-    this.favorites.replaceChildren();
-    for (let index = 0; index < MAX_FAVORITES; index += 1) {
-      const coin = this.favoriteList[index];
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = `fav-btn${coin ? " filled" : ""}`;
-      button.textContent = coin ?? `Fav${index + 1}`;
-      button.disabled = !coin;
-      button.title = coin ? `Switch to ${coin}` : "Empty favourite slot";
-      if (coin) {
-        button.addEventListener("click", () => {
-          this.applyCoins(this.coinList, coin);
-          this.host.setFocusedCoin(coin);
-          void this.refreshPosition(false);
-          this.scheduleSave();
-        });
-      }
-      this.favorites.appendChild(button);
-    }
-  }
-
   // ── Events ────────────────────────────────────────────────────────────
 
   private bindEvents(): void {
@@ -445,6 +451,7 @@ class AppController {
       const coin = this.coin.value;
       if (!coin) return;
       this.host.setFocusedCoin(coin);
+      void this.refreshPrecisionFor(coin);
       void this.refreshPosition(false);
       this.scheduleSave();
     });
@@ -457,10 +464,14 @@ class AppController {
     this.risk.addEventListener("change", () => this.recalculateQty());
     this.limit.addEventListener("change", () => this.recalculateQty());
     this.sl.addEventListener("change", () => this.recalculateQty());
+    this.tp.addEventListener("change", () => this.normalizePriceInput(this.tp));
     for (const input of [this.risk, this.limit, this.tp, this.sl, this.qty]) {
       input.addEventListener("input", () => this.scheduleSave());
     }
-    this.hyperliquid.addEventListener("change", () => this.scheduleSave());
+    this.hyperliquid.addEventListener("change", () => {
+      this.updateRailState();
+      this.scheduleSave();
+    });
 
     this.directionBtn.addEventListener("click", () => {
       this.direction = this.direction === "long" ? "short" : "long";
@@ -475,25 +486,33 @@ class AppController {
     this.centerChart.addEventListener("click", () => this.host.centerFocused());
     this.openBrowser.addEventListener("click", () => void this.openBrowserPage());
     this.setAlert.addEventListener("click", () => void this.openAlerts());
-    this.addFavorite.addEventListener("click", () => this.pinCurrentCoin());
     this.settingsBtn.addEventListener("click", () => void this.openSettingsDialog());
+    this.settingsRail.addEventListener("click", () => void this.openSettingsDialog());
+    this.sidebarCollapse.addEventListener("click", () => this.toggleSidebar(false));
+    this.sidebarExpand.addEventListener("click", () => this.toggleSidebar(true));
     this.bannerRetry.addEventListener("click", () => void this.retryBackend());
     this.workspaceReload.addEventListener("click", () => {
       this.workspaceError.hidden = true;
+      this.workspaceLoading.hidden = false;
       this.host.reload();
     });
-    this.restoreBar.addEventListener("click", () => this.toggleShellBar(true));
-
     this.refreshCoins.addEventListener("click", () => void this.refreshCoinList());
+    this.centerRail.addEventListener("click", () => this.host.centerFocused());
+    this.refreshRail.addEventListener("click", () => void this.refreshCoinList());
+    this.openBrowserRail.addEventListener("click", () => void this.openBrowserPage());
+    this.hyperliquidRail.addEventListener("click", () => {
+      this.hyperliquid.checked = !this.hyperliquid.checked;
+      this.hyperliquid.dispatchEvent(new Event("change"));
+    });
 
     window.addEventListener("keydown", (event) => {
       if (event.key === "F11") {
         event.preventDefault();
-        void shell.setFullscreen(true).catch(() => undefined);
+        void this.toggleFullscreen();
       }
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "t") {
         event.preventDefault();
-        this.toggleShellBar();
+        this.toggleSidebar();
       }
       if (event.ctrlKey && !event.shiftKey && event.key === ",") {
         event.preventDefault();
@@ -514,20 +533,45 @@ class AppController {
       input.addEventListener("change", sync);
       sync();
     }
-    document.addEventListener("fullscreenchange", () => {
-      if (!document.fullscreenElement) {
-        void shell.setFullscreen(false).catch(() => undefined);
-      }
-    });
     window.addEventListener("beforeunload", () => {
       void this.saveWindowState();
     });
   }
 
-  private toggleShellBar(force?: boolean): void {
-    const hide = force === undefined ? !this.shellBar.hidden : !force;
-    this.shellBar.hidden = hide;
-    this.restoreBar.hidden = !hide;
+  private toggleSidebar(force?: boolean): void {
+    this.setSidebarCollapsed(force === undefined ? !this.sidebarCollapsed : !force);
+  }
+
+  /** Native window fullscreen keeps the shell (and this sidebar) in the layout. */
+  private async toggleFullscreen(): Promise<void> {
+    try {
+      const enabled = await shell.toggleFullscreen();
+      this.host.setFullscreenState(enabled);
+    } catch (error) {
+      toast(`Fullscreen failed: ${(error as Error).message}`, "error");
+    }
+  }
+
+  private setSidebarCollapsed(collapsed: boolean, persist = true): void {
+    const active = document.activeElement as HTMLElement | null;
+    // Focus in a real control (not the collapse button) means the user is
+    // keyboard-driving the panel, so hand focus to the mirrored rail control.
+    const keyboardInside =
+      !!active && active !== this.sidebarCollapse && this.sidebarBody.contains(active);
+    const focusWasOnExpand = active === this.sidebarExpand;
+    this.sidebarCollapsed = collapsed;
+    this.sidebar.classList.toggle("collapsed", collapsed);
+    this.sidebarBody.hidden = collapsed;
+    this.sidebarCollapse.setAttribute("aria-expanded", String(!collapsed));
+    this.sidebarExpand.setAttribute("aria-expanded", String(!collapsed));
+    if (collapsed) {
+      if (keyboardInside) this.sidebarExpand.focus();
+      // Pointer collapse: drop focus so the rail parks instead of hanging open.
+      else if (active === this.sidebarCollapse) this.sidebarCollapse.blur();
+    } else if (focusWasOnExpand) {
+      this.sidebarCollapse.focus();
+    }
+    if (persist) this.scheduleSave();
   }
 
   private updateDirection(): void {
@@ -538,6 +582,14 @@ class AppController {
     this.directionLabel.textContent = short ? "SHORT" : "LONG";
     this.directionBtn.title =
       `Direction: ${short ? "short" : "long"} (does not submit an order)`;
+  }
+
+  /** Mirror instrument state onto the collapsed rail so it never drifts. */
+  private updateRailState(): void {
+    const hl = this.hyperliquid.checked;
+    this.hyperliquidRail.setAttribute("aria-pressed", String(hl));
+    this.hyperliquidRail.title = hl ? "Hyperliquid mode: on" : "Hyperliquid mode: off";
+    this.centerRail.disabled = !this.coin.value;
   }
 
   private updateTradingEnabled(): void {
@@ -560,6 +612,7 @@ class AppController {
     if (timeframe && timeframe !== this.tf.value) {
       this.applyTimeframe(timeframe);
     }
+    if (base) void this.refreshPrecisionFor(base);
     if (base) void this.refreshPosition(false);
     this.scheduleSave();
   }
@@ -568,6 +621,9 @@ class AppController {
     const coin = this.coin.value;
     if (!coin || this.status.state !== "running") return;
     try {
+      // Kick the tick metadata off in parallel but never make positions wait
+      // on a slow exchange meta request.
+      void this.loadPricePrecision(coin);
       const position = await account.getPosition(coin);
       this.applyPosition(position);
       if (report && !position.has_position) toast(`No open position for ${coin}`, "info");
@@ -587,11 +643,68 @@ class AppController {
     }
   }
 
+  /** Fetch (once per coin) the exchange price tick used to format LIM/TP/SL. */
+  private async loadPricePrecision(
+    coin: string,
+  ): Promise<trading.ExchangePricePrecision | null> {
+    if (!coin) return null;
+    const cached = this.pricePrecision.get(coin);
+    if (cached) return cached;
+    const pending = this.precisionRequests.get(coin);
+    if (pending) return pending;
+    const request = trading
+      .getPricePrecision(coin)
+      .then((precision) => {
+        if (precision.coin === coin) this.pricePrecision.set(coin, precision);
+        return precision;
+      })
+      .catch(() => null)
+      .finally(() => {
+        this.precisionRequests.delete(coin);
+      });
+    this.precisionRequests.set(coin, request);
+    return request;
+  }
+
+  /** Re-format the ticket once the coin's tick is known (or changed). */
+  private async refreshPrecisionFor(coin: string): Promise<void> {
+    const precision = await this.loadPricePrecision(coin);
+    if (!precision || this.coin.value !== coin) return;
+    // Never rewrite a field the user is currently editing.
+    const active = document.activeElement;
+    if (active === this.limit || active === this.tp || active === this.sl) return;
+    this.normalizeLevels();
+    if (this.limit.value || this.sl.value) void this.recalculateQty();
+  }
+
+  /** Format a price with the selected coin's tick; falls back to 6 dp while
+   *  metadata is still loading so raw float tails never reach the ticket. */
+  private formatPrice(value: number): string {
+    const precision = this.pricePrecision.get(this.coin.value);
+    if (precision) return formatExchangePrice(value, precision);
+    return String(round(value, 6));
+  }
+
+  private normalizePriceInput(input: HTMLInputElement): number | null {
+    const value = parseNumber(input.value);
+    if (value === null) return null;
+    const text = this.formatPrice(value);
+    input.value = text;
+    input.title = text;
+    return parseNumber(text);
+  }
+
+  private normalizeLevels(): void {
+    for (const input of [this.limit, this.tp, this.sl]) {
+      this.normalizePriceInput(input);
+    }
+  }
+
   private applyPosition(position: Position): void {
     if (position.coin !== this.coin.value) return;
-    if (position.entry) this.limit.value = String(round(position.entry, 6));
-    if (position.tp) this.tp.value = String(round(position.tp, 6));
-    if (position.sl) this.sl.value = String(round(position.sl, 6));
+    if (position.entry) this.limit.value = this.formatPrice(position.entry);
+    if (position.tp) this.tp.value = this.formatPrice(position.tp);
+    if (position.sl) this.sl.value = this.formatPrice(position.sl);
     this.direction = position.size < 0 ? "short" : "long";
     this.updateDirection();
     this.syncInputTitles();
@@ -605,9 +718,25 @@ class AppController {
     if (entry === sl) return;
     if (short && !(tp < entry && entry < sl)) return;
     if (!short && !(sl < entry && entry < tp)) return;
-    this.limit.value = String(entry);
-    this.tp.value = String(tp);
-    this.sl.value = String(sl);
+    const limitText = this.formatPrice(entry);
+    const tpText = this.formatPrice(tp);
+    const slText = this.formatPrice(sl);
+    const rounded = [limitText, tpText, slText].map(parseNumber);
+    if (rounded.some((value) => value === null || value <= 0)) {
+      toast(`Levels are below ${this.coin.value}'s price tick`, "error");
+      return;
+    }
+    const [limit, takeProfit, stop] = rounded as [number, number, number];
+    if (short ? !(takeProfit < limit && limit < stop) : !(stop < limit && limit < takeProfit)) {
+      toast(
+        `Levels are tighter than ${this.coin.value}'s price tick — widen the position box`,
+        "error",
+      );
+      return;
+    }
+    this.limit.value = limitText;
+    this.tp.value = tpText;
+    this.sl.value = slText;
     this.direction = short ? "short" : "long";
     this.updateDirection();
     this.syncInputTitles();
@@ -617,8 +746,8 @@ class AppController {
 
   private async recalculateQty(): Promise<void> {
     const risk = parseNumber(this.risk.value);
-    const entry = parseNumber(this.limit.value);
-    const sl = parseNumber(this.sl.value);
+    const entry = this.normalizePriceInput(this.limit);
+    const sl = this.normalizePriceInput(this.sl);
     const coin = this.coin.value;
     if (risk === null || entry === null || sl === null || !coin) return;
     if (entry === sl || risk <= 0) return;
@@ -654,10 +783,11 @@ class AppController {
       return;
     }
 
-    const limitPrice = parseNumber(this.limit.value);
-    const tpPrice = parseNumber(this.tp.value);
-    const slPrice = parseNumber(this.sl.value);
+    const limitPrice = this.normalizePriceInput(this.limit);
+    const tpPrice = this.normalizePriceInput(this.tp);
+    const slPrice = this.normalizePriceInput(this.sl);
     const qty = parseNumber(this.qty.value);
+    this.syncInputTitles();
     const isShort = this.direction === "short";
 
     if (kind === "set") {
@@ -719,8 +849,8 @@ class AppController {
     message: string,
   ): void {
     const body = document.createElement("p");
+    body.className = success ? "inline-ok" : "inline-error";
     body.style.margin = "0";
-    body.style.color = success ? "#a7f3d0" : "#fecaca";
     body.textContent = success
       ? kind === "set"
         ? `Order request accepted for ${coin}.`
@@ -855,22 +985,6 @@ class AppController {
   }
 
   // ── Other actions ─────────────────────────────────────────────────────
-
-  private pinCurrentCoin(): void {
-    const coin = this.coin.value;
-    if (!coin) return;
-    if (this.favoriteList.includes(coin)) {
-      toast(`${coin} is already pinned`, "info");
-      return;
-    }
-    if (this.favoriteList.length >= MAX_FAVORITES) {
-      toast("Favourite slots are full", "info");
-      return;
-    }
-    this.favoriteList.push(coin);
-    this.renderFavorites();
-    this.scheduleSave();
-  }
 
   private async refreshCoinList(): Promise<void> {
     this.refreshCoins.disabled = true;

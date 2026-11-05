@@ -19,6 +19,7 @@
         "minWidth": 1280,
         "minHeight": 720,
         "resizable": true,
+        "backgroundColor": "#1c1c1b",
         "center": true,
         "fullscreen": false,
         "decorations": true
@@ -28,7 +29,8 @@
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; frame-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'none'; form-action 'none'",
       "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline' http://localhost:5173; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173; frame-src 'self' http://localhost:5173; frame-ancestors 'self'; object-src 'none'; base-uri 'none'; form-action 'none'",
       "capabilities": ["default"]
-    }
+    },
+    "enableGTKAppId": true
   },
   "bundle": {
     "active": true,

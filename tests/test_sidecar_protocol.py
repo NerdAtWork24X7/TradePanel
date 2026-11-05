@@ -171,6 +171,27 @@ class InProcessServerTests(unittest.TestCase):
         thread.join(timeout=3)
 
 
+class HardExitTests(unittest.TestCase):
+    """Regression: a library thread must never keep the sidecar process alive."""
+
+    def test_exit_now_ignores_non_daemon_threads(self):
+        script = (
+            "import sys, threading\n"
+            f"sys.path.insert(0, {str(ROOT)!r})\n"
+            "from backend.sidecar import _exit_now\n"
+            "threading.Thread(target=threading.Event().wait, daemon=False).start()\n"
+            "_exit_now(7)\n"
+        )
+        started = time.time()
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            timeout=10,
+        )
+        self.assertEqual(proc.returncode, 7)
+        self.assertLess(time.time() - started, 5)
+
+
 class _Sidecar:
     def __init__(self, data_dir: str) -> None:
         env = dict(os.environ)
@@ -396,6 +417,7 @@ class SidecarEndToEndTests(unittest.TestCase):
             "limit": "2500",
             "tp": "2400",
             "sl": "2550",
+            "sidebar_collapsed": True,
             "unknown_field": "dropped",
         }
         self.assertTrue(
@@ -404,6 +426,7 @@ class SidecarEndToEndTests(unittest.TestCase):
         loaded = self.sidecar.rpc("settings.window_state.get")["result"]["state"]
         self.assertEqual(loaded["coin"], "ETH")
         self.assertEqual(loaded["favorites"], ["BTC", "ETH"])
+        self.assertIs(loaded["sidebar_collapsed"], True)
         self.assertNotIn("unknown_field", loaded)
 
         self.assertTrue(

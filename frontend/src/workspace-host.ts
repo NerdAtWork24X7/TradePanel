@@ -14,6 +14,7 @@ export interface WorkspaceHandlers {
   positionDrawing(direction: string, entry: number, tp: number, sl: number): void;
   configRequested(): void;
   toggleTopBar(): void;
+  toggleFullscreen(): void;
   fullscreen(enabled: boolean): void;
   ready(): void;
   failed(message: string): void;
@@ -123,6 +124,10 @@ export class WorkspaceHost {
     this.send("setActive", [active]);
   }
 
+  setFullscreenState(enabled: boolean): void {
+    this.send("setFullscreenState", [enabled]);
+  }
+
   shutdown(): void {
     this.send("shutdown", []);
     window.removeEventListener("message", this.onMessage);
@@ -168,6 +173,9 @@ export class WorkspaceHost {
         break;
       case "toggleTopBar":
         this.handlers.toggleTopBar();
+        break;
+      case "toggleFullscreen":
+        this.handlers.toggleFullscreen();
         break;
       case "fullscreen":
         this.handlers.fullscreen(Boolean(payload[0]));

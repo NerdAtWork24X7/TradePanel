@@ -40,6 +40,7 @@ function createHarness() {
     centerFocused(...args) { wsCalls.push(["centerFocused", args]); },
     setIndicatorConfig(...args) { wsCalls.push(["setIndicatorConfig", args]); },
     setActive(...args) { wsCalls.push(["setActive", args]); },
+    setFullscreenState(...args) { wsCalls.push(["setFullscreenState", args]); },
     shutdown(...args) { wsCalls.push(["shutdown", args]); }
   };
   const documentObject = {
@@ -167,6 +168,18 @@ test("workspace signals become typed host events", async () => {
   assert.equal(events.at(-3).message.event, "configRequested");
   assert.equal(events.at(-2).message.event, "toggleTopBar");
   assert.deepEqual(plain(events.at(-1).message.payload), ["hello"]);
+});
+
+test("fullscreen toggles use the bridge and sync state back", async () => {
+  const harness = createHarness();
+  await harness.boot();
+  const stub = harness.windowObject.__WS_STUB__;
+  stub.toggleFullscreen();
+  const event = harness.posted.filter((entry) => entry.message.type === "event").at(-1).message;
+  assert.equal(event.event, "toggleFullscreen");
+
+  harness.postToPage({ __ws: 1, type: "host", cmd: "setFullscreenState", payload: [true] });
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.wsCalls.at(-1))), ["setFullscreenState", [true]]);
 });
 
 test("host commands reach the workspace API and are queued until boot", async () => {

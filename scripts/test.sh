@@ -11,7 +11,7 @@ echo "== Chart synchronisation tests =="
 node --test tests/chart_sync.test.mjs
 
 echo "== Workspace bridge adapter tests =="
-node --test frontend/tests/tauri_bridge.test.mjs
+node --test frontend/tests/*.test.mjs
 
 echo "== Frontend typecheck + production build =="
 npm --prefix frontend run typecheck

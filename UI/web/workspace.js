@@ -31,7 +31,7 @@
         '8': { cols: 4, rows: 2, label: '8 charts (4x2)' },
         'custom': { cols: 0, rows: 0, label: 'Custom' }
     };
-    var GROUP_COLORS = ['#FF5A3C', '#2962FF', '#F5C400', '#10B981', '#A855F7', '#06B6D4'];
+    var GROUP_COLORS = ['#e3b24f', '#6aa2f0', '#ffd43b', '#83cf9c', '#ad8cf2', '#7fd4d4'];
     var DEFAULT_SLOTS = [
         ['binance', 'BTC/USDT', '5m'], ['bybit', 'BTC/USDT', '5m'],
         ['binance', 'ETH/USDT', '15m'], ['okx', 'SOL/USDT', '1h'],
@@ -56,7 +56,7 @@
         session_london: { label: 'London session', group: 'Sessions', color: '#7B68EE' },
         session_ny_am: { label: 'NY AM session', group: 'Sessions', color: '#FF6347' },
         session_ny_pm: { label: 'NY PM session', group: 'Sessions', color: '#00CED1' },
-        fvg: { label: 'Fair Value Gap', group: 'Advanced', color: '#F5C400' },
+        fvg: { label: 'Fair Value Gap', group: 'Advanced', color: '#ffd43b' },
         ribbon: { label: 'MA Ribbon', group: 'Advanced', color: '#2196F3' },
         vp: { label: 'Volume Profile', group: 'Advanced', color: '#60A5FA' },
         daily_vp: { label: 'Daily VP', group: 'Advanced', color: '#38BDF8' },
@@ -93,14 +93,15 @@
         saveQueued: false,
         shuttingDown: false,
         active: true,
-        prefs: { favorites: [], recent: [] },
+        prefs: { recent: [] },
         indicatorConfig: {},
         modal: null,
         menu: null,
         menuAnchor: null,
         dragChartId: null,
         drawDrag: null,
-        statusTimer: null
+        statusTimer: null,
+        fullscreenOn: false
     };
     window.WS = WS;
 
@@ -282,7 +283,6 @@
             var raw = localStorage.getItem(PREFS_KEY);
             if (raw) {
                 var parsed = JSON.parse(raw);
-                if (parsed && Array.isArray(parsed.favorites)) WS.prefs.favorites = parsed.favorites.slice(0, 40);
                 if (parsed && Array.isArray(parsed.recent)) WS.prefs.recent = parsed.recent.slice(0, 12);
             }
         } catch (err) { /* storage may be unavailable */ }
@@ -299,14 +299,6 @@
         WS.prefs.recent = WS.prefs.recent.filter(function (k) { return k !== key; });
         WS.prefs.recent.unshift(key);
         WS.prefs.recent = WS.prefs.recent.slice(0, 10);
-        savePrefs();
-    }
-
-    function toggleFavorite(key) {
-        var idx = WS.prefs.favorites.indexOf(key);
-        if (idx >= 0) WS.prefs.favorites.splice(idx, 1);
-        else WS.prefs.favorites.unshift(key);
-        WS.prefs.favorites = WS.prefs.favorites.slice(0, 40);
         savePrefs();
     }
 
@@ -499,33 +491,45 @@
         var tools = el('div', 'panel-tools');
         var indBtn = el('button', 'icon-btn');
         indBtn.type = 'button';
+        indBtn.dataset.action = 'indicators';
         indBtn.title = 'Indicators';
         indBtn.setAttribute('aria-label', 'Indicators');
         indBtn.appendChild(panelIcon(['M4 18V9M9 18V5M14 18v-6M19 18v-9']));
         var refBtn = el('button', 'icon-btn');
         refBtn.type = 'button';
+        refBtn.dataset.action = 'reference';
         refBtn.title = 'Price-scale reference point';
         refBtn.setAttribute('aria-label', 'Price-scale reference point');
         refBtn.appendChild(panelIcon(['M12 3v18', 'M6 7h12', 'M8 17h8']));
         refBtn.style.display = 'none';
         var drawBtn = el('button', 'icon-btn');
         drawBtn.type = 'button';
+        drawBtn.dataset.action = 'draw';
         drawBtn.title = 'Drawing tools';
         drawBtn.setAttribute('aria-label', 'Drawing tools');
         drawBtn.appendChild(panelIcon(['M4 20l5-1 9-9-3-3-9 9-2 4z', 'M14.5 5.5l3 3']));
+        var statsBtn = el('button', 'icon-btn');
+        statsBtn.type = 'button';
+        statsBtn.dataset.action = 'stats';
+        statsBtn.dataset.statsToggle = '1';
+        entry.statsButtons = [statsBtn];
+        syncStatsButtons(entry);
         var maxBtn = el('button', 'icon-btn');
         maxBtn.type = 'button';
+        maxBtn.dataset.action = 'maximize';
         maxBtn.title = 'Maximize / restore';
         maxBtn.setAttribute('aria-label', 'Maximize or restore');
         maxBtn.appendChild(panelIcon(['M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5']));
         var closeBtn = el('button', 'icon-btn');
         closeBtn.type = 'button';
+        closeBtn.dataset.action = 'close';
         closeBtn.title = 'Remove chart';
         closeBtn.setAttribute('aria-label', 'Remove chart');
         closeBtn.appendChild(panelIcon(['M6 6l12 12M18 6L6 18']));
         tools.appendChild(indBtn);
         tools.appendChild(refBtn);
         tools.appendChild(drawBtn);
+        tools.appendChild(statsBtn);
         tools.appendChild(maxBtn);
         tools.appendChild(closeBtn);
         head.appendChild(tools);
@@ -616,6 +620,32 @@
         return panel;
     }
 
+    function statsToggleIcon(visible) {
+        return visible
+            ? ['M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z',
+               'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z']
+            : ['M3 3l18 18',
+               'M10.6 6.1A10.9 10.9 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.5 3.9',
+               'M6.6 6.7A17.4 17.4 0 0 0 2 12s3.6 6 10 6a10.6 10.6 0 0 0 4.2-.9'];
+    }
+
+    function syncStatsButtons(entry) {
+        var visible = entry.posSettings.showStats !== false;
+        (entry.statsButtons || []).forEach(function (btn) {
+            btn.setAttribute('aria-pressed', String(visible));
+            btn.title = visible ? 'Hide position stats card' : 'Show position stats card';
+            btn.setAttribute('aria-label', btn.title);
+            btn.replaceChildren(panelIcon(statsToggleIcon(visible)));
+        });
+    }
+
+    function togglePositionStats(entry) {
+        entry.posSettings.showStats = entry.posSettings.showStats === false;
+        savePositionSettings(entry);
+        syncStatsButtons(entry);
+        renderDrawings(entry);
+    }
+
     function buildDrawRail(entry) {
         var rail = el('div', 'draw-rail');
         var icons = {
@@ -651,6 +681,14 @@
             'M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.9 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.54 15a1.7 1.7 0 0 0-1.56-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.7 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.54a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.46 9v.09a1.7 1.7 0 0 0 1.56 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z']));
         gear.addEventListener('click', function () { openPositionSettings(entry); });
         rail.appendChild(gear);
+        var railStatsBtn = el('button');
+        railStatsBtn.type = 'button';
+        railStatsBtn.dataset.statsToggle = '1';
+        railStatsBtn.addEventListener('click', function () { togglePositionStats(entry); });
+        entry.statsButtons = entry.statsButtons || [];
+        entry.statsButtons.push(railStatsBtn);
+        syncStatsButtons(entry);
+        rail.appendChild(railStatsBtn);
         var clear = el('button');
         clear.type = 'button';
         clear.title = 'Clear all drawings on this chart';
@@ -707,14 +745,18 @@
             panel.classList.remove('drag-over');
         });
 
-        entry.head.querySelectorAll('.panel-tools .icon-btn').forEach(function (btn, idx) {
+        entry.head.querySelectorAll('.panel-tools .icon-btn').forEach(function (btn) {
             btn.addEventListener('click', function (ev) {
                 ev.stopPropagation();
-                if (idx === 0) openIndicatorModal(entry);
-                else if (idx === 1) openReferenceMenu(entry, btn);
-                else if (idx === 2) toggleRail(entry);
-                else if (idx === 3) toggleMaximize(entry);
-                else removeChart(entry);
+                switch (btn.dataset.action) {
+                    case 'indicators': openIndicatorModal(entry); break;
+                    case 'reference': openReferenceMenu(entry, btn); break;
+                    case 'draw': toggleRail(entry); break;
+                    case 'stats': togglePositionStats(entry); break;
+                    case 'maximize': toggleMaximize(entry); break;
+                    case 'close': removeChart(entry); break;
+                    default: break;
+                }
             });
         });
 
@@ -738,6 +780,98 @@
         wireDrawingCanvas(entry);
     }
 
+    /* ── Theme ───────────────────────────────────────────────────────────────
+       Pi Scope tokens in workspace.html are the single source of truth; the
+       canvas needs concrete colours, so they are cached here and re-read when
+       the shell toggles the theme (localStorage `tp-theme`, same origin). */
+    function readTheme() {
+        var cs = window.getComputedStyle(document.documentElement);
+        var pick = function (name, fallback) {
+            var value = cs.getPropertyValue(name);
+            value = value ? value.trim() : '';
+            return value || fallback;
+        };
+        THEME = {
+            bg: pick('--chart-bg', '#1c1c1b'),
+            panel: pick('--panel', '#1a1a19'),
+            text: pick('--chart-text', '#b1b0a7'),
+            muted: pick('--chart-muted', '#a09f95'),
+            ink: pick('--chart-ink', '#f3f1e9'),
+            grid: pick('--chart-grid', 'rgba(255,255,255,0.045)'),
+            crosshair: pick('--chart-crosshair', '#6f6e66'),
+            border: pick('--chart-border', '#3b3b36'),
+            up: pick('--chart-up', '#83cf9c'),
+            down: pick('--chart-down', '#ff9e96'),
+            upRgb: pick('--chart-up-rgb', '131, 207, 156'),
+            downRgb: pick('--chart-down-rgb', '255, 158, 150'),
+            accent: pick('--accent', '#ffd43b'),
+            accentRgb: pick('--accent-rgb', '255, 212, 59')
+        };
+    }
+    var THEME = {};
+    readTheme();
+
+    function rgbaOf(name, alpha) {
+        return 'rgba(' + THEME[name] + ',' + alpha + ')';
+    }
+
+    function volumeAlpha() {
+        return currentTheme() === 'light' ? 0.45 : 0.32;
+    }
+
+    function themeOptions() {
+        return {
+            layout: {
+                background: { type: 'solid', color: THEME.bg },
+                textColor: THEME.text,
+                fontSize: 11,
+                fontFamily: "'MesloLGS NFM', 'JetBrains Mono', ui-monospace, monospace"
+            },
+            grid: {
+                vertLines: { color: THEME.grid },
+                horzLines: { color: THEME.grid }
+            },
+            crosshair: {
+                vertLine: { color: THEME.crosshair, width: 1, style: window.LightweightCharts.LineStyle.Dashed, labelBackgroundColor: THEME.accent },
+                horzLine: { color: THEME.crosshair, width: 1, style: window.LightweightCharts.LineStyle.Dashed, labelBackgroundColor: THEME.accent }
+            },
+            rightPriceScale: { borderColor: THEME.border },
+            timeScale: { borderColor: THEME.border }
+        };
+    }
+
+    /** Series colours per chart style, derived from the active theme. */
+    function seriesTheme(type) {
+        if (type === 'hollow') {
+            return {
+                upColor: THEME.bg, downColor: THEME.down,
+                borderUpColor: THEME.up, borderDownColor: THEME.down,
+                wickUpColor: THEME.up, wickDownColor: THEME.down,
+                borderVisible: true
+            };
+        }
+        if (type === 'bar') return { upColor: THEME.up, downColor: THEME.down, thinBars: false };
+        if (type === 'line') return { color: THEME.accent, lineWidth: 2 };
+        if (type === 'area') {
+            return {
+                lineColor: THEME.accent, lineWidth: 2,
+                topColor: rgbaOf('accentRgb', 0.24), bottomColor: rgbaOf('accentRgb', 0.02)
+            };
+        }
+        if (type === 'baseline') {
+            return {
+                topLineColor: THEME.up, bottomLineColor: THEME.down,
+                topFillColor1: rgbaOf('upRgb', 0.22), topFillColor2: rgbaOf('upRgb', 0.02),
+                bottomFillColor1: rgbaOf('downRgb', 0.02), bottomFillColor2: rgbaOf('downRgb', 0.22)
+            };
+        }
+        return {
+            upColor: THEME.up, downColor: THEME.down,
+            borderUpColor: THEME.up, borderDownColor: THEME.down,
+            wickUpColor: THEME.up, wickDownColor: THEME.down
+        };
+    }
+
     /* ── Chart lifecycle ──────────────────────────────────────────────────── */
 
     // Right-scale padding; temporarily zeroed while a vertical price drag is
@@ -745,37 +879,20 @@
     var PRICE_SCALE_MARGINS = { top: 0.08, bottom: 0.22 };
 
     function chartOptions() {
-        return {
-            layout: {
-                background: { type: 'solid', color: '#0A0A0A' },
-                textColor: '#A1A1AA',
-                fontSize: 11,
-                fontFamily: 'JetBrains Mono, Satoshi, ui-monospace, monospace'
-            },
-            grid: {
-                vertLines: { color: 'rgba(255,255,255,0.035)' },
-                horzLines: { color: 'rgba(255,255,255,0.035)' }
-            },
-            crosshair: {
-                mode: window.LightweightCharts.CrosshairMode.Normal,
-                vertLine: { color: '#52525B', width: 1, style: window.LightweightCharts.LineStyle.Dashed, labelBackgroundColor: '#F5C400' },
-                horzLine: { color: '#52525B', width: 1, style: window.LightweightCharts.LineStyle.Dashed, labelBackgroundColor: '#F5C400' }
-            },
-            rightPriceScale: {
-                borderColor: '#2A2A2A',
-                scaleMargins: { top: PRICE_SCALE_MARGINS.top, bottom: PRICE_SCALE_MARGINS.bottom },
-                minimumWidth: 72
-            },
-            timeScale: {
-                borderColor: '#2A2A2A',
-                timeVisible: true,
-                secondsVisible: false,
-                rightOffset: 6,
-                barSpacing: 7
-            },
-            handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-            handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true }
+        var options = themeOptions();
+        options.crosshair.mode = window.LightweightCharts.CrosshairMode.Normal;
+        options.rightPriceScale.scaleMargins = {
+            top: PRICE_SCALE_MARGINS.top,
+            bottom: PRICE_SCALE_MARGINS.bottom
         };
+        options.rightPriceScale.minimumWidth = 72;
+        options.timeScale.timeVisible = true;
+        options.timeScale.secondsVisible = false;
+        options.timeScale.rightOffset = 6;
+        options.timeScale.barSpacing = 7;
+        options.handleScroll = { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false };
+        options.handleScale = { mouseWheel: true, pinch: true, axisPressedMouseMove: true };
+        return options;
     }
 
     function makeEntry(cfg) {
@@ -922,46 +1039,18 @@
 
     function createMainSeries(entry, type) {
         var chart = entry.chart;
-        var cfg = entry.config;
         var opts = {
             priceLineVisible: false,
             lastValueVisible: false,
             crosshairMarkerVisible: true
         };
         var series;
-        if (type === 'hollow') {
-            series = chart.addCandlestickSeries(Object.assign({}, opts, {
-                upColor: '#0A0A0A', downColor: '#DC2626',
-                borderUpColor: '#10B981', borderDownColor: '#DC2626',
-                wickUpColor: '#10B981', wickDownColor: '#DC2626',
-                borderVisible: true
-            }));
-        } else if (type === 'bar') {
-            series = chart.addBarSeries(Object.assign({}, opts, {
-                upColor: '#10B981', downColor: '#DC2626', thinBars: false
-            }));
-        } else if (type === 'line') {
-            series = chart.addLineSeries(Object.assign({}, opts, {
-                color: '#F5C400', lineWidth: 2
-            }));
-        } else if (type === 'area') {
-            series = chart.addAreaSeries(Object.assign({}, opts, {
-                lineColor: '#F5C400', lineWidth: 2,
-                topColor: 'rgba(245,196,0,0.24)', bottomColor: 'rgba(245,196,0,0.02)'
-            }));
-        } else if (type === 'baseline') {
-            series = chart.addBaselineSeries(Object.assign({}, opts, {
-                topLineColor: '#10B981', bottomLineColor: '#DC2626',
-                topFillColor1: 'rgba(16,185,129,0.22)', topFillColor2: 'rgba(16,185,129,0.02)',
-                bottomFillColor1: 'rgba(220,38,38,0.02)', bottomFillColor2: 'rgba(220,38,38,0.22)'
-            }));
-        } else {
-            series = chart.addCandlestickSeries(Object.assign({}, opts, {
-                upColor: '#10B981', downColor: '#DC2626',
-                borderUpColor: '#10B981', borderDownColor: '#DC2626',
-                wickUpColor: '#10B981', wickDownColor: '#DC2626'
-            }));
-        }
+        var seriesOpts = Object.assign({}, opts, seriesTheme(type));
+        if (type === 'bar') series = chart.addBarSeries(seriesOpts);
+        else if (type === 'line') series = chart.addLineSeries(seriesOpts);
+        else if (type === 'area') series = chart.addAreaSeries(seriesOpts);
+        else if (type === 'baseline') series = chart.addBaselineSeries(seriesOpts);
+        else series = chart.addCandlestickSeries(seriesOpts);
         series.applyOptions({ priceFormat: priceFormatFor(entry) });
         return series;
     }
@@ -1337,7 +1426,7 @@
             return {
                 time: c.time,
                 value: c.volume,
-                color: c.close >= c.open ? 'rgba(16,185,129,0.32)' : 'rgba(220,38,38,0.32)'
+                color: c.close >= c.open ? rgbaOf('upRgb', volumeAlpha()) : rgbaOf('downRgb', volumeAlpha())
             };
         });
     }
@@ -1407,6 +1496,7 @@
 
     function showStrip(entry, candle) {
         var div = entry.ohlcStrip;
+        entry.stripCandle = candle;
         div.innerHTML = '';
         var fields = [
             ['O', candle.open], ['H', candle.high], ['L', candle.low], ['C', candle.close],
@@ -1416,7 +1506,7 @@
             var span = el('span');
             span.appendChild(document.createTextNode(pair[0] + ' '));
             var b = el('b', '', pair[0] === 'V' ? compactNumber(pair[1]) : formatPrice(pair[1], entry.precision));
-            if (pair[0] !== 'V') b.style.color = candle.close >= candle.open ? '#10B981' : '#DC2626';
+            if (pair[0] !== 'V') b.style.color = candle.close >= candle.open ? THEME.up : THEME.down;
             span.appendChild(b);
             div.appendChild(span);
         });
@@ -1604,7 +1694,7 @@
             var rawLast = entry.candles[entry.candles.length - 1];
             entry.volumeSeries.update({
                 time: rawLast.time, value: rawLast.volume,
-                color: rawLast.close >= rawLast.open ? 'rgba(16,185,129,0.32)' : 'rgba(220,38,38,0.32)'
+                color: rawLast.close >= rawLast.open ? rgbaOf('upRgb', volumeAlpha()) : rgbaOf('downRgb', volumeAlpha())
             });
         } catch (err) {
             console.warn('tick update failed, rebuilding', err);
@@ -1942,7 +2032,7 @@
             if (!conf || !conf.enabled) return;
             var span = el('span');
             span.style.setProperty('--lite', IND_DEFS[key].color);
-            span.style.borderColor = 'rgba(255,255,255,0.08)';
+            span.style.borderColor = 'var(--border)';
             span.appendChild(document.createTextNode(IND_DEFS[key].label));
             if (conf.length) span.appendChild(el('b', '', ' ' + conf.length));
             else if (key === 'macd') span.appendChild(el('b', '', ' ' + (conf.fast || 12) + '/' + (conf.slow || 26)));
@@ -2017,9 +2107,9 @@
         var ind = entry.ind[key];
         var ts = entry.chart.timeScale();
         var pad = 6;
-        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.strokeStyle = THEME.grid;
         ctx.beginPath(); ctx.moveTo(0, top + 0.5); ctx.lineTo(plotW, top + 0.5); ctx.stroke();
-        ctx.fillStyle = '#52525B';
+        ctx.fillStyle = THEME.crosshair;
         ctx.fillText(key.toUpperCase(), 6, top + 9);
 
         function xs(time) { var x = ts.timeToCoordinate(time); return x == null ? null : x; }
@@ -2042,11 +2132,11 @@
             }
             ctx.stroke();
             [30, 70].forEach(function (level) {
-                ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+                ctx.strokeStyle = THEME.grid;
                 ctx.setLineDash([3, 4]);
                 ctx.beginPath(); ctx.moveTo(0, yFor(level)); ctx.lineTo(plotW, yFor(level)); ctx.stroke();
                 ctx.setLineDash([]);
-                ctx.fillStyle = '#3F3F46';
+                ctx.fillStyle = THEME.muted;
                 ctx.fillText(String(level), plotW + 4, yFor(level));
             });
         } else if (key === 'macd') {
@@ -2057,13 +2147,13 @@
             var min = Math.min.apply(null, nums.concat([-0.0001]));
             var y = function (v) { return top + pad + (1 - (v - min) / (max - min || 1)) * (height - pad * 2); };
             var zero = y(0);
-            ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+            ctx.strokeStyle = THEME.grid;
             ctx.beginPath(); ctx.moveTo(0, zero); ctx.lineTo(plotW, zero); ctx.stroke();
             for (var j = 0; j < data.hist.length; j++) {
                 if (data.hist[j] == null) continue;
                 var hx = xs(times[j]);
                 if (hx == null || hx < -5 || hx > plotW + 5) continue;
-                ctx.fillStyle = data.hist[j] >= 0 ? 'rgba(16,185,129,0.35)' : 'rgba(220,38,38,0.35)';
+                ctx.fillStyle = data.hist[j] >= 0 ? rgbaOf('upRgb', 0.35) : rgbaOf('downRgb', 0.35);
                 var yTop = data.hist[j] >= 0 ? y(data.hist[j]) : zero;
                 ctx.fillRect(hx - 1.5, yTop, 3, Math.abs(y(data.hist[j]) - zero));
             }
@@ -2088,11 +2178,11 @@
             var levels = adxData.levels || [25];
             var val = function (v) { return top + pad + (1 - Math.max(0, Math.min(100, v)) / 100) * (height - pad * 2); };
             levels.forEach(function (level) {
-                ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+                ctx.strokeStyle = THEME.grid;
                 ctx.setLineDash([3, 4]);
                 ctx.beginPath(); ctx.moveTo(0, val(level)); ctx.lineTo(plotW, val(level)); ctx.stroke();
                 ctx.setLineDash([]);
-                ctx.fillStyle = '#3F3F46';
+                ctx.fillStyle = THEME.muted;
                 ctx.fillText(String(level), plotW + 4, val(level));
             });
             function drawAdxLine(points, color, width) {
@@ -2133,7 +2223,7 @@
             }
             ctx.stroke();
             if (maxA) {
-                ctx.fillStyle = '#3F3F46';
+                ctx.fillStyle = THEME.muted;
                 ctx.fillText(maxA.toFixed(2), plotW + 4, top + 10);
             }
         }
@@ -2643,21 +2733,11 @@
                 return;
             }
             state.results.forEach(function (item) {
-                var key = prefKey(state.exchange, state.market, item.symbol);
                 var row = el('button', 'sym-row');
                 row.type = 'button';
                 row.setAttribute('aria-selected', String(state.selected === item.symbol));
                 row.appendChild(el('span', '', item.symbol));
                 row.appendChild(el('span', '', item.native));
-                var star = el('span', 'fav' + (WS.prefs.favorites.indexOf(key) >= 0 ? ' on' : ''), '★');
-                star.title = 'Toggle favourite';
-                star.addEventListener('click', function (ev) {
-                    ev.stopPropagation();
-                    toggleFavorite(key);
-                    renderChips();
-                    renderResults();
-                });
-                row.appendChild(star);
                 row.addEventListener('click', function () {
                     state.selected = item.symbol;
                     renderResults();
@@ -2669,24 +2749,16 @@
 
         function renderChips() {
             chips.innerHTML = '';
-            var recent = WS.prefs.recent.slice(0, 6);
-            var favs = WS.prefs.favorites.slice(0, 8);
-            var shown = [];
-            recent.forEach(function (key) {
+            var shown = WS.prefs.recent.slice(0, 6).map(function (key) {
                 var parts = key.split('|');
-                shown.push({ key: key, label: parts[0] + ' · ' + parts[2], fav: false });
-            });
-            favs.forEach(function (key) {
-                if (shown.some(function (s) { return s.key === key; })) return;
-                var parts = key.split('|');
-                shown.push({ key: key, label: '★ ' + parts[2], fav: true });
+                return { key: key, label: parts[0] + ' · ' + parts[2] };
             });
             if (!shown.length) return;
-            var label = el('div', 'modal-sub', 'Recent / favourites');
+            var label = el('div', 'modal-sub', 'Recent');
             label.style.width = '100%';
             chips.appendChild(label);
             shown.forEach(function (item) {
-                var btn = el('button', 'mini-chip' + (item.fav ? ' fav' : ''), item.label);
+                var btn = el('button', 'mini-chip', item.label);
                 btn.type = 'button';
                 btn.addEventListener('click', function () {
                     var parts = item.key.split('|');
@@ -3740,6 +3812,46 @@
         }
     }
 
+    /** Re-paint every live chart after the shell switches light/dark. */
+    function applyTheme() {
+        readTheme();
+        Object.keys(WS.charts).forEach(function (id) {
+            var entry = WS.charts[id];
+            if (!entry || entry.destroyed || !entry.chart) return;
+            try {
+                entry.chart.applyOptions(themeOptions());
+                if (entry.mainSeries) entry.mainSeries.applyOptions(seriesTheme(entry.config.chartType));
+                // Volume bar colours are baked per point, so repaint the series.
+                if (entry.volumeSeries && entry.candles && entry.candles.length) {
+                    entry.volumeSeries.setData(volumeData(entry));
+                }
+                if (entry.legend) renderLegend(entry);
+                if (entry.stripCandle && entry.ohlcStrip.classList.contains('show')) {
+                    showStrip(entry, entry.stripCandle);
+                }
+                scheduleDraw(entry);
+            } catch (err) { /* a chart mid-teardown must not break the switch */ }
+        });
+    }
+
+    function currentTheme() {
+        return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    }
+
+    function syncTheme(theme) {
+        if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
+        else document.documentElement.removeAttribute('data-theme');
+        applyTheme();
+    }
+
+    // The shell writes `tp-theme`; same-origin storage events reach this frame.
+    window.addEventListener('storage', function (event) {
+        if (event.key !== 'tp-theme') return;
+        syncTheme(event.newValue === 'light' ? 'light' : 'dark');
+    });
+    WS.setTheme = syncTheme;
+    WS.currentTheme = currentTheme;
+
     function scheduledDraw(entry) {
         if (entry.rafId) return;
         entry.rafId = requestAnimationFrame(function () {
@@ -3820,7 +3932,7 @@
     }
 
     function drawShape(entry, ctx, d, box, selected) {
-        var color = selected ? '#F5C400' : (d.color || '#A1A1AA');
+        var color = selected ? THEME.accent : (d.color || THEME.muted);
         ctx.strokeStyle = color;
         ctx.fillStyle = color;
         ctx.lineWidth = selected ? 1.6 : 1.1;
@@ -3846,11 +3958,11 @@
         if (d.tool === 'text') {
             if (x0 == null || y0 == null) return;
             ctx.font = '11px "JetBrains Mono", monospace';
-            ctx.fillStyle = selected ? '#F5C400' : '#FFFFFF';
+            ctx.fillStyle = selected ? THEME.accent : THEME.ink;
             ctx.fillText(d.text || 'Text', x0 + 4, y0 - 4);
             if (selected) {
                 var m = ctx.measureText(d.text || 'Text');
-                ctx.strokeStyle = '#F5C400';
+                ctx.strokeStyle = THEME.accent;
                 ctx.strokeRect(x0 + 1, y0 - 15, m.width + 6, 16);
                 handleDot(ctx, x0, y0);
             }
@@ -3881,7 +3993,7 @@
             var lastLabelY = null;
             levels.forEach(function (level) {
                 var y = y0 + (y1 - y0) * level;
-                ctx.strokeStyle = level === 0 || level === 1 ? color : 'rgba(161,161,170,0.55)';
+                ctx.strokeStyle = level === 0 || level === 1 ? color : THEME.muted;
                 ctx.setLineDash(level === 0 || level === 1 ? [] : [3, 3]);
                 ctx.beginPath(); ctx.moveTo(Math.min(x0, x1), y); ctx.lineTo(Math.max(x0, x1), y); ctx.stroke();
                 ctx.setLineDash([]);
@@ -3889,7 +4001,7 @@
                 // Avoid label pile-up on shallow ranges.
                 if (lastLabelY == null || Math.abs(y - lastLabelY) >= 11) {
                     lastLabelY = y;
-                    ctx.fillStyle = selected ? '#F5C400' : '#A1A1AA';
+                    ctx.fillStyle = selected ? THEME.accent : THEME.muted;
                     ctx.fillText(level + ' (' + formatPrice(price, entry.precision) + ')', Math.min(x0, x1) + 3, y - 3);
                 }
             });
@@ -3898,8 +4010,8 @@
     }
 
     function handleDot(ctx, x, y) {
-        ctx.fillStyle = '#0A0A0A';
-        ctx.strokeStyle = '#F5C400';
+        ctx.fillStyle = THEME.bg;
+        ctx.strokeStyle = THEME.accent;
         ctx.lineWidth = 1.4;
         ctx.beginPath();
         ctx.arc(x, y, 3.2, 0, Math.PI * 2);
@@ -3946,7 +4058,8 @@
             acct: Number(saved.acct) || 10000,
             risk: Number(saved.risk) || 1,
             lev: Number(saved.lev) || 10,
-            widthPx: Number(saved.widthPx) || Number(saved.widthBars) * 6 || 140
+            widthPx: Number(saved.widthPx) || Number(saved.widthBars) * 6 || 140,
+            showStats: saved.showStats !== false
         };
     }
 
@@ -3986,6 +4099,8 @@
         wrap.style.display = 'grid';
         wrap.style.gridTemplateColumns = '1fr 1fr';
         wrap.style.gap = '10px';
+        // `showStats` is toggled from the drawing rail; keep Apply from
+        // clobbering it (only numeric inputs are read below).
         function field(label, key, value, step) {
             var box = el('div', 'field');
             box.appendChild(el('label', '', label));
@@ -4047,13 +4162,20 @@
             if (x1 < -20 || x0 > box.w + 20) return;
             var selected = pos.id === entry.selectedPosition;
             var long = pos.dir === 'long';
-            var color = long ? '#22C55E' : '#EF4444';
+            var color = long ? THEME.up : THEME.down;
             var top = Math.min(yEntry, yTp, ySl);
             var bottom = Math.max(yEntry, yTp, ySl);
-            ctx.fillStyle = long ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)';
-            ctx.fillRect(x0, top, Math.max(1, x1 - x0), Math.max(1, bottom - top));
+            var boxW = Math.max(1, x1 - x0);
+            // Profit zone (entry→TP) is always green, risk zone (entry→SL)
+            // always red — for shorts the zones simply swap sides.
+            ctx.fillStyle = rgbaOf('upRgb', 0.10);
+            ctx.fillRect(x0, Math.min(yEntry, yTp), boxW,
+                Math.max(1, Math.abs(yTp - yEntry)));
+            ctx.fillStyle = rgbaOf('downRgb', 0.10);
+            ctx.fillRect(x0, Math.min(yEntry, ySl), boxW,
+                Math.max(1, Math.abs(ySl - yEntry)));
             if (selected) {
-                ctx.strokeStyle = 'rgba(245,196,0,0.65)';
+                ctx.strokeStyle = rgbaOf('accentRgb', 0.65);
                 ctx.lineWidth = 1;
                 ctx.strokeRect(x0 + 0.5, top + 0.5, Math.max(1, x1 - x0 - 1), Math.max(1, bottom - top - 1));
             }
@@ -4071,20 +4193,20 @@
                 var text = label + ' ' + formatPrice(price, entry.precision) + (offscreen ? ' \u25B2' : '');
                 var width = ctx.measureText(text).width + 8;
                 var tx = Math.min(x1 + 4, box.w - width);
-                ctx.fillStyle = 'rgba(9,11,14,0.9)';
+                ctx.fillStyle = THEME.bg;
                 ctx.fillRect(tx, y - 7, width, 12);
                 ctx.fillStyle = colorValue;
                 ctx.fillText(text, tx + 4, y + 2);
                 if (selected) handleDot(ctx, x0, y);
             }
-            level(yEntry, pos.entry, '#F5C400', false, 'ENTRY', entryOff);
-            level(yTp, pos.tp, '#22C55E', true, 'TP', tpOff);
-            level(ySl, pos.sl, '#EF4444', true, 'SL', slOff);
+            level(yEntry, pos.entry, THEME.accent, false, 'ENTRY', entryOff);
+            level(yTp, pos.tp, THEME.up, true, 'TP', tpOff);
+            level(ySl, pos.sl, THEME.down, true, 'SL', slOff);
             if (selected) {
-                ctx.fillStyle = '#F5C400';
+                ctx.fillStyle = THEME.accent;
                 ctx.fillRect(x1 - 1, top, 3, Math.max(2, bottom - top));
             }
-            if (selected) {
+            if (selected && entry.posSettings.showStats !== false) {
                 var stats = positionStats(entry, pos);
                 var lines = [
                     (long ? 'LONG' : 'SHORT') + '  ' + pos.entry.toFixed(entry.precision),
@@ -4097,14 +4219,14 @@
                 var cardW = 132, cardH = lines.length * 13 + 12;
                 var cardX = Math.min(Math.max(x0 + 8, 8), box.w - cardW - 8);
                 var cardY = Math.max(8, Math.min(yEntry - cardH - 10, box.h - cardH - 10));
-                ctx.fillStyle = 'rgba(14,17,22,0.95)';
-                ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+                ctx.fillStyle = THEME.panel;
+                ctx.strokeStyle = THEME.grid;
                 ctx.fillRect(cardX, cardY, cardW, cardH);
                 ctx.strokeRect(cardX + 0.5, cardY + 0.5, cardW - 1, cardH - 1);
                 ctx.font = '9px "JetBrains Mono", monospace';
                 ctx.fillStyle = color;
                 ctx.fillText(lines[0], cardX + 8, cardY + 13);
-                ctx.fillStyle = '#A6ADB8';
+                ctx.fillStyle = THEME.text;
                 for (var i = 1; i < lines.length; i++) {
                     ctx.fillText(lines[i], cardX + 8, cardY + 13 + i * 13);
                 }
@@ -4125,8 +4247,8 @@
         var ySl = yForPrice(entry, sl);
         if (x0 == null || yEntry == null || yTp == null || ySl == null) return;
         if (x1 == null || x1 < x0) x1 = x0 + 80;
-        var color = long ? '#22C55E' : '#EF4444';
-        ctx.fillStyle = long ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)';
+        var color = long ? THEME.up : THEME.down;
+        ctx.fillStyle = long ? rgbaOf('upRgb', 0.12) : rgbaOf('downRgb', 0.12);
         ctx.fillRect(x0, Math.min(yEntry, yTp, ySl), Math.max(1, x1 - x0),
             Math.max(1, Math.abs(ySl - yTp)));
         ctx.strokeStyle = color;
@@ -4138,7 +4260,7 @@
         ctx.font = '9px "JetBrains Mono", monospace';
         ctx.fillStyle = color;
         ctx.fillText(long ? 'LONG' : 'SHORT', x0 + 5, Math.min(yEntry, yTp) - 6);
-        ctx.fillStyle = '#F5C400';
+        ctx.fillStyle = THEME.accent;
         ctx.fillText('ENTRY ' + formatPrice(draft.entry, entry.precision), x0 + 5, yEntry - 3);
     }
 
@@ -4151,8 +4273,8 @@
         var y1 = yForPrice(entry, measure.end.price);
         if (x0 == null || x1 == null || y0 == null || y1 == null) return;
         var up = measure.end.price >= measure.start.price;
-        var color = up ? '#22C55E' : '#EF4444';
-        ctx.fillStyle = up ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)';
+        var color = up ? THEME.up : THEME.down;
+        ctx.fillStyle = up ? rgbaOf('upRgb', 0.10) : rgbaOf('downRgb', 0.10);
         ctx.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.4;
@@ -4168,7 +4290,7 @@
         var width = ctx.measureText(text).width + 12;
         var tx = Math.min((x0 + x1) / 2 + 8, box.w - width - 8);
         var ty = Math.max(10, Math.min((y0 + y1) / 2 - 10, box.h - 14));
-        ctx.fillStyle = 'rgba(14,17,22,0.94)';
+        ctx.fillStyle = THEME.panel;
         ctx.fillRect(tx, ty - 10, width, 16);
         ctx.fillStyle = color;
         ctx.fillText(text, tx + 6, ty + 1);
@@ -4400,7 +4522,7 @@
                 start: { time: time, price: price },
                 current: { time: time, price: price }
             };
-            entry.drawPreview = { id: 'preview', tool: entry.drawTool, points: [dragging.start, dragging.current], color: '#F5C400' };
+            entry.drawPreview = { id: 'preview', tool: entry.drawTool, points: [dragging.start, dragging.current], color: THEME.accent };
             renderDrawings(entry);
             void dragging;
         });
@@ -4444,7 +4566,7 @@
                 dragging.current = { time: t2, price: p2 };
                 entry.drawPreview = {
                     id: 'preview', tool: dragging.tool,
-                    points: [dragging.start, dragging.current], color: '#F5C400'
+                    points: [dragging.start, dragging.current], color: THEME.accent
                 };
                 renderDrawings(entry);
             }
@@ -4718,7 +4840,7 @@
             id: id,
             tool: drawing.tool,
             points: drawing.points,
-            color: '#A1A1AA',
+            color: THEME.muted,
             text: drawing.text || ''
         };
         entry.config.drawings.push(record);
@@ -5014,8 +5136,8 @@
             rows: [0.5, 0.5],
             charts: [],
             syncGroups: [
-                { id: 'g-red', name: 'Group A', color: '#FF5A3C', enabled: true, settings: clone(baseSettings) },
-                { id: 'g-blue', name: 'Group B', color: '#2962FF', enabled: true, settings: clone(baseSettings) }
+                { id: 'g-red', name: 'Group A', color: '#e3b24f', enabled: true, settings: clone(baseSettings) },
+                { id: 'g-blue', name: 'Group B', color: '#6aa2f0', enabled: true, settings: clone(baseSettings) }
             ],
             globalSettings: baseSettings,
             updatedAt: Date.now()
@@ -5129,6 +5251,16 @@
     }
 
     function toggleFullscreen() {
+        // Inside the Tauri shell, fullscreen the native window. HTML fullscreen
+        // would put the iframe above the shell and hide the trade sidebar.
+        if (Bridge.ready && Bridge.obj && typeof Bridge.obj.toggleFullscreen === 'function') {
+            Bridge.call('toggleFullscreen').catch(function () { browserFullscreen(); });
+            return;
+        }
+        browserFullscreen();
+    }
+
+    function browserFullscreen() {
         if (document.fullscreenElement) {
             document.exitFullscreen().catch(function () { /* ignore */ });
         } else if (document.documentElement.requestFullscreen) {
@@ -5138,11 +5270,17 @@
         }
     }
 
+    WS.setFullscreenState = function (enabled) {
+        WS.fullscreenOn = !!enabled;
+        updateFullscreenIcon();
+    };
+
     function updateFullscreenIcon() {
         var btn = $('#btn-fullscreen');
         if (!btn) return;
-        btn.title = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen (F11)';
-        btn.setAttribute('aria-pressed', String(!!document.fullscreenElement));
+        var on = WS.fullscreenOn || !!document.fullscreenElement;
+        btn.title = on ? 'Exit fullscreen' : 'Fullscreen (F11)';
+        btn.setAttribute('aria-pressed', String(on));
     }
 
     /* ── Boot ────────────────────────────────────────────────────────────── */

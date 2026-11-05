@@ -46,6 +46,9 @@ sudo apt install -y \
 # repository root
 npm install                 # Tauri CLI (dev dependency)
 npm --prefix frontend install   # Vite/TypeScript/@tauri-apps/api
+
+# or let the launcher do it:
+./start.sh
 ```
 
 The Python app environment (legacy Qt app and tests) is managed by uv:
@@ -90,24 +93,54 @@ Notes:
 ## 4. Development
 
 ```bash
-scripts/dev.sh
-# equivalent:
+./start.sh                  # deps + sidecar (if missing) + tauri dev
+./start.sh --rebuild-backend   # force a fresh PyInstaller sidecar first
+scripts/dev.sh              # same launcher without the toolchain checks
+```
+
+`./start.sh` is safe from any working directory: it installs `node_modules` when missing,
+builds `src-tauri/backend-dist/tradepanel-backend` when missing (or when
+`--rebuild-backend` is passed), then runs `tauri dev`. Arguments after `--` go to
+`tauri dev`, e.g. `./start.sh -- --no-watch`.
+
+Manual equivalent:
+
+```bash
 scripts/build-backend.sh
 npx tauri dev
 ```
 
 * `tauri dev` starts Vite on `http://localhost:5173`, then the Rust shell.
+* `custom-protocol` is a **default feature** (`src-tauri/Cargo.toml`) that is only
+  compiled into release builds; `tauri dev` runs `cargo run --no-default-features` so the
+  webview loads `devUrl` instead of the assets embedded in the binary. Keep it that way —
+  if it is added to `[dependencies]` unconditionally, `tauri dev` silently serves the last
+  compiled `frontend/dist` and frontend edits need a full rebuild.
 * `cargo run` **without** the Tauri CLI uses `devUrl`; start Vite yourself
   (`npm --prefix frontend run dev`).
 * `cargo build --release` embeds `frontend/dist` because the `custom-protocol` feature is
   enabled in `Cargo.toml`. Run `npm --prefix frontend run build` first.
-* Standalone snapshot of the old app remains available: `.venv/bin/python main.py`.
 
 ## 5. Linux release
 
 ```bash
-scripts/build-linux.sh
+./build.sh                    # AppImage + deb (targets from tauri.linux.conf.json)
+scripts/build-linux.sh        # thin wrapper over ./build.sh
 ```
+
+`./build.sh` options:
+
+| Flag | Effect |
+|---|---|
+| `--debug` | debug bundle instead of an optimised release build |
+| `--bundles=deb,appimage` | override the platform bundle targets |
+| `--skip-backend` | reuse the already staged sidecar (fails if it is missing) |
+| `--install` | force `npm ci` for the shell and the frontend |
+| `-- <args>` | forwarded to `tauri build` (e.g. `--no-bundle`, `--verbose`) |
+
+It builds the sidecar, prunes stale staging (`target/release/backend`,
+`target/release/bundle`, the pre-resource-mapping `tradepanel-backend` file), runs
+`tauri build`, then lists the produced artifacts.
 
 Outputs:
 
@@ -116,13 +149,10 @@ src-tauri/target/release/bundle/appimage/TradePanel_0.1.0_amd64.AppImage
 src-tauri/target/release/bundle/deb/TradePanel_0.1.0_amd64.deb
 ```
 
-The script removes `src-tauri/target/release/backend` and `bundle/` first: Tauri overlays
-resources and would otherwise keep obsolete files (for example a removed TBB backend).
-
 If AppImage bundling fails on a machine without FUSE, run:
 
 ```bash
-APPIMAGE_EXTRACT_AND_RUN=1 npx tauri build --bundles appimage
+APPIMAGE_EXTRACT_AND_RUN=1 ./build.sh --bundles=appimage --skip-backend
 ```
 
 Clean-install check (no Python installed required):
@@ -136,7 +166,11 @@ chmod +x TradePanel_0.1.0_amd64.AppImage
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
+# options: -SkipBackend  (reuse the staged sidecar)
+#          -Install      (force npm ci for shell and frontend)
 ```
+
+`build.sh` detects Git Bash/MSYS on Windows and delegates to this script.
 
 Outputs (NSIS):
 

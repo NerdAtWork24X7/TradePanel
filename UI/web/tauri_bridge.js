@@ -127,8 +127,13 @@
         onConfigRequested: function () {
             emit('configRequested', []);
         },
-        toggleTopBar: function () {
+        toggleTopBar: function (cb) {
             emit('toggleTopBar', []);
+            if (typeof cb === 'function') cb(stringify({ ok: true }));
+        },
+        toggleFullscreen: function (cb) {
+            emit('toggleFullscreen', []);
+            if (typeof cb === 'function') cb(stringify({ ok: true }));
         },
         debug: function (message) {
             emit('log', [String(message)]);

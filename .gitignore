@@ -64,3 +64,13 @@ desktop.ini
 tmp/
 
 
+
+# ── Tauri / frontend build artifacts ─────────────────────────────────────────
+node_modules/
+frontend/dist/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/backend-dist/
+backend/build/dist/
+backend/build/work/
+.venv-build/

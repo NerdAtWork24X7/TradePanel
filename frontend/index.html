@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>TradePanel</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#workspace-frame">Skip to charts</a>
+
+    <header class="shell-bar" id="shell-bar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div class="brand-text">
+          <strong>TradePanel</strong>
+          <span id="app-version" class="brand-version">terminal</span>
+        </div>
+      </div>
+
+      <section class="card instrument-card" aria-label="Instrument">
+        <div class="field">
+          <label for="coin">Coin</label>
+          <select id="coin" class="mono" aria-label="Coin"></select>
+        </div>
+        <div class="field compact">
+          <label for="tf">TF</label>
+          <select id="tf" class="mono" aria-label="Timeframe"></select>
+        </div>
+        <button id="center-chart" class="icon-btn" type="button" title="Center focused chart" aria-label="Center focused chart">⌂</button>
+        <button id="refresh-coins" class="ghost-btn" type="button" title="Refresh coin list from Hyperliquid + Binance">Refresh</button>
+        <label class="check" for="hyperliquid">
+          <input id="hyperliquid" type="checkbox" />
+          <span>Hyperliquid</span>
+        </label>
+        <button id="open-browser" class="ghost-btn" type="button" title="Open Hyperliquid trade page">Open Browser</button>
+      </section>
+
+      <section class="card trade-card" aria-label="Trade ticket">
+        <div class="ticket-grid">
+          <div class="field"><label for="qty">QTY</label><input id="qty" class="mono" inputmode="decimal" autocomplete="off" /></div>
+          <div class="field"><label for="risk">RISK</label><input id="risk" class="mono" inputmode="decimal" value="10" autocomplete="off" /></div>
+          <button id="direction" class="direction long" type="button" aria-pressed="false" title="Toggle long/short (does not submit)">
+            <span class="direction-dot" aria-hidden="true"></span><span id="direction-label">LONG</span>
+          </button>
+          <button id="read-order" class="ghost-btn tall" type="button" title="Load the open Hyperliquid position for this coin">Read order</button>
+          <div class="field"><label for="limit">LIM</label><input id="limit" class="mono" inputmode="decimal" autocomplete="off" /></div>
+          <div class="field"><label for="tp">TP</label><input id="tp" class="mono" inputmode="decimal" autocomplete="off" /></div>
+          <div class="field"><label for="sl">SL</label><input id="sl" class="mono" inputmode="decimal" autocomplete="off" /></div>
+          <div class="order-actions">
+            <button id="update-order" class="ghost-btn" type="button">Update Order</button>
+            <button id="set-order" class="primary-btn" type="button">Set Order</button>
+          </div>
+        </div>
+        <p class="ticket-note" id="ticket-note">Levels come from the selected position box. Orders use the current LIM / TP / SL / QTY.</p>
+      </section>
+
+      <section class="card fav-card" aria-label="Favourites">
+        <div class="fav-head">
+          <span class="card-label">Favourites</span>
+          <button id="add-favorite" class="ghost-btn tiny" type="button" title="Pin the current coin">+ Pin</button>
+          <button id="set-alert" class="ghost-btn tiny" type="button" title="Save FVG alert levels">Alert</button>
+        </div>
+        <div id="favorites" class="favorites" role="group" aria-label="Favourite coins"></div>
+      </section>
+
+      <div class="status-cluster">
+        <span id="backend-pill" class="pill pending" role="status" aria-live="polite">Connecting…</span>
+        <button id="settings-btn" class="icon-btn" type="button" aria-label="Open settings" title="Settings">⚙</button>
+      </div>
+    </header>
+
+    <main class="workspace-shell">
+      <div id="backend-banner" class="banner" hidden>
+        <div class="banner-copy">
+          <strong id="banner-title">Backend unavailable</strong>
+          <span id="banner-detail">Trading controls are disabled. Charts keep their last data.</span>
+        </div>
+        <button id="banner-retry" class="ghost-btn" type="button">Retry backend</button>
+      </div>
+      <iframe
+        id="workspace-frame"
+        class="workspace-frame"
+        title="Multi-chart workspace"
+        allow="fullscreen; clipboard-read; clipboard-write"
+      ></iframe>
+      <div id="workspace-error" class="workspace-error" hidden>
+        <h2>Chart workspace unavailable</h2>
+        <p id="workspace-error-message">The workspace could not be loaded.</p>
+        <button id="workspace-reload" class="primary-btn" type="button">Reload workspace</button>
+      </div>
+    </main>
+
+    <button id="restore-bar" class="restore-bar" type="button" hidden title="Show toolbar (Ctrl+Shift+T)">
+      Toolbar
+    </button>
+    <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+    <div id="modal-root"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

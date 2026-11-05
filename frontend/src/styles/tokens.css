@@ -1,0 +1,28 @@
+:root {
+  --bg: #0a0a0a;
+  --surface: #121212;
+  --surface-alt: #141414;
+  --surface-3: #171b22;
+  --text: #ffffff;
+  --text-2: #a1a1aa;
+  --text-3: #71717a;
+  --muted: #52525b;
+  --border: #2a2a2a;
+  --hairline: rgba(255, 255, 255, 0.09);
+  --accent: #f5c400;
+  --accent-soft: rgba(245, 196, 0, 0.12);
+  --accent-line: rgba(245, 196, 0, 0.42);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.12);
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.12);
+  --coral: #ff5a3c;
+  --radius-control: 6px;
+  --radius-button: 8px;
+  --radius-card: 12px;
+  --font-body: "Satoshi", "Inter", "Noto Sans", "DejaVu Sans", system-ui, sans-serif;
+  --font-display: "Clash Grotesk", "Inter", "Noto Sans", "DejaVu Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "DejaVu Sans Mono", "Consolas", "Liberation Mono", monospace;
+  --micro: 160ms cubic-bezier(0.2, 0.7, 0.3, 1);
+  --macro: 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}

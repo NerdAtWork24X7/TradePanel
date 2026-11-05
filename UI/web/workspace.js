@@ -3004,7 +3004,7 @@
         foot.style.display = 'flex';
         foot.style.alignItems = 'center';
         foot.style.gap = '8px';
-        var note = el('span', 'cred-foot-note', 'keys/.env');
+        var note = el('span', 'cred-foot-note', 'OS keyring');
         var cancel = el('button', 'btn-ghost', 'Cancel');
         cancel.addEventListener('click', closeModal);
         var save = el('button', 'btn-ghost primary', 'Save keys');
@@ -3022,7 +3022,7 @@
                 if (!res || res.ok !== true) throw new Error((res && res.error) || 'Save failed');
                 var count = (res.keys || []).length;
                 closeModal();
-                toast(count ? 'Credentials saved to keys/.env' : 'No credential changes');
+                toast(count ? 'Credentials saved to the OS keyring' : 'No credential changes');
             }).catch(function (err) {
                 save.disabled = false;
                 save.textContent = 'Save keys';
@@ -3035,7 +3035,7 @@
 
         openModal({
             title: 'API keys',
-            sub: 'Hyperliquid trading wallet · stored in keys/.env',
+            sub: 'Hyperliquid trading wallet · stored in the OS credential store',
             body: body,
             foot: foot
         });

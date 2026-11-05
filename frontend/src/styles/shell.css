@@ -346,6 +346,113 @@ body[data-theme="light"] .trade-sidebar.collapsed {
   flex: 0 0 auto;
 }
 
+/* ── Sidebar views (Trade / AI Analysis) ────────────────────────────────── */
+
+.sidebar-tabs {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.sidebar-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 36px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  transition: color var(--micro), background var(--micro);
+}
+
+.sidebar-tab:hover {
+  color: var(--text-2);
+  background: var(--hover-wash);
+}
+
+.sidebar-tab[aria-selected="true"] {
+  color: var(--text);
+}
+
+.sidebar-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+  border-radius: var(--radius-control);
+}
+
+.sidebar-tab-spark {
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.sidebar-tab-dot {
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: transparent;
+  transition: background var(--micro), box-shadow var(--micro);
+}
+
+.trade-sidebar[data-ai-state="ok"] .sidebar-tab-dot {
+  background: var(--success);
+}
+
+.trade-sidebar[data-ai-state="error"] .sidebar-tab-dot {
+  background: var(--danger);
+}
+
+.trade-sidebar[data-ai-state="streaming"] .sidebar-tab-dot,
+.trade-sidebar[data-ai-state="pending"] .sidebar-tab-dot {
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.8);
+  animation: dot-pulse 1.4s ease-in-out infinite;
+}
+
+.sidebar-tab-glider {
+  position: absolute;
+  left: 6px;
+  bottom: -1px;
+  width: calc(50% - 6px);
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.45);
+  transform: translateX(0);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sidebar-tabs[data-active="ai"] .sidebar-tab-glider {
+  transform: translateX(100%);
+}
+
+.sidebar-panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-tab-glider {
+    transition: none;
+  }
+}
+
 .sidebar-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -1096,4 +1203,589 @@ body[data-theme="light"] .trade-sidebar.collapsed {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* ── Full-page settings (Pi Scope-style section rail) ─────────────────── */
+
+body.settings-open {
+  overflow: hidden;
+}
+
+.settings-page {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  /* WebKitGTK composites the chart iframe separately; a fixed overlay above it
+     can otherwise be skipped until the next full repaint. Its own layer plus a
+     one-frame entrance animation makes the first open paint reliably. */
+  transform: translateZ(0);
+  animation: settings-page-in 120ms ease-out;
+  background:
+    radial-gradient(1200px 600px at 78% -10%, rgba(var(--accent-rgb), 0.05), transparent 60%),
+    var(--bg);
+}
+
+.settings-page[hidden] {
+  display: none;
+}
+
+@keyframes settings-page-in {
+  from { opacity: 0.98; }
+  to { opacity: 1; }
+}
+
+.settings-page-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 54px;
+  padding: 0 16px 0 18px;
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--surface);
+}
+
+.settings-page-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-page-title > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.settings-page-title strong {
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.settings-page-title span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-page-body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 228px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 0;
+  padding: 14px 10px;
+  overflow-y: auto;
+  border-right: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.settings-nav-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--micro), border-color var(--micro), color var(--micro);
+}
+
+.settings-nav-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.settings-nav-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.settings-nav-item.active {
+  border-color: var(--accent-line);
+  background: rgba(var(--accent-rgb), 0.07);
+  color: var(--text);
+}
+
+.settings-nav-label {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.settings-nav-hint {
+  color: var(--muted);
+  font-size: 8.5px;
+  line-height: 1.35;
+}
+
+.settings-content {
+  min-width: 0;
+  padding: 18px 22px 44px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.settings-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 1180px;
+}
+
+.settings-tab[hidden] {
+  display: none;
+}
+
+.settings-tab > .section {
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.settings-tab > .section h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 12px;
+}
+
+.settings-tab .grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.settings-tab .field label {
+  color: var(--text-3);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-tab .field input,
+.settings-tab .field select {
+  height: 30px;
+  font-size: 10.5px;
+}
+
+.settings-tab .field-hint {
+  font-size: 8.5px;
+}
+
+.settings-save-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.settings-save-row .inline-error {
+  flex: 1 1 auto;
+  font-size: 9px;
+}
+
+.settings-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-section-head h3 {
+  margin: 0 0 2px;
+  font-family: var(--font-display);
+  font-size: 12px;
+}
+
+.settings-section-head p {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.settings-section-head code {
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+}
+
+/* The Pi settings view was laid out for the narrow sidebar; in the page it is
+   a normal block and must not claim the sidebar's flex height. */
+#settings-ai-mount .ai-settings {
+  flex: 0 1 auto;
+  padding: 0;
+  overflow: visible;
+}
+
+#settings-ai-mount .ai-settings-scroll {
+  overflow: visible;
+}
+
+#settings-ai-mount .ai-set-section {
+  max-width: 1180px;
+}
+
+#settings-ai-mount .ai-auth-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  align-items: start;
+}
+
+#settings-ai-mount .ai-auth-prov {
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .settings-page-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .settings-nav {
+    flex-direction: row;
+    border-right: 0;
+    border-bottom: 1px solid var(--hairline);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .settings-nav-item {
+    flex: 0 0 auto;
+    min-width: 118px;
+  }
+
+  .settings-nav-hint {
+    display: none;
+  }
+
+  .settings-content {
+    padding: 14px 12px 36px;
+  }
+}
+
+.settings-tab .inline-error {
+  color: var(--danger);
+  font-size: 10px;
+  min-height: 13px;
+}
+
+.settings-tab .inline-ok {
+  color: var(--success);
+  font-size: 10px;
+}
+
+/* ── Settings readability: page-scale typography ──────────────────────── */
+
+.settings-page {
+  font-size: 13px;
+}
+
+.settings-page-title strong {
+  font-size: 17px;
+}
+
+.settings-page-title span {
+  font-size: 11px;
+}
+
+.settings-nav-item {
+  padding: 10px 12px;
+}
+
+.settings-nav-label {
+  font-size: 13px;
+}
+
+.settings-nav-hint {
+  font-size: 10.5px;
+}
+
+.settings-tab {
+  gap: 16px;
+}
+
+.settings-tab > .section {
+  padding: 16px 18px;
+  gap: 12px;
+}
+
+.settings-tab > .section h3 {
+  font-size: 14px;
+}
+
+.settings-tab .grid {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 13px 16px;
+}
+
+.settings-tab .field label {
+  font-size: 10.5px;
+}
+
+.settings-tab .field input,
+.settings-tab .field select {
+  height: 34px;
+  font-size: 13px;
+}
+
+.settings-tab .field-hint {
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.settings-tab .inline-error,
+.settings-tab .inline-ok {
+  font-size: 11.5px;
+}
+
+.settings-tab .check-inline {
+  font-size: 11.5px;
+}
+
+.settings-tab .cred-row {
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.settings-tab .cred-state {
+  font-size: 10.5px;
+}
+
+.settings-save-row .primary-btn {
+  height: 34px;
+  padding: 0 16px;
+  font-size: 12px;
+}
+
+.settings-section-head h3 {
+  font-size: 14px;
+}
+
+.settings-section-head p {
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.settings-section-head code {
+  font-size: 10.5px;
+}
+
+#settings-ai-mount .ai-set-kicker {
+  font-size: 10px;
+}
+
+#settings-ai-mount .ai-set-note {
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+#settings-ai-mount .ai-set-note code,
+#settings-ai-mount .ai-auth-current code {
+  font-size: 10px;
+}
+
+#settings-ai-mount .ai-auth-current {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+#settings-ai-mount .ai-settings .field label {
+  font-size: 10.5px;
+}
+
+#settings-ai-mount .ai-settings .field input,
+#settings-ai-mount .ai-settings .field select {
+  height: 34px;
+  font-size: 13px;
+}
+
+#settings-ai-mount .ai-settings-check {
+  font-size: 11.5px;
+}
+
+#settings-ai-mount .ai-settings-actions .primary-btn,
+#settings-ai-mount .ai-settings-actions .ghost-btn {
+  height: 34px;
+  font-size: 12px;
+}
+
+#settings-ai-mount .ai-auth-search {
+  height: 34px;
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+#settings-ai-mount .ai-auth-list {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 8px;
+}
+
+#settings-ai-mount .ai-auth-prov {
+  gap: 6px;
+  padding: 9px 11px;
+}
+
+#settings-ai-mount .ai-auth-prov-name,
+#settings-ai-mount .ai-auth-cred-name {
+  font-size: 12.5px;
+}
+
+#settings-ai-mount .ai-auth-chip {
+  font-size: 9px;
+  padding: 2px 7px;
+}
+
+#settings-ai-mount .ai-auth-prov-actions .mini,
+#settings-ai-mount .ai-auth-cred .mini {
+  height: 27px;
+  padding: 0 9px;
+  font-size: 10.5px;
+}
+
+#settings-ai-mount .ai-auth-none {
+  font-size: 10.5px;
+}
+
+#settings-ai-mount .ai-auth-login {
+  gap: 9px;
+  padding: 11px;
+}
+
+#settings-ai-mount .ai-auth-login-head strong {
+  font-size: 13px;
+}
+
+#settings-ai-mount .ai-auth-event {
+  font-size: 11px;
+}
+
+#settings-ai-mount .ai-auth-event-note {
+  font-size: 10px;
+}
+
+#settings-ai-mount .ai-auth-event code {
+  font-size: 11px;
+  padding: 2px 6px;
+}
+
+#settings-ai-mount .ai-auth-link {
+  font-size: 11px;
+}
+
+#settings-ai-mount .ai-auth-prompt-msg {
+  font-size: 11px;
+}
+
+#settings-ai-mount .ai-auth-input-row .ai-input {
+  height: 34px;
+  min-height: 34px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+#settings-ai-mount .ai-auth-input-row .mini,
+#settings-ai-mount .ai-auth-choices .mini {
+  height: 34px;
+  font-size: 11px;
+  padding: 0 10px;
+}
+
+#settings-ai-mount .ai-auth-status {
+  font-size: 11px;
+}
+
+#settings-ai-mount .ai-details summary {
+  font-size: 10.5px;
+}
+
+#settings-ai-mount .ai-diagnostics {
+  font-size: 10px;
+  line-height: 1.5;
+  max-height: 260px;
+}
+
+#settings-ai-mount .ai-settings-note {
+  font-size: 10px;
+}
+
+/* Settings is a desktop page, not a sidebar: use comfortable body sizes. */
+.settings-page {
+  font-size: 15px;
+}
+
+.settings-nav-label {
+  font-size: 14px;
+}
+
+.settings-nav-hint {
+  font-size: 11.5px;
+}
+
+.settings-tab > .section h3,
+.settings-section-head h3 {
+  font-size: 16px;
+}
+
+.settings-tab .field label,
+#settings-ai-mount .ai-settings .field label {
+  font-size: 12px;
+}
+
+.settings-tab .field input,
+.settings-tab .field select,
+#settings-ai-mount .ai-settings .field input,
+#settings-ai-mount .ai-settings .field select {
+  height: 38px;
+  font-size: 14px;
+}
+
+.settings-tab .field-hint,
+#settings-ai-mount .ai-set-note {
+  font-size: 11.5px;
+}
+
+.settings-section-head p {
+  font-size: 12px;
+}
+
+.settings-save-row .primary-btn {
+  font-size: 13px;
+}
+
+#settings-ai-mount .ai-auth-prov-name,
+#settings-ai-mount .ai-auth-cred-name {
+  font-size: 13.5px;
+}
+
+#settings-ai-mount .ai-auth-prov-actions .mini,
+#settings-ai-mount .ai-auth-cred .mini {
+  font-size: 11.5px;
+}
+
+#settings-ai-mount .ai-auth-current {
+  font-size: 13px;
 }

@@ -18,29 +18,35 @@ TradePanel/
 │   │   ├── commands/          # allow-listed IPC, credentials, updates, order gate
 │   │   ├── sidecar/           # spawn, handshake, health, restart, shutdown
 │   │   ├── security/          # OS keyring store + validation
+│   │   ├── ai/                # supervised read-only Pi runtime + AI commands
 │   │   ├── protocol.rs        # JSON-RPC framing, allow-list, error codes
 │   │   ├── events.rs          # backend status / event emission
 │   │   └── config.rs          # app-data paths, legacy import, sidecar resolution
 │   ├── capabilities/          # minimal WebView permissions
 │   ├── icons/
 │   ├── backend-dist/          # staged one-folder sidecar (generated)
+│   ├── ai-runtime/            # staged Node + Pi runtime (generated)
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 │
 ├── frontend/                  # shell UI (TypeScript + Vite, no framework)
 │   ├── src/
 │   │   ├── app/               # controller, startup, reconnect handling
-│   │   ├── components/        # toasts, modals, settings
+│   │   ├── components/        # toasts, modals, settings, AI Analysis panel
 │   │   ├── services/          # backend, trading, market-data, account,
-│   │   │                      # indicators, workspace, credentials, settings
-│   │   └── styles/            # Pi Scope tokens, fonts, shell CSS
+│   │   │                      # indicators, workspace, credentials, settings, ai
+│   │   ├── ai-snapshot/       # offscreen LWC chart renderer (iframe page)
+│   │   ├── lib/               # markdown, technical indicators, snapshot host
+│   │   └── styles/            # Pi Scope tokens, fonts, shell + AI CSS
 │   ├── web/                   # shared chart workspace (served by Vite/Tauri)
 │   │   │                      # workspace.html/js, chart_sync.js, LWC 4.2.2,
 │   │   │                      # tauri_bridge.js (compatibility adapter), fonts/
-│   ├── tests/                 # bridge adapter contract tests
+│   ├── tests/                 # bridge + AI markdown/indicator contract tests
 │   ├── index.html
+│   ├── snapshot.html          # hidden AI chart renderer page
 │   └── package.json
 │
+├── ai/runtime/                # pinned Pi runtime source (package.json, extension, prompt)
 ├── backend/                   # Python sidecar + trading/analysis engine
 │   ├── sidecar.py             # entry, stdout defence, signals
 │   ├── ipc/                   # JSON-RPC server, methods, credentials, protocol
@@ -187,16 +193,60 @@ vertical price offset), measure, horizontal/vertical lines, trend lines, rectang
 Fibonacci retracement and text. Position drawings persist per symbol in local storage and
 the selected box feeds the trade ticket.
 
+## AI Analysis (Pi)
+
+The right sidebar has two tabs — **Trade** (instrument + order ticket) and
+**AI Analysis** — so the analysis owns the full column height instead of a
+stacked strip. `Ctrl+Shift+A` jumps to the AI tab; `Ctrl+Shift+T` shows/hides the
+sidebar.
+It runs the bundled Pi 1.5.0 agent on a bundled Node 22 runtime, so the installed
+application needs no Node, npm, Pi CLI or terminal. Provider sign-in, model
+selection and the rest of the app's settings live on a separate, tabbed Settings
+page opened from the gear button to the right of **Trade** (or `Ctrl+,`).
+
+* **Start analysis is explicit.** The panel renders the current instrument's
+  **1d, 4h and 5m** charts offscreen with EMA ribbon, Bollinger Bands, volume,
+  RSI, MACD and ticket levels, then attaches the three PNGs to the prompt. This
+  replaces sending hundreds of candles as text and cuts token use by an order of
+  magnitude.
+* Pi receives a compact snapshot (instrument, freshness, per-timeframe indicator
+  values, structural levels, optional portfolio, read-only ticket) through five
+  `panel_*` tools. It has no shell, file, network or trading tools.
+* The answer ends with a validated plan card: **LONG/SHORT/NO TRADE, entry,
+  take-profit, stop-loss, R:R**. The card can fill the ticket as a user action;
+  it never submits an order.
+* Conversations persist as Pi session files under the OS app-data directory and
+  restore without starting Pi.
+* Provider sign-in uses Pi's own authentication runtime: OAuth/device flows and
+  API keys are handled by the bundled agent and stored in its owner-only
+  `agent/auth.json`. Settings → AI Analysis lists every provider Pi supports,
+  highlights signed-in accounts and shows the models they unlock.
+
+Stage and test the runtime:
+
+```bash
+npm run ai:runtime        # download Node + install pinned Pi (build-time only)
+npm run test:ai           # mock-provider end-to-end: images, tools, plan, abort
+npm --prefix frontend test
+```
+
+Details: [`docs/AI_INTEGRATION.md`](docs/AI_INTEGRATION.md),
+[`docs/AI_SECURITY.md`](docs/AI_SECURITY.md),
+[`docs/STANDALONE_BUILD.md`](docs/STANDALONE_BUILD.md),
+[`docs/AI_TROUBLESHOOTING.md`](docs/AI_TROUBLESHOOTING.md).
+
 ## Data, credentials and safety
 
 * User data lives in the OS app-data directory. On first run a legacy `data/` directory is
   **copied** (missing files only, including SQLite WAL/SHM); the original is untouched.
-* Credentials are stored in the OS credential store (Windows Credential Manager, Secret
-  Service, Keychain). Nothing is written to `keys/.env` by the new app and secrets never
-  reach JavaScript. A legacy `keys/.env` is detected and can be imported explicitly from
-  Settings → Credentials.
-* If the credential store is unavailable, the app fails explicitly — there is no plaintext
-  fallback.
+* **Trading credentials** are stored in the OS credential store (Windows Credential
+  Manager, Secret Service, Keychain). Nothing is written to `keys/.env` by the new app
+  and secrets never reach JavaScript. A legacy `keys/.env` is detected and can be
+  imported from Settings → Credentials. If the credential store is unavailable, the
+  app fails explicitly — there is no plaintext fallback.
+* **AI provider credentials** are stored by Pi in `<app-data>/ai/agent/auth.json`
+  (mode 0600) after an OAuth or API-key sign-in. They are separate from trading keys
+  and are never passed to the chart workspace or model prompt.
 * Order submission is never retried automatically. Timeouts and sidecar exits during an
   order produce `EXECUTION_UNKNOWN`, persist a lock, and require the user to check open
   orders before re-enabling trading. Identical in-flight submissions are rejected in both
@@ -216,6 +266,10 @@ Details: [`docs/SECURITY.md`](docs/SECURITY.md) and
 | [`docs/SECURITY.md`](docs/SECURITY.md) | threat model, credentials, CSP/capabilities, order safety, updates |
 | [`docs/BUILD.md`](docs/BUILD.md) | prerequisites, dev/build commands, packaging, updater, troubleshooting |
 | [`docs/TESTING.md`](docs/TESTING.md) | suites, E2E evidence, performance, manual cross-platform checklist |
+| [`docs/AI_INTEGRATION.md`](docs/AI_INTEGRATION.md) | Pi runtime, screenshots, tools, plan validation, conversations |
+| [`docs/AI_SECURITY.md`](docs/AI_SECURITY.md) | read-only boundary, environment isolation, snapshot validation, provider auth |
+| [`docs/STANDALONE_BUILD.md`](docs/STANDALONE_BUILD.md) | runtime staging, Windows/Linux packaging, clean-machine checklist |
+| [`docs/AI_TROUBLESHOOTING.md`](docs/AI_TROUBLESHOOTING.md) | provider, runtime, rendering and history failures |
 
 ## Known limitations
 
@@ -223,6 +277,12 @@ Details: [`docs/SECURITY.md`](docs/SECURITY.md) and
 * Live/testnet order execution was not run during migration testing; the execution paths
   are preserved and guarded, but require a disposable-key testnet pass before release.
 * The bundled Python sidecar is large (~267 MB on disk) because `pandas_ta` requires numba.
+* The bundled AI runtime adds ~200 MB (Node + Pi dependencies). Chart snapshots are
+  rendered by an offscreen WebView page, not a bundled Chromium.
+* AI provider sign-in uses Pi's bundled authentication runtime (OAuth/device code
+  or API key) and stores credentials in `agent/auth.json`; the Linux Secret Service
+  is only required for Hyperliquid trading credentials. Provider keys are still
+  never sent to the model or written into the analysis snapshot.
 * Lightweight Charts 4.x has no native panes/toolkit; oscillator panes, session/FVG/VP
   boxes, measure and position projections are custom canvas layers.
 * Absolute price sync deliberately skips charts with incompatible quote currency/scale.

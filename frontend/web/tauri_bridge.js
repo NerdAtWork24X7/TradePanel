@@ -120,6 +120,9 @@
         onPositionDrawingChanged: function (direction, entry, tp, sl) {
             emit('positionDrawing', [direction, entry, tp, sl]);
         },
+        onTradeOverlayResult: function (ok, message) {
+            emit('tradeOverlay', [!!ok, String(message || '')]);
+        },
         onFocusedChartChanged: function (symbol, exchange, market, timeframe) {
             emit('focusedChart', [symbol, exchange, market, timeframe]);
         },
@@ -128,6 +131,14 @@
         },
         toggleTopBar: function (cb) {
             emit('toggleTopBar', []);
+            if (typeof cb === 'function') cb(stringify({ ok: true }));
+        },
+        openSettings: function (cb) {
+            emit('openSettings', []);
+            if (typeof cb === 'function') cb(stringify({ ok: true }));
+        },
+        toggleTheme: function (cb) {
+            emit('toggleTheme', []);
             if (typeof cb === 'function') cb(stringify({ ok: true }));
         },
         toggleFullscreen: function (cb) {

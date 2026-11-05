@@ -356,7 +356,11 @@
             min-height: 0;
         }
 
-        #ws-grid.maximized .panel:not(.is-maximized) { visibility: hidden; }
+        /* Hidden panels must leave grid flow: `visibility: hidden` still occupies
+           cells, pushing them into implicit rows that the maximized panel
+           (`grid-row: 1 / -1`, explicit tracks only) does not span — leaving a
+           dead band at the bottom. */
+        #ws-grid.maximized .panel:not(.is-maximized) { display: none; }
         #ws-grid.maximized .empty-cell { display: none; }
         #ws-grid.maximized .panel.is-maximized {
             grid-column: 1 / -1; grid-row: 1 / -1; z-index: 4;
@@ -1009,15 +1013,14 @@
             <button id="btn-groups" class="icon-btn" title="Synchronization groups" aria-label="Synchronization groups">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><circle cx="7" cy="17" r="3"/><circle cx="17" cy="17" r="3"/></svg>
             </button>
-            <button id="drawer-keys" class="icon-btn" title="Hyperliquid API keys" aria-label="Hyperliquid API keys">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="7.5" cy="15.5" r="3.5"/><path d="M10 13l8.5-8.5M15.5 7.5L18 10M18 5l2.5 2.5"/>
-                </svg>
-            </button>
             <button id="btn-fullscreen" class="icon-btn" title="Fullscreen (F11)" aria-label="Fullscreen">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
             </button>
             <button id="btn-trade" class="icon-btn" title="Show/hide trade panel" aria-label="Toggle trade panel">Trade</button>
+            <button id="btn-settings" class="icon-btn" title="Settings (Ctrl+,)" aria-label="Open settings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h6M14 7h6M4 17h10M18 17h2"/><circle cx="12" cy="7" r="2"/><circle cx="16" cy="17" r="2"/></svg>
+            </button>
+            <button id="btn-theme" class="icon-btn" title="Toggle light/dark theme" aria-label="Toggle theme">◐</button>
         </header>
 
         <div id="ws-subbar">

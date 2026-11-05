@@ -1,0 +1,131 @@
+/**
+ * Full-page settings, shaped like Pi Scope's settings surface: a section rail
+ * on the left and one scrollable tab at a time. The AI tab reuses the Pi
+ * connection view that lives beside the analysis panel; the other tabs are
+ * built from the existing indicator/credential/update form.
+ */
+import { toast } from "./toast";
+import { buildSettingsContent, type SettingsContext } from "./settings";
+import type { AiPanel } from "./ai-panel";
+
+export type SettingsTab = "indicators" | "credentials" | "ai" | "updates";
+
+interface TabDef {
+  id: SettingsTab;
+  label: string;
+  hint: string;
+}
+
+const TABS: TabDef[] = [
+  { id: "indicators", label: "Indicators", hint: "EMA ribbon, VWAP, FVG, sessions" },
+  { id: "credentials", label: "Credentials", hint: "Hyperliquid API keys" },
+  { id: "ai", label: "AI Analysis", hint: "Pi sign-in and model" },
+  { id: "updates", label: "Updates", hint: "Signed release channel" },
+];
+
+let panel: HTMLElement | null = null;
+let nav: HTMLElement | null = null;
+let aiPanelRef: AiPanel | null = null;
+let previousFocus: HTMLElement | null = null;
+let built = false;
+let activeTab: SettingsTab = "indicators";
+let onKey: ((event: KeyboardEvent) => void) | null = null;
+
+function must<T extends HTMLElement>(id: string): T {
+  const node = document.getElementById(id);
+  if (!node) throw new Error(`Missing settings element #${id}`);
+  return node as T;
+}
+
+function tabButton(def: TabDef): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "settings-nav-item";
+  button.dataset.tab = def.id;
+  button.setAttribute("role", "tab");
+  button.setAttribute("aria-selected", "false");
+  const label = document.createElement("span");
+  label.className = "settings-nav-label";
+  label.textContent = def.label;
+  const hint = document.createElement("span");
+  hint.className = "settings-nav-hint";
+  hint.textContent = def.hint;
+  button.append(label, hint);
+  button.addEventListener("click", () => setTab(def.id));
+  return button;
+}
+
+function ensureShell(): void {
+  if (panel) return;
+  panel = must<HTMLElement>("settings-page");
+  nav = must<HTMLElement>("settings-nav");
+  must<HTMLButtonElement>("settings-page-close").addEventListener("click", closeSettingsPage);
+  for (const def of TABS) nav.appendChild(tabButton(def));
+  onKey = (event: KeyboardEvent) => {
+    if (event.key === "Escape" && !panel?.hidden) {
+      event.preventDefault();
+      closeSettingsPage();
+    }
+  };
+  document.addEventListener("keydown", onKey, true);
+}
+
+function setTab(tab: SettingsTab): void {
+  if (!panel) return;
+  activeTab = tab;
+  panel.querySelectorAll<HTMLButtonElement>(".settings-nav-item").forEach((button) => {
+    const active = button.dataset.tab === tab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  panel.querySelectorAll<HTMLElement>(".settings-tab").forEach((node) => {
+    node.hidden = node.dataset.tab !== tab;
+  });
+  if (tab === "ai" && aiPanelRef) aiPanelRef.openSettings();
+}
+
+export async function openSettingsPage(
+  ctx: SettingsContext,
+  aiPanel: AiPanel,
+  tab: SettingsTab = "indicators",
+): Promise<void> {
+  ensureShell();
+  aiPanelRef = aiPanel;
+  if (panel!.hidden) previousFocus = document.activeElement as HTMLElement | null;
+  if (!built) {
+    try {
+      const settings = await buildSettingsContent(ctx);
+      must<HTMLElement>("settings-tab-indicators").replaceChildren(settings.indicators);
+      must<HTMLElement>("settings-tab-credentials").replaceChildren(settings.credentials);
+      must<HTMLElement>("settings-tab-updates").replaceChildren(settings.updates);
+      built = true;
+    } catch (error) {
+      toast((error as Error).message, "error");
+      return;
+    }
+  }
+  // The Pi connection markup ships inside the AI tab; it is created with the
+  // document, so AiPanel already holds its element references.
+  panel!.hidden = false;
+  document.body.classList.add("settings-open");
+  setTab(tab);
+  window.setTimeout(() => must<HTMLButtonElement>("settings-page-close").focus(), 0);
+}
+
+export function closeSettingsPage(): void {
+  if (!panel) return;
+  panel.hidden = true;
+  document.body.classList.remove("settings-open");
+  built = false; // rebuild credentials/indicator values next time
+  activeTab = "indicators";
+  previousFocus?.focus?.();
+  previousFocus = null;
+}
+
+export function settingsPageOpen(): boolean {
+  return Boolean(panel && !panel.hidden);
+}
+
+export function currentSettingsTab(): SettingsTab {
+  return activeTab;
+}

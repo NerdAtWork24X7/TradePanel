@@ -931,6 +931,8 @@
             positionDrag: null,
             posDraft: null,
             posSettings: loadPositionSettings(),
+            pendingOverlay: null,
+            focusRange: null,
             measure: null,
             legacy: {},
             legacySeq: 0,
@@ -1085,12 +1087,16 @@
                 };
             }
             var info = original();
-            if (!info || !info.priceRange || !offset) return info;
+            if (!info || !info.priceRange) return info;
+            var minValue = info.priceRange.minValue + offset;
+            var maxValue = info.priceRange.maxValue + offset;
+            if (entry.focusRange) {
+                minValue = Math.min(minValue, entry.focusRange.min);
+                maxValue = Math.max(maxValue, entry.focusRange.max);
+            }
+            if (!offset && !entry.focusRange) return info;
             return {
-                priceRange: {
-                    minValue: info.priceRange.minValue + offset,
-                    maxValue: info.priceRange.maxValue + offset
-                },
+                priceRange: { minValue: minValue, maxValue: maxValue },
                 margins: info.margins
             };
         };
@@ -1190,6 +1196,7 @@
             var hadPanBase = !!target.panBase;
             target.priceOffset = 0;
             target.panBase = null;
+            target.focusRange = null;
             if (hadPanBase) restoreScaleMargins(target);
             refreshPriceOffset(target, true);
         });
@@ -1322,6 +1329,7 @@
         requestLegacy(entry);
         startPolling(entry);
         if (WS.sync) WS.sync.schedulePriceScaleRefresh();
+        applyPendingTradeOverlay(entry);
     }
 
     function detectPrecision(candles) {
@@ -1780,6 +1788,13 @@
     }
 
     function showError(entry, message) {
+        if (entry.pendingOverlay) {
+            entry.pendingOverlay = null;
+            reportTradeOverlay({
+                ok: false,
+                message: 'Could not load ' + entry.config.symbol + ' candles for the plan overlay.'
+            });
+        }
         entry.overlay.className = 'panel-overlay show error';
         entry.overlay.innerHTML = '';
         entry.overlay.appendChild(el('div', 'ov-title', 'Data unavailable'));
@@ -3130,6 +3145,18 @@
         });
     }
 
+    /**
+     * Draw an AI trade plan as a position box on the chart for its instrument.
+     * Purely visual: it never fills the ticket and never submits an order.
+     * The outcome is returned and relayed to the shell (bridge event) so the
+     * toast appears in the sidebar instead of the chart frame.
+     */
+    WS.overlayTrade = function (trade) {
+        var result = overlayTrade(trade);
+        reportTradeOverlay(result);
+        return result;
+    };
+
     WS.setFocusedCoin = function (coin) {
         var entry = WS.charts[WS.focused];
         if (!entry || !coin) return;
@@ -3582,17 +3609,25 @@
             cell.appendChild(el('span', 'plus', '+'));
             cell.appendChild(el('span', 't', 'Add chart'));
             cell.appendChild(el('span', 's', 'Panel ' + (i + 1)));
-            cell.addEventListener('click', addChart);
+            cell.addEventListener('click', function () { addChart(); });
             grid.appendChild(cell);
         }
     }
 
-    function addChart() {
+    /**
+     * Add a chart panel. `patch` lets callers (AI plan overlays) pin the
+     * instrument/timeframe; keep it out of the click handlers so a DOM event
+     * can never be merged into the config.
+     */
+    function addChart(patch) {
         var ws = activeWorkspace();
-        if (ws.charts.length >= 12) { toast('Maximum 12 charts', true); return; }
+        if (!ws) return null;
+        if (ws.charts.length >= 12) { toast('Maximum 12 charts', true); return null; }
+        var cfg = defaultChartConfig(ws.charts.length);
+        if (patch) Object.assign(cfg, patch);
         var cap = capacity(ws);
         if (ws.layout !== 'custom' && ws.charts.length < cap) {
-            ws.charts.push(defaultChartConfig(ws.charts.length));
+            ws.charts.push(cfg);
             syncPanels(ws);
         } else if (ws.layout !== 'custom' && cap < 8) {
             var next = cap === 1 ? '2h' : cap === 2 ? '4' : cap === 4 ? '6' : '8';
@@ -3600,14 +3635,14 @@
             var spec = LAYOUTS[next];
             ws.columns = equalFractions(spec.cols);
             ws.rows = equalFractions(spec.rows);
-            ws.charts.push(defaultChartConfig(ws.charts.length));
+            ws.charts.push(cfg);
             applyGridTemplate(ws);
             syncPanels(ws);
             updateLayoutButtons();
             renderGutters();
         } else {
             ws.layout = 'custom';
-            ws.charts.push(defaultChartConfig(ws.charts.length));
+            ws.charts.push(cfg);
             var grid = customGridFor(ws.charts.length);
             ws.columns = grid.columns;
             ws.rows = grid.rows;
@@ -3617,6 +3652,7 @@
             renderGutters();
         }
         scheduleSave();
+        return cfg;
     }
 
     function removeChart(entry) {
@@ -4369,6 +4405,240 @@
         notifyPosition(entry, pos);
         renderDrawings(entry);
         return pos;
+    }
+
+    /* ── AI trade overlays ──────────────────────────────────────────────── */
+
+    function reportTradeOverlay(result) {
+        if (!result) return;
+        try {
+            if (Bridge.obj && Bridge.obj.onTradeOverlayResult) {
+                Bridge.obj.onTradeOverlayResult(!!result.ok, result.message || '');
+                return;
+            }
+        } catch (err) { /* fall back to the in-frame toast */ }
+        toast(result.message || '', !result.ok);
+    }
+
+    function symbolKey(symbol) {
+        return String(symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    }
+
+    function findTradeChart(trade) {
+        var ids = Object.keys(WS.charts);
+        var focused = WS.charts[WS.focused];
+        var wanted = symbolKey(trade.symbol);
+        var venueMatches = function (entry) {
+            return (!trade.exchange || entry.config.exchange === trade.exchange) &&
+                (!trade.market || entry.config.market === trade.market);
+        };
+        var exact = function (entry) {
+            return venueMatches(entry) && symbolKey(entry.config.symbol) === wanted;
+        };
+        var sameSymbol = function (entry) {
+            return symbolKey(entry.config.symbol) === wanted;
+        };
+        if (focused && !focused.destroyed && exact(focused)) return focused;
+        for (var i = 0; i < ids.length; i++) {
+            var entry = WS.charts[ids[i]];
+            if (entry && !entry.destroyed && exact(entry)) return entry;
+        }
+        if (focused && !focused.destroyed && sameSymbol(focused)) return focused;
+        for (var j = 0; j < ids.length; j++) {
+            var other = WS.charts[ids[j]];
+            if (other && !other.destroyed && sameSymbol(other)) return other;
+        }
+        return null;
+    }
+
+    function tradeChartVenue(trade) {
+        var fallback = WS.charts[WS.focused] && !WS.charts[WS.focused].destroyed
+            ? WS.charts[WS.focused] : null;
+        var exchanges = (WS.meta && WS.meta.exchanges) || [];
+        var exchange = trade.exchange || (fallback ? fallback.config.exchange : (exchanges[0] ? exchanges[0].id : 'binance'));
+        var market = trade.market || (fallback ? fallback.config.market : 'spot');
+        var ex = exchanges.filter(function (e) { return e.id === exchange; })[0];
+        if (!ex) {
+            exchange = fallback ? fallback.config.exchange : (exchanges[0] ? exchanges[0].id : 'binance');
+            ex = exchanges.filter(function (e) { return e.id === exchange; })[0];
+            market = fallback ? fallback.config.market : 'spot';
+        }
+        var markets = (ex && ex.markets) || [];
+        if (!markets.some(function (m) { return m.id === market; })) {
+            var preferred = markets.filter(function (m) { return m.id === 'spot'; })[0] || markets[0];
+            market = preferred ? preferred.id : 'spot';
+        }
+        var supported = timeframesFor(exchange, market);
+        if (!Array.isArray(supported) || !supported.length) supported = TIMEFRAMES;
+        var timeframe = trade.timeframe;
+        if (supported.indexOf(timeframe) < 0) {
+            timeframe = fallback ? fallback.config.timeframe : null;
+        }
+        if (supported.indexOf(timeframe) < 0) {
+            timeframe = supported.indexOf('5m') >= 0 ? '5m' : supported[0];
+        }
+        return { exchange: exchange, market: market, timeframe: timeframe || '5m' };
+    }
+
+    function openTradeChart(trade) {
+        var venue = tradeChartVenue(trade);
+        var cfg = addChart({
+            exchange: venue.exchange,
+            market: venue.market,
+            symbol: trade.symbol,
+            timeframe: venue.timeframe,
+            groupId: null
+        });
+        return cfg ? WS.charts[cfg.id] || null : null;
+    }
+
+    var OVERLAY_BARS = 16;
+    var OVERLAY_LEAD_BARS = 8;
+
+    function findMatchingPosition(entry, trade) {
+        var near = function (a, b) {
+            return Math.abs(a - b) <= Math.max(1e-9, Math.abs(b) * 1e-9);
+        };
+        for (var i = entry.positions.length - 1; i >= 0; i--) {
+            var pos = entry.positions[i];
+            if (pos.dir === trade.dir && near(pos.entry, trade.entry) &&
+                near(pos.tp, trade.tp) && near(pos.sl, trade.sl)) {
+                return pos;
+            }
+        }
+        return null;
+    }
+
+    function revealTradePosition(entry, pos) {
+        if (!entry || !entry.chart || entry.destroyed) return;
+        var barSec = barSeconds(entry.config.timeframe);
+        var span = Math.max(6, Math.round((pos.endTime - pos.startTime) / barSec));
+        var startIdx = lowerBound(entry.display, pos.startTime);
+        if (startIdx >= entry.display.length) startIdx = Math.max(0, entry.display.length - 1);
+        // Keep the plan in context: a full screen of history before the box
+        // and a little future whitespace after it.
+        try {
+            entry.chart.timeScale().setVisibleLogicalRange({
+                from: Math.max(0, startIdx - span),
+                to: startIdx + span + 8
+            });
+        } catch (err) { /* keep the current viewport */ }
+        // Drop a manual vertical pan so the plan levels are not left outside
+        // the frozen window (absolute group scales are shared; leave those).
+        if (entry.config.priceScaleMode !== 'absolute') resetPricePan(entry);
+        // Widen the autoscale window to contain every level without freezing
+        // the price axis; resetPricePan clears it on Center / instrument change.
+        entry.focusRange = {
+            min: transformValue(entry, Math.min(pos.entry, pos.tp, pos.sl)),
+            max: transformValue(entry, Math.max(pos.entry, pos.tp, pos.sl))
+        };
+        refreshPriceOffset(entry, true);
+        scheduleDraw(entry);
+    }
+
+    function placeTradeOverlay(entry, trade) {
+        var existing = findMatchingPosition(entry, trade);
+        if (existing) {
+            entry.selectedPosition = existing.id;
+            entry.selectedDrawing = null;
+            renderDrawings(entry);
+            revealTradePosition(entry, existing);
+            return { ok: true, message: 'That plan is already on the ' + trade.symbol + ' chart.' };
+        }
+        var barSec = barSeconds(entry.config.timeframe);
+        var last = entry.candles.length ? entry.candles[entry.candles.length - 1] : null;
+        var anchor = last && isFinite(last.time)
+            ? last.time
+            : Math.floor(Date.now() / 1000 / barSec) * barSec;
+        var pos = {
+            id: 'p-' + Math.random().toString(36).slice(2, 9),
+            dir: trade.dir,
+            entry: trade.entry,
+            tp: trade.tp,
+            sl: trade.sl,
+            startTime: anchor - barSec * OVERLAY_LEAD_BARS,
+            endTime: anchor + barSec * (OVERLAY_BARS - OVERLAY_LEAD_BARS)
+        };
+        entry.positions.push(pos);
+        entry.selectedPosition = pos.id;
+        entry.selectedDrawing = null;
+        entry.measure = null;
+        savePositions(entry);
+        renderDrawings(entry);
+        revealTradePosition(entry, pos);
+        return {
+            ok: true,
+            message: (trade.dir === 'long' ? 'Long' : 'Short') + ' ' + trade.symbol + ' drawn on the chart.'
+        };
+    }
+
+    function applyPendingTradeOverlay(entry) {
+        var trade = entry.pendingOverlay;
+        if (!trade) return;
+        entry.pendingOverlay = null;
+        if (!entry.candles.length) return;
+        reportTradeOverlay(placeTradeOverlay(entry, trade));
+    }
+
+    function revealTradePanel(entry) {
+        if (!entry) return;
+        // A maximized sibling would hide the target panel entirely.
+        if (WS.maximized && WS.maximized !== entry.id) toggleMaximize(entry, true);
+        focusChart(entry);
+    }
+
+    function overlayTrade(trade) {
+        if (!trade || typeof trade !== 'object') {
+            return { ok: false, message: 'No trade levels to overlay.' };
+        }
+        var dir = String(trade.direction || '').toLowerCase();
+        if (dir !== 'long' && dir !== 'short') {
+            return { ok: false, message: 'Only long or short plans can be drawn.' };
+        }
+        var entryPrice = Number(trade.entry);
+        var tp = Number(trade.takeProfit);
+        var sl = Number(trade.stopLoss);
+        if (![entryPrice, tp, sl].every(function (v) { return isFinite(v) && v > 0; })) {
+            return { ok: false, message: 'The plan has no usable entry, take-profit and stop-loss.' };
+        }
+        if (dir === 'long' ? !(sl < entryPrice && entryPrice < tp) : !(tp < entryPrice && entryPrice < sl)) {
+            return { ok: false, message: 'The plan levels are inconsistent, so nothing was drawn.' };
+        }
+        var symbol = String(trade.symbol || '').trim().toUpperCase();
+        if (!symbol) return { ok: false, message: 'The plan does not name an instrument.' };
+        var normalized = {
+            dir: dir,
+            entry: entryPrice,
+            tp: tp,
+            sl: sl,
+            symbol: symbol,
+            exchange: String(trade.exchange || '').trim().toLowerCase(),
+            market: String(trade.market || '').trim().toLowerCase(),
+            timeframe: String(trade.timeframe || '').trim()
+        };
+        var target = findTradeChart(normalized);
+        if (target) {
+            revealTradePanel(target);
+            if (!target.candles.length) {
+                target.pendingOverlay = normalized;
+                return { ok: true, message: 'Waiting for ' + symbol + ' candles…' };
+            }
+            return placeTradeOverlay(target, normalized);
+        }
+        var created = openTradeChart(normalized);
+        if (!created) {
+            return {
+                ok: false,
+                message: 'All 12 chart panels are in use; close one to overlay ' + symbol + '.'
+            };
+        }
+        revealTradePanel(created);
+        created.pendingOverlay = normalized;
+        if (created.candles.length) {
+            created.pendingOverlay = null;
+            return placeTradeOverlay(created, normalized);
+        }
+        return { ok: true, message: 'Opening a ' + symbol + ' chart for the plan…' };
     }
 
     /**
@@ -5178,7 +5448,7 @@
             });
         });
         $('#ws-delete').addEventListener('click', deleteWorkspace);
-        $('#btn-add-chart').addEventListener('click', addChart);
+        $('#btn-add-chart').addEventListener('click', function () { addChart(); });
         $('#btn-save').addEventListener('click', saveNow);
         $('#btn-groups').addEventListener('click', openDrawer);
         $('#drawer-close').addEventListener('click', closeDrawer);
@@ -5215,6 +5485,8 @@
 
         $('#btn-fullscreen').addEventListener('click', toggleFullscreen);
         $('#btn-trade').addEventListener('click', function () { Bridge.call('toggleTopBar'); });
+        $('#btn-settings').addEventListener('click', function () { Bridge.call('openSettings'); });
+        $('#btn-theme').addEventListener('click', function () { Bridge.call('toggleTheme'); });
         document.addEventListener('fullscreenchange', updateFullscreenIcon);
         window.addEventListener('resize', function () { renderGutters(); });
 

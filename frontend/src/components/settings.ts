@@ -1,4 +1,3 @@
-import { openModal } from "./modal";
 import { toast } from "./toast";
 import type {
   CredentialField,
@@ -86,20 +85,29 @@ function asInt(value: string, label: string, min: number, max: number): number {
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-export async function openSettings(ctx: SettingsContext): Promise<void> {
+export interface SettingsContent {
+  indicators: HTMLElement;
+  credentials: HTMLElement;
+  updates: HTMLElement;
+  saveIndicators: HTMLButtonElement;
+  indicatorError: HTMLElement;
+}
+
+export async function buildSettingsContent(ctx: SettingsContext): Promise<SettingsContent> {
   const [configResult, credentialsResult, legacyResult] = await Promise.allSettled([
     ctx.loadIndicatorConfig(),
     ctx.loadCredentials(),
     ctx.legacyCredentials(),
   ]);
   if (configResult.status === "rejected") {
-    toast(`Could not load indicator config: ${String(configResult.reason)}`, "error");
-    return;
+    throw new Error(`Could not load indicator config: ${String(configResult.reason)}`);
   }
   const config = structuredClone(configResult.value) as IndicatorConfig;
   const bindings: InputBinding[] = [];
 
-  const body = el("div");
+  const indicatorsPage = el("div", "settings-tab-page");
+  const credentialsPage = el("div", "settings-tab-page");
+  const updatesPage = el("div", "settings-tab-page");
 
   // ── Indicators ──────────────────────────────────────────────────────────
   const indicators = section("Indicators");
@@ -214,7 +222,7 @@ export async function openSettings(ctx: SettingsContext): Promise<void> {
     el("span", "field-hint", "The box extends to the next session start; all times UTC."),
   );
 
-  body.append(indicators, sessions);
+  indicatorsPage.append(indicators, sessions);
 
   // ── Credentials ─────────────────────────────────────────────────────────
   const credentialsSection = section("Credentials");
@@ -232,7 +240,7 @@ export async function openSettings(ctx: SettingsContext): Promise<void> {
   const credSave = el("button", "ghost-btn", "Save credentials");
   credSave.type = "button";
   credentialsSection.append(credentialRows, credError, credOk, credSave);
-  body.appendChild(credentialsSection);
+  credentialsPage.appendChild(credentialsSection);
 
   const renderCredentials = (fields: CredentialField[]) => {
     credentialRows.replaceChildren();
@@ -362,7 +370,7 @@ export async function openSettings(ctx: SettingsContext): Promise<void> {
   updateRow.style.alignItems = "center";
   updateRow.append(check, install, updateStatus);
   updates.appendChild(updateRow);
-  body.appendChild(updates);
+  updatesPage.appendChild(updates);
 
   check.addEventListener("click", async () => {
     check.disabled = true;
@@ -395,21 +403,13 @@ export async function openSettings(ctx: SettingsContext): Promise<void> {
     }
   });
 
-  // ── Save / cancel ───────────────────────────────────────────────────────
+  // ── Save ────────────────────────────────────────────────────────────────
   const errorLine = el("div", "inline-error");
-
-  const cancel = el("button", "ghost-btn", "Cancel");
-  cancel.type = "button";
   const save = el("button", "primary-btn", "Save indicators");
   save.type = "button";
-
-  const modal = openModal({
-    title: "Settings",
-    subtitle: "Indicator parameters, credentials and updates",
-    body,
-    footer: [errorLine, cancel, save],
-  });
-  cancel.addEventListener("click", modal.close);
+  const saveRow = el("div", "settings-save-row");
+  saveRow.append(errorLine, save);
+  indicatorsPage.appendChild(saveRow);
 
   save.addEventListener("click", async () => {
     errorLine.textContent = "";
@@ -461,9 +461,16 @@ export async function openSettings(ctx: SettingsContext): Promise<void> {
       }
       await ctx.saveIndicatorConfig(config);
       toast("Indicator settings saved", "success");
-      modal.close();
     } catch (error) {
       errorLine.textContent = (error as Error).message;
     }
   });
+
+  return {
+    indicators: indicatorsPage,
+    credentials: credentialsPage,
+    updates: updatesPage,
+    saveIndicators: save,
+    indicatorError: errorLine,
+  };
 }

@@ -2,9 +2,11 @@
 #
 #   powershell -ExecutionPolicy Bypass -File backend\scripts\build-windows.ps1
 #   ... -SkipBackend    # reuse the already staged sidecar
+#   ... -SkipAiRuntime  # reuse the already staged Node + Pi runtime
 #   ... -Install        # force `npm ci` for the shell and the frontend
 param(
     [switch]$SkipBackend,
+    [switch]$SkipAiRuntime,
     [switch]$Install
 )
 $ErrorActionPreference = "Stop"
@@ -14,6 +16,7 @@ Set-Location $Root
 # Remove stale staged resources (Tauri does not prune them).
 if (Test-Path "src-tauri\target\release\backend") { Remove-Item -Recurse -Force "src-tauri\target\release\backend" }
 if (Test-Path "src-tauri\target\release\bundle") { Remove-Item -Recurse -Force "src-tauri\target\release\bundle" }
+if (Test-Path "src-tauri\target\release\ai-runtime") { Remove-Item -Recurse -Force "src-tauri\target\release\ai-runtime" }
 
 $Sidecar = "src-tauri\backend-dist\tradepanel-backend\tradepanel-backend.exe"
 if ($SkipBackend) {
@@ -24,6 +27,13 @@ if ($SkipBackend) {
 } else {
     & (Join-Path $PSScriptRoot "build-backend.ps1")
     if ($LASTEXITCODE -ne 0) { throw "Sidecar build failed" }
+}
+
+if (-not $SkipAiRuntime) {
+    node backend\scripts\build-ai-runtime.mjs --target win-x64
+    if ($LASTEXITCODE -ne 0) { throw "AI runtime build failed" }
+} elseif (-not (Test-Path "src-tauri\ai-runtime\win-x64\manifest.json")) {
+    Write-Warning "-SkipAiRuntime given but src-tauri\ai-runtime\win-x64\manifest.json is missing"
 }
 
 if ($Install -or -not (Test-Path "frontend\node_modules")) {

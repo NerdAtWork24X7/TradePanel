@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="color-scheme" content="dark" />
+    <title>TradePanel AI snapshot renderer</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #12120f;
+        color: #f3f1e9;
+        overflow: hidden;
+      }
+      #stage {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 960px;
+        height: 680px;
+        opacity: 0;
+        pointer-events: none;
+      }
+      #stage .pane {
+        width: 960px;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage" aria-hidden="true"></div>
+    <script src="/lightweight-charts.standalone.production.js"></script>
+    <script type="module" src="/src/ai-snapshot/main.ts"></script>
+  </body>
+</html>

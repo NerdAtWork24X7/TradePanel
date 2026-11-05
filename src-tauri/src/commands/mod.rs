@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, State};
 use tauri_plugin_updater::UpdaterExt;
 
+use crate::ai::AiManager;
 use crate::protocol::{
     is_frontend_method, is_order_method, BackendStatus, RpcErrorPayload, ERR_DUPLICATE_REQUEST,
     ERR_EXECUTION_UNKNOWN, ERR_INTERNAL, ERR_INVALID_REQUEST, ERR_UNAVAILABLE,
@@ -35,6 +36,7 @@ pub struct AppState {
     pub credentials: Arc<SecretStore>,
     pub orders: OrderGate,
     pub data_dir: PathBuf,
+    pub ai: Arc<AiManager>,
 }
 
 // ── Order safety gate ───────────────────────────────────────────────────────
@@ -481,6 +483,26 @@ pub async fn open_trade_page(coin: String) -> Result<(), RpcErrorPayload> {
         return Err(RpcErrorPayload::new(ERR_INVALID_REQUEST, "Invalid coin"));
     }
     let url = format!("https://app.hyperliquid.xyz/trade/{coin}");
+    open::that(url).map_err(|error| {
+        RpcErrorPayload::new(ERR_INTERNAL, format!("Cannot open the browser: {error}"))
+    })
+}
+
+/// Open a provider sign-in URL in the user's browser. Only HTTPS is accepted:
+/// OAuth/device pages are HTTPS, and this command must never become a generic
+/// local-file or shell launcher.
+#[tauri::command]
+pub async fn open_external_url(url: String) -> Result<(), RpcErrorPayload> {
+    let url = url.trim();
+    if url.is_empty() || url.len() > 2048 || !url.starts_with("https://") {
+        return Err(RpcErrorPayload::new(
+            ERR_INVALID_REQUEST,
+            "Only HTTPS links can be opened",
+        ));
+    }
+    if url.chars().any(char::is_control) {
+        return Err(RpcErrorPayload::new(ERR_INVALID_REQUEST, "Invalid link"));
+    }
     open::that(url).map_err(|error| {
         RpcErrorPayload::new(ERR_INTERNAL, format!("Cannot open the browser: {error}"))
     })

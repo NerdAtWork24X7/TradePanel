@@ -1,3 +1,4 @@
+mod ai;
 mod commands;
 mod config;
 mod events;
@@ -67,11 +68,46 @@ pub fn run() {
                 version,
                 credentials.clone(),
             );
+            let ai_paths = ai::paths::AiPaths::prepare(app.handle()).map_err(|error| {
+                Box::<dyn std::error::Error>::from(std::io::Error::other(error))
+            })?;
+            let ai_store = Arc::new(ai::store::AiStore::load(
+                ai_paths.settings_file.clone(),
+                ai_paths.conversations_file.clone(),
+            ));
+            let ai_runtime = ai::runtime::AiRuntime::discover(app.handle());
+            if let Err(error) = &ai_runtime {
+                log::warn!("{error}");
+            } else if let Ok(runtime) = &ai_runtime {
+                log::info!(
+                    "AI runtime available: Node {} / Pi {} ({})",
+                    runtime.node_version,
+                    runtime.pi_version,
+                    runtime.root.display()
+                );
+            }
+            let ai_auth = std::sync::Arc::new(ai::auth::AuthService::new(
+                app.handle().clone(),
+                ai_runtime.clone(),
+                ai_paths.clone(),
+            ));
+            ai_auth.bind();
+            let ai = ai::AiManager::new(
+                app.handle().clone(),
+                ai_paths,
+                ai_store,
+                credentials.clone(),
+                ai_auth,
+                ai_runtime,
+            );
+            ai.bind();
+            ai.start_background();
             app.manage(AppState {
                 sidecar: sidecar.clone(),
                 credentials,
                 orders: commands::OrderGate::new(paths.data_dir.join("trading_state.json")),
                 data_dir: paths.data_dir.clone(),
+                ai: ai.clone(),
             });
             log::info!(
                 "TradePanel {} starting (data dir: {})",
@@ -93,19 +129,47 @@ pub fn run() {
             commands::credentials_import_legacy,
             commands::app_info,
             commands::open_trade_page,
+            commands::open_external_url,
             commands::set_fullscreen,
             commands::log_frontend,
             commands::update_check,
             commands::update_install,
+            ai::commands::ai_status,
+            ai::commands::ai_providers,
+            ai::commands::ai_auth_providers,
+            ai::commands::ai_auth_models,
+            ai::commands::ai_auth_start,
+            ai::commands::ai_auth_answer,
+            ai::commands::ai_auth_cancel,
+            ai::commands::ai_auth_session,
+            ai::commands::ai_auth_logout,
+            ai::commands::ai_diagnostics,
+            ai::commands::ai_runtime_report,
+            ai::commands::ai_connect,
+            ai::commands::ai_disconnect,
+            ai::commands::ai_models,
+            ai::commands::ai_save_preferences,
+            ai::commands::ai_send,
+            ai::commands::ai_abort,
+            ai::commands::ai_stop,
+            ai::commands::ai_history,
+            ai::commands::ai_conversations,
+            ai::commands::ai_conversation_create,
+            ai::commands::ai_conversation_activate,
+            ai::commands::ai_conversation_rename,
+            ai::commands::ai_conversation_delete,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the TradePanel application");
 
     app.run(|handle, event| {
         if let tauri::RunEvent::Exit = event {
-            let manager = handle.state::<AppState>().sidecar.clone();
+            let state = handle.state::<AppState>();
+            let sidecar = state.sidecar.clone();
+            let ai = state.ai.clone();
             tauri::async_runtime::block_on(async move {
-                manager.shutdown().await;
+                sidecar.shutdown().await;
+                ai.shutdown().await;
             });
         }
     });

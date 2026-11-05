@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026-11-05 — maximized chart fills the grid
+- Maximizing a chart left a dead band at the bottom whenever the workspace held
+  more panels than the layout's explicit tracks. Sibling panels were hidden with
+  `visibility: hidden`, so they stayed in grid flow, spilled into implicit rows,
+  and the maximized panel (`grid-row: 1 / -1`, which stops at the explicit grid
+  end) only filled the top tracks. Hidden panels now use `display: none`, so the
+  maximized panel spans the whole grid area.
+- Verified in `tmp/workspace-preview.html` at 1600×900: maximized panel is
+  1584×792 (grid 1600×808 minus 8 px padding), canvas fills the host minus the
+  28 px time axis, restore returns all four panels to 788×392; checked layouts
+  1 / 2h / 2v / 4 / 6 / 8 / custom and a resized grid, zero console warnings.
+
+## 2026-11-05 — AI analysis always returns a trade with a probability
+- `panel_submit_trade_plan` now requires `action` `long`/`short` plus an integer
+  `probability` (1–99), the estimated chance that take-profit is reached before
+  stop-loss. `no-trade` plans are rejected; the prompt tells the model to pick
+  the better-evidenced side, calibrate the percentage from 1d/4h/5m alignment
+  and the 5m trigger, and reflect weak evidence in a lower probability.
+- Trade cards render the percentage as an accent chip in the header and include
+  it in "Copy levels". Plans stored before this change (no-trade, qualitative
+  confidence) still render from conversation history.
+- Verified: frontend typecheck and 27 Node tests; AI smoke test rejects missing
+  probability, no-trade and inverted levels and accepts a 62% long plan.
+
+## 2026-11-05 — sidebar tabs for Trade and AI Analysis
+- The right column is now two views instead of one stacked column: a **Trade**
+  ticket and its own **AI Analysis** tab, switched by an ARIA tab strip
+  (`frontend/src/components/sidebar-tabs.ts`, roving tabindex, Arrow/Home/End,
+  choice persisted, `Ctrl+Shift+A` opens the AI tab). Each view owns the full
+  column height, so the analysis gets a real transcript instead of a 62 % strip.
+- AI type scale raised to a reading size: messages 13 px (was 11), markdown
+  headings 13.5–14.5, plan values 13, compose/input 12–12.5, labels 9.5–10.5.
+  The context bar is two rows now, so the instrument and timeframe never
+  truncate at the 248 px minimum column width; the empty state owns the body
+  when the transcript is empty. The AI tab carries the live status dot, so a
+  run started on the Trade tab stays visible.
+- The panel's own collapse chevron is gone (the tab strip replaces it); the
+  widen button still temporarily expands the column and restores it on Escape
+  or on switching back to Trade.
+- Verified in the Chromium harness at 248/296/380/560 px (no overflow, glider
+  alignment, focus/selection, reload persistence, scroll re-pin after a
+  background run, light theme) plus typecheck, 27 Node tests and the Vite build.
+
 ## 2026-11-05 — clean startup paint and instant app close
 - Startup no longer flashes the raw shell (the skip link and unstyled controls) before
   the stylesheet arrives. `frontend/index.html` carries critical first-paint CSS and a

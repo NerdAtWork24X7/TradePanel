@@ -9,7 +9,9 @@
     "build": "tauri build",
     "frontend:dev": "npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build",
+    "ai:runtime": "node backend/scripts/build-ai-runtime.mjs",
     "test:frontend": "npm --prefix frontend test",
+    "test:ai": "node --test tests/ai_rpc_smoke.mjs tests/ai_settings_service.test.mjs",
     "typecheck": "npm --prefix frontend run typecheck"
   },
   "devDependencies": {

@@ -158,3 +158,201 @@ export interface IndicatorComputeResult {
   ok: boolean;
   [key: string]: unknown;
 }
+
+// ── AI Analysis ────────────────────────────────────────────────────────────
+
+export type AiState =
+  | "stopped"
+  | "starting"
+  | "idle"
+  | "streaming"
+  | "error"
+  | "unavailable";
+
+export interface AiStatus {
+  state: AiState;
+  message: string | null;
+  pid: number | null;
+  runtimeReady: boolean;
+  runtimeError: string | null;
+  nodeVersion: string | null;
+  piVersion: string | null;
+  configured: boolean;
+  hasKey: boolean;
+  provider: string | null;
+  providerLabel: string | null;
+  model: string | null;
+  thinking: string;
+  portfolioContext: boolean;
+  sessionId: string | null;
+  streaming: boolean;
+  attempt: number;
+  models: number;
+  updatedAtMs: number;
+}
+
+export interface AiProvider {
+  id: string;
+  label: string;
+}
+
+export interface AiModel {
+  id: string;
+  name: string;
+  provider: string;
+  contextWindow: number | null;
+  maxTokens: number | null;
+  reasoning: boolean;
+  input: string[];
+}
+
+export interface AiAuthMethod {
+  type: "oauth" | "api_key";
+  label: string;
+  canLogin: boolean;
+}
+
+export interface AiAuthProvider {
+  id: string;
+  name: string;
+  methods: AiAuthMethod[];
+  configured: boolean;
+  usingOAuth: boolean;
+  statusLabel: string;
+}
+
+export interface AiAuthCredential {
+  providerId: string;
+  name: string;
+  type: "oauth" | "api_key";
+}
+
+export interface AiAuthProviders {
+  ready: boolean;
+  reason: string | null;
+  providers: AiAuthProvider[];
+  credentials: AiAuthCredential[];
+}
+
+export interface AiAuthPromptOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface AiAuthPrompt {
+  id: number;
+  type: "text" | "secret" | "select" | "manual_code";
+  message: string;
+  placeholder?: string;
+  options?: AiAuthPromptOption[];
+}
+
+export interface AiAuthEvent {
+  type: "info" | "auth_url" | "device_code" | "progress";
+  message?: string;
+  url?: string;
+  instructions?: string;
+  userCode?: string;
+  verificationUri?: string;
+  links?: { url: string; label?: string }[];
+}
+
+export interface AiAuthSession {
+  id: string;
+  providerId: string;
+  providerName: string;
+  type: "oauth" | "api_key";
+  status: "running" | "ok" | "error" | "cancelled";
+  prompt: AiAuthPrompt | null;
+  events: AiAuthEvent[];
+  error?: string | null;
+  startedAt: number;
+}
+
+export interface AiAuthModel {
+  id: string;
+  name: string;
+  provider: string;
+  contextWindow: number | null;
+  maxTokens: number | null;
+  reasoning: boolean;
+  input: string[];
+  thinkingLevels: string[] | null;
+  cost: UnknownRecord | null;
+}
+
+export interface AiConversation {
+  id: string;
+  title: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+  model: string;
+}
+
+export interface AiConversationStore {
+  version: number;
+  active: string;
+  items: AiConversation[];
+}
+
+export interface AiSettings {
+  provider: string;
+  model: string;
+  thinking: string;
+  portfolioContext: boolean;
+}
+
+export interface AiDiagnostics {
+  runtimeReady: boolean;
+  runtimeError: string | null;
+  runtimeRoot: string | null;
+  nodeVersion: string | null;
+  piVersion: string | null;
+  target: string | null;
+  nodePath: string | null;
+  piCli: string | null;
+  extension: string | null;
+  systemPrompt: string | null;
+  agentDir: string;
+  sessionsDir: string;
+  workspaceDir: string;
+  contextFile: string;
+  sessionFiles: number;
+  lastError: string | null;
+  authReady: boolean;
+  authError: string | null;
+}
+
+export type AiPlanAction = "long" | "short" | "no-trade";
+
+export interface AiTradePlan {
+  /** `no-trade` only appears in plans stored before analysis required a trade. */
+  action: AiPlanAction;
+  /** Estimated chance (integer percentage) that TP is hit before SL. */
+  probability?: number | null;
+  /** Legacy plans used a qualitative confidence instead of `probability`. */
+  confidence?: "low" | "medium" | "high";
+  basisTimeframe: string;
+  rationale: string;
+  entry: number | null;
+  takeProfit: number | null;
+  stopLoss: number | null;
+  qty?: number | null;
+  riskReward: number | null;
+  symbol: string | null;
+  timeframe: string | null;
+  lastPrice?: number | null;
+  acceptedAtMs: number;
+}
+
+export interface AiConnectResult {
+  models: AiModel[];
+  model: string;
+  reply: string;
+}
+
+export interface AiEvent {
+  type: string;
+  [key: string]: unknown;
+}

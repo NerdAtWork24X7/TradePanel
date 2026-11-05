@@ -43,7 +43,8 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "backend-dist/tradepanel-backend": "backend"
+      "backend-dist/tradepanel-backend": "backend",
+      "ai-runtime": "ai-runtime"
     },
     "createUpdaterArtifacts": false,
     "category": "Finance",

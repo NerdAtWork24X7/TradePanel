@@ -10,6 +10,15 @@ export async function openTradePage(coin: string): Promise<void> {
   }
 }
 
+/** HTTPS-only browser open, used by the provider sign-in flow. */
+export async function openExternalUrl(url: string): Promise<void> {
+  try {
+    await invoke("open_external_url", { url });
+  } catch (error) {
+    throw RpcError.from(error);
+  }
+}
+
 export async function setFullscreen(enabled: boolean): Promise<void> {
   try {
     await invoke("set_fullscreen", { enabled });

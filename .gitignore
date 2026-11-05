@@ -73,6 +73,11 @@ frontend/dist/
 src-tauri/target/
 src-tauri/gen/
 src-tauri/backend-dist/
+src-tauri/ai-runtime/*
+!src-tauri/ai-runtime/README.md
 backend/build/dist/
 backend/build/work/
+backend/build/ai-staging/
+backend/build/ai-cache/
 .venv-build/
+backend/build/

@@ -89,6 +89,37 @@ impl SecretStore {
         out
     }
 
+    /// Read a non-trading secret (used for the AI provider key). The caller is
+    /// responsible for the key namespace and validation; trading credentials
+    /// keep using the fixed `FIELDS` allow-list above.
+    pub fn get_external(&self, key: &str) -> Result<Option<Zeroizing<String>>, String> {
+        self.get(key)
+    }
+
+    /// Store a non-trading secret in the OS credential store.
+    #[allow(dead_code)] // retained for migrating older keyring-only installs
+    pub fn set_external(&self, key: &str, value: &str) -> Result<(), String> {
+        if !key.starts_with("AI_PROVIDER_") || key.len() > 96 {
+            return Err("Refusing to store an unknown secret namespace".to_string());
+        }
+        if value.is_empty() || value.len() > 1024 || value.chars().any(char::is_control) {
+            return Err("Invalid secret value".to_string());
+        }
+        let entry = Self::entry(key)?;
+        entry.set_password(value).map_err(store_error)
+    }
+
+    /// Remove a non-trading secret. A missing entry is not an error.
+    pub fn delete_external(&self, key: &str) -> Result<(), String> {
+        if !key.starts_with("AI_PROVIDER_") || key.len() > 96 {
+            return Err("Refusing to delete an unknown secret namespace".to_string());
+        }
+        match Self::entry(key)?.delete_credential() {
+            Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
+            Err(error) => Err(store_error(error)),
+        }
+    }
+
     pub fn get(&self, key: &str) -> Result<Option<Zeroizing<String>>, String> {
         let entry = Self::entry(key)?;
         match entry.get_password() {

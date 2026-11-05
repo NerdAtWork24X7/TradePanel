@@ -9,10 +9,13 @@ import * as trading from "../services/trading";
 import * as updates from "../services/updates";
 import { formatExchangePrice } from "../lib/exchange-price";
 import { openModal } from "../components/modal";
-import { openSettings } from "../components/settings";
+import { openSettingsPage, closeSettingsPage } from "../components/settings-page";
+import { AiPanel, type AiFocus, type AiTicket } from "../components/ai-panel";
+import { SidebarTabs } from "../components/sidebar-tabs";
 import { toast } from "../components/toast";
 import { WorkspaceHost } from "../workspace-host";
 import type {
+  AiTradePlan,
   BackendStatus,
   Direction,
   IndicatorConfig,
@@ -87,8 +90,6 @@ class AppController {
   private readonly sidebarCollapse = must<HTMLButtonElement>("sidebar-collapse");
   private readonly sidebarExpand = must<HTMLButtonElement>("sidebar-expand");
   private readonly backendDot = must<HTMLElement>("backend-dot");
-  private readonly settingsBtn = must<HTMLButtonElement>("settings-btn");
-  private readonly settingsRail = must<HTMLButtonElement>("settings-btn-rail");
   private readonly centerRail = must<HTMLButtonElement>("center-chart-rail");
   private readonly refreshRail = must<HTMLButtonElement>("refresh-coins-rail");
   private readonly openBrowserRail = must<HTMLButtonElement>("open-browser-rail");
@@ -101,6 +102,9 @@ class AppController {
   private readonly versionLabel = must<HTMLElement>("app-version");
 
   private readonly host: WorkspaceHost;
+  private readonly aiPanel: AiPanel;
+  private readonly sidebarTabs: SidebarTabs;
+  private aiFocus: AiFocus | null = null;
   private status: BackendStatus = {
     state: "starting",
     message: null,
@@ -130,11 +134,16 @@ class AppController {
 
   constructor() {
     this.host = new WorkspaceHost(this.frame, {
-      focusedChart: (symbol, _exchange, _market, timeframe) =>
-        this.onFocusedChart(symbol, timeframe),
+      focusedChart: (symbol, exchange, market, timeframe) =>
+        this.onFocusedChart(symbol, exchange, market, timeframe),
       positionDrawing: (direction, entry, tp, sl) =>
         this.applyLevels(direction, entry, tp, sl),
-      configRequested: () => void this.openSettingsDialog(),
+      tradeOverlay: (ok, message) => {
+        if (message) toast(message, ok ? "success" : "error");
+      },
+      configRequested: () => void this.openSettingsDialog("indicators"),
+      openSettings: () => void this.openSettingsDialog("indicators"),
+      toggleTheme: () => this.toggleTheme(),
       toggleTopBar: () => this.toggleSidebar(),
       toggleFullscreen: () => void this.toggleFullscreen(),
       fullscreen: (enabled) => {
@@ -148,6 +157,34 @@ class AppController {
       ready: () => this.onWorkspaceReady(),
       failed: (message) => this.showWorkspaceError(message),
       log: (message) => shell.logFrontend("info", `workspace: ${message}`),
+    });
+    this.aiPanel = new AiPanel({
+      focus: () => this.aiFocus,
+      ticket: (): AiTicket => ({
+        direction: this.direction,
+        qty: this.qty.value,
+        risk: this.risk.value,
+        limit: this.limit.value,
+        tp: this.tp.value,
+        sl: this.sl.value,
+      }),
+      indicatorConfig: () => this.indicatorConfig,
+      precision: (coin) =>
+        this.loadPricePrecision(coin)
+          .then((precision) => precision?.sz_decimals ?? null)
+          .catch(() => null),
+      applyPlan: (plan) => this.applyAiPlan(plan),
+      showPlanOnChart: (plan, focus) => this.overlayAiTrade(plan, focus),
+      openSettings: (tab) => void this.openSettingsDialog(tab === "ai" ? "ai" : "indicators"),
+      closeSettings: () => closeSettingsPage(),
+      log: (message) => shell.logFrontend("info", `ai: ${message}`),
+    });
+    // Trade and AI analysis are separate views of the same column. Switching
+    // away from AI restores the ticket width; switching back re-pins the
+    // transcript to the newest message.
+    this.sidebarTabs = new SidebarTabs(must<HTMLElement>("sidebar-tabs"), (tab) => {
+      if (tab === "ai") this.aiPanel.onShow();
+      else this.aiPanel.onHide();
     });
   }
 
@@ -489,8 +526,6 @@ class AppController {
     this.updateOrder.addEventListener("click", () => void this.submitOrder("update"));
     this.centerChart.addEventListener("click", () => this.host.centerFocused());
     this.openBrowser.addEventListener("click", () => void this.openBrowserPage());
-    this.settingsBtn.addEventListener("click", () => void this.openSettingsDialog());
-    this.settingsRail.addEventListener("click", () => void this.openSettingsDialog());
     this.sidebarCollapse.addEventListener("click", () => this.toggleSidebar(false));
     this.sidebarExpand.addEventListener("click", () => this.toggleSidebar(true));
     this.bannerRetry.addEventListener("click", () => void this.retryBackend());
@@ -519,6 +554,11 @@ class AppController {
         event.preventDefault();
         this.toggleSidebar();
       }
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        if (this.sidebarCollapsed) this.setSidebarCollapsed(false);
+        this.sidebarTabs.select("ai", true);
+      }
       if (event.ctrlKey && !event.shiftKey && event.key === ",") {
         event.preventDefault();
         void this.openSettingsDialog();
@@ -535,6 +575,7 @@ class AppController {
       sync();
     }
     window.addEventListener("beforeunload", () => {
+      this.aiPanel.dispose();
       void this.saveWindowState();
     });
   }
@@ -712,7 +753,16 @@ class AppController {
 
   // ── Position / levels ─────────────────────────────────────────────────
 
-  private onFocusedChart(symbol: string, timeframe: string): void {
+  private onFocusedChart(
+    symbol: string,
+    exchange: string,
+    market: string,
+    timeframe: string,
+  ): void {
+    if (symbol) {
+      this.aiFocus = { symbol, exchange, market, timeframe };
+      this.aiPanel.setFocus(this.aiFocus);
+    }
     const base = (symbol || "").split("/")[0];
     if (base && base !== this.coin.value) {
       this.applyCoins(this.coinList, base);
@@ -806,6 +856,45 @@ class AppController {
     for (const input of [this.limit, this.tp, this.sl]) {
       this.normalizePriceInput(input);
     }
+  }
+
+  /** User-initiated: copy AI plan levels into the ticket (never submits). */
+  private applyAiPlan(plan: AiTradePlan): void {
+    if (plan.action !== "long" && plan.action !== "short") return;
+    this.direction = plan.action;
+    if (plan.entry) this.limit.value = this.formatPrice(plan.entry);
+    if (plan.takeProfit) this.tp.value = this.formatPrice(plan.takeProfit);
+    if (plan.stopLoss) this.sl.value = this.formatPrice(plan.stopLoss);
+    this.updateDirection();
+    this.syncInputTitles();
+    void this.recalculateQty();
+    this.scheduleSave();
+  }
+
+  /** User-initiated: draw the plan as a position box on the matching chart.
+   *  It never fills the ticket and never submits an order. */
+  private overlayAiTrade(plan: AiTradePlan, focus: AiFocus | null): void {
+    if (plan.action !== "long" && plan.action !== "short") return;
+    const { entry, takeProfit, stopLoss } = plan;
+    if (!entry || !takeProfit || !stopLoss) {
+      toast("The plan has no usable levels to draw.", "error");
+      return;
+    }
+    const symbol = (plan.symbol ?? focus?.symbol ?? "").trim();
+    if (!symbol) {
+      toast("The plan does not name an instrument.", "error");
+      return;
+    }
+    this.host.overlayTrade({
+      direction: plan.action,
+      symbol,
+      exchange: focus?.exchange ?? "",
+      market: focus?.market ?? "",
+      timeframe: plan.basisTimeframe || focus?.timeframe || "",
+      entry,
+      takeProfit,
+      stopLoss,
+    });
   }
 
   private applyPosition(position: Position): void {
@@ -1125,34 +1214,49 @@ class AppController {
     }
   }
 
-  private async openSettingsDialog(): Promise<void> {
+  private async openSettingsDialog(tab: "indicators" | "ai" = "indicators"): Promise<void> {
     if (this.status.state !== "running") {
       toast("Backend unavailable — settings cannot be saved", "error");
       return;
     }
     try {
-      await openSettings({
-        loadIndicatorConfig: () => indicators.getIndicatorConfig(),
-        saveIndicatorConfig: async (config) => {
-          const saved = await indicators.saveIndicatorConfig(config);
-          this.indicatorConfig = saved;
-          this.host.setIndicatorConfig(saved as unknown as UnknownRecord);
+      await openSettingsPage(
+        {
+          loadIndicatorConfig: () => indicators.getIndicatorConfig(),
+          saveIndicatorConfig: async (config) => {
+            const saved = await indicators.saveIndicatorConfig(config);
+            this.indicatorConfig = saved;
+            this.host.setIndicatorConfig(saved as unknown as UnknownRecord);
+          },
+          loadCredentials: () => credentials.credentialStatus(),
+          saveCredentials: async (values, clear) => {
+            const saved = await credentials.saveCredentials(values, clear);
+            return saved.fields;
+          },
+          legacyCredentials: () => credentials.legacyCredentialsStatus(),
+          importLegacyCredentials: async () => {
+            const imported = await credentials.importLegacyCredentials();
+            return imported.fields;
+          },
+          checkUpdates: () => updates.checkForUpdates(),
+          installUpdate: () => updates.installUpdate(),
         },
-        loadCredentials: () => credentials.credentialStatus(),
-        saveCredentials: async (values, clear) => {
-          const saved = await credentials.saveCredentials(values, clear);
-          return saved.fields;
-        },
-        legacyCredentials: () => credentials.legacyCredentialsStatus(),
-        importLegacyCredentials: async () => {
-          const imported = await credentials.importLegacyCredentials();
-          return imported.fields;
-        },
-        checkUpdates: () => updates.checkForUpdates(),
-        installUpdate: () => updates.installUpdate(),
-      });
+        this.aiPanel,
+        tab,
+      );
     } catch (error) {
       toast((error as Error).message, "error");
+    }
+  }
+
+  private toggleTheme(): void {
+    const light = document.body.getAttribute("data-theme") === "light";
+    if (light) {
+      document.body.removeAttribute("data-theme");
+      try { localStorage.setItem("tp-theme", "dark"); } catch { /* storage unavailable */ }
+    } else {
+      document.body.setAttribute("data-theme", "light");
+      try { localStorage.setItem("tp-theme", "light"); } catch { /* storage unavailable */ }
     }
   }
 

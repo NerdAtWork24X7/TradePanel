@@ -1,6 +1,7 @@
 import "./styles/fonts.css";
 import "./styles/tokens.css";
 import "./styles/shell.css";
+import "./styles/ai.css";
 import { bootstrapApp } from "./app/controller";
 
 /** The critical inline styles keep the boot screen opaque until the module

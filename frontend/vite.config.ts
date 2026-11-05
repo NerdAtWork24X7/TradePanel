@@ -13,5 +13,12 @@ export default defineConfig({
     emptyOutDir: true,
     target: "es2022",
     sourcemap: false,
+    rollupOptions: {
+      // The hidden AI snapshot renderer is a second page in the same bundle.
+      input: {
+        main: "index.html",
+        snapshot: "snapshot.html",
+      },
+    },
   },
 });

@@ -6,6 +6,7 @@
 #   ./build.sh --debug          # debug bundle, no optimisations
 #   ./build.sh --bundles=deb    # override the Tauri bundle targets
 #   ./build.sh --skip-backend   # reuse the already staged Python sidecar
+#   ./build.sh --skip-ai-runtime  # reuse the already staged Node + Pi runtime
 #   ./build.sh --install        # force `npm ci` for the shell and the frontend
 #
 # Bundling targets come from src-tauri/tauri.<platform>.conf.json unless
@@ -34,6 +35,7 @@ usage() {
 MODE="release"
 BUNDLES=""
 SKIP_BACKEND=0
+SKIP_AI_RUNTIME=0
 FORCE_INSTALL=0
 PASSTHRU=()
 
@@ -43,6 +45,7 @@ while [[ $# -gt 0 ]]; do
     --bundles) BUNDLES="${2:-}"; [[ -n "$BUNDLES" ]] || { echo "--bundles needs a value" >&2; exit 2; }; shift ;;
     --bundles=*) BUNDLES="${1#*=}" ;;
     --skip-backend) SKIP_BACKEND=1 ;;
+    --skip-ai-runtime) SKIP_AI_RUNTIME=1 ;;
     --install) FORCE_INSTALL=1 ;;
     -h|--help) usage; exit 0 ;;
     *) PASSTHRU+=("$1") ;;
@@ -82,6 +85,14 @@ else
   backend/scripts/build-backend.sh
 fi
 
+# ── Bundled AI runtime ──────────────────────────────────────────────────────
+if [[ $SKIP_AI_RUNTIME -eq 1 ]]; then
+  [[ -f "src-tauri/ai-runtime/$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')/manifest.json" ]] \
+    || echo "Warning: --skip-ai-runtime given but no staged runtime was found" >&2
+else
+  node backend/scripts/build-ai-runtime.mjs --target "$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')"
+fi
+
 # Tauri overlays resources instead of pruning them: stale sidecar files (e.g. a
 # removed TBB backend) would otherwise survive into the bundle. The loose
 # `tradepanel-backend` file is the pre-resource-mapping layout; it is unused but
@@ -89,6 +100,7 @@ fi
 rm -rf "src-tauri/target/$MODE/backend"
 rm -rf "src-tauri/target/$MODE/tradepanel-backend"
 rm -rf "src-tauri/target/$MODE/bundle"
+rm -rf "src-tauri/target/$MODE/ai-runtime"
 
 # ── Build ───────────────────────────────────────────────────────────────────
 ARGS=(build)

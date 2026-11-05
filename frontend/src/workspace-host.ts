@@ -12,13 +12,27 @@ type Envelope =
 export interface WorkspaceHandlers {
   focusedChart(symbol: string, exchange: string, market: string, timeframe: string): void;
   positionDrawing(direction: string, entry: number, tp: number, sl: number): void;
+  tradeOverlay(ok: boolean, message: string): void;
   configRequested(): void;
+  openSettings(): void;
+  toggleTheme(): void;
   toggleTopBar(): void;
   toggleFullscreen(): void;
   fullscreen(enabled: boolean): void;
   ready(): void;
   failed(message: string): void;
   log(message: string): void;
+}
+
+export interface WorkspaceTradeOverlay {
+  direction: "long" | "short";
+  symbol: string;
+  exchange?: string;
+  market?: string;
+  timeframe?: string;
+  entry: number;
+  takeProfit: number;
+  stopLoss: number;
 }
 
 const ORIGIN =
@@ -116,6 +130,15 @@ export class WorkspaceHost {
     this.send("centerFocused", []);
   }
 
+  /**
+   * Draw an AI trade plan on the workspace chart of its instrument. The
+   * workspace resolves (or opens) the matching panel and reports the outcome
+   * through the `tradeOverlay` event. It never fills the ticket or submits.
+   */
+  overlayTrade(trade: WorkspaceTradeOverlay): void {
+    this.send("overlayTrade", [trade]);
+  }
+
   setIndicatorConfig(config: UnknownRecord): void {
     this.send("setIndicatorConfig", [config]);
   }
@@ -168,8 +191,17 @@ export class WorkspaceHost {
           asNumber(payload[2]), asNumber(payload[3]),
         );
         break;
+      case "tradeOverlay":
+        this.handlers.tradeOverlay(Boolean(payload[0]), asString(payload[1]));
+        break;
       case "configRequested":
         this.handlers.configRequested();
+        break;
+      case "openSettings":
+        this.handlers.openSettings();
+        break;
+      case "toggleTheme":
+        this.handlers.toggleTheme();
         break;
       case "toggleTopBar":
         this.handlers.toggleTopBar();

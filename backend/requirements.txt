@@ -1,7 +1,8 @@
 # Runtime dependencies for the TradePanel sidecar only (no Qt).
-# The desktop shell (Tauri/Rust) is built separately.
-python-dotenv>=1.0
-requests>=2.31
-pandas>=2.2
-pandas_ta>=0.3.14b0
-hyperliquid-python-sdk>=0.16
+# Pinned to the versions exercised by the migration regression suite.
+python-dotenv==1.2.2
+requests==2.34.2
+pandas==3.0.3
+numpy==2.2.6
+pandas_ta==0.4.71b0
+hyperliquid-python-sdk==0.24.0

@@ -235,6 +235,10 @@ impl SidecarManager {
         envs.insert("TRADEPANEL_IGNORE_ENV_FILE".to_string(), "1".to_string());
         // numba's optional TBB layer is not bundled (no libtbb dependency).
         envs.insert("NUMBA_THREADING_LAYER".to_string(), "workqueue".to_string());
+        envs.insert(
+            "TRADEPANEL_APP_VERSION".to_string(),
+            self.app_version.clone(),
+        );
 
         let mut command = Command::new(&self.binary);
         command

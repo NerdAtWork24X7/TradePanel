@@ -39,7 +39,7 @@ from .protocol import (
 
 log = logging.getLogger(__name__)
 
-BACKEND_VERSION = "0.1.0"
+BACKEND_VERSION = os.environ.get("TRADEPANEL_APP_VERSION", "0.1.0")
 LAYOUTS = ["1", "2h", "2v", "4", "6", "8", "custom"]
 
 

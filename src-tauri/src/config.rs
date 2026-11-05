@@ -59,6 +59,11 @@ pub fn sidecar_binary(app: &AppHandle) -> Result<PathBuf, String> {
         "tradepanel-backend"
     };
     let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(value) = std::env::var("TRADEPANEL_BACKEND_BIN") {
+        if !value.trim().is_empty() {
+            candidates.push(PathBuf::from(value));
+        }
+    }
     if let Ok(resource_dir) = app.path().resource_dir() {
         candidates.push(resource_dir.join("backend").join(name));
         candidates.push(resource_dir.join("backend-dist").join("tradepanel-backend").join(name));
@@ -69,22 +74,25 @@ pub fn sidecar_binary(app: &AppHandle) -> Result<PathBuf, String> {
             candidates.push(dir.join("backend-dist").join("tradepanel-backend").join(name));
         }
     }
-    if cfg!(debug_assertions) {
-        candidates.push(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("backend-dist")
-                .join("tradepanel-backend")
-                .join(name),
-        );
-    }
-    for candidate in candidates {
+    // Development and CI: `cargo run --release` does not stage bundle resources.
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("backend-dist")
+            .join("tradepanel-backend")
+            .join(name),
+    );
+    for candidate in &candidates {
         if candidate.is_file() {
-            return Ok(candidate);
+            return Ok(candidate.clone());
         }
     }
     Err(format!(
-        "Python backend executable not found. Build it with `scripts/build-backend.sh` (or the PowerShell equivalent). Looked for: {}",
-        name
+        "Python backend executable not found. Build it with `scripts/build-backend.sh` (or the PowerShell equivalent). Tried: {}",
+        candidates
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
     ))
 }
 

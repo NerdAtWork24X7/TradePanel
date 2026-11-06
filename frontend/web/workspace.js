@@ -525,18 +525,29 @@
         typeBtn.appendChild(panelIcon('tp-chevron-down', 12));
         head.appendChild(typeBtn);
 
+        var headTools = el('div', 'head-tools');
+        var indBtn = el('button', 'icon-btn');
+        indBtn.type = 'button';
+        indBtn.dataset.action = 'indicators';
+        indBtn.title = 'Indicators';
+        indBtn.setAttribute('aria-label', 'Indicators');
+        indBtn.appendChild(panelIcon('header-indicators-metrics-and-strategies', 20));
+        var drawBtn = el('button', 'icon-btn');
+        drawBtn.type = 'button';
+        drawBtn.dataset.action = 'draw';
+        drawBtn.title = 'Drawing tools';
+        drawBtn.setAttribute('aria-label', 'Drawing tools');
+        drawBtn.appendChild(panelIcon('draw-brush', 20));
+        headTools.appendChild(indBtn);
+        headTools.appendChild(drawBtn);
+        head.appendChild(headTools);
+
         var priceSpan = el('span', 'head-price', '—');
         var chgSpan = el('span', 'head-chg flat', '—');
         head.appendChild(priceSpan);
         head.appendChild(chgSpan);
 
         var tools = el('div', 'panel-tools');
-        var indBtn = el('button', 'icon-btn');
-        indBtn.type = 'button';
-        indBtn.dataset.action = 'indicators';
-        indBtn.title = 'Indicators';
-        indBtn.setAttribute('aria-label', 'Indicators');
-        indBtn.appendChild(panelIcon('header-indicators-metrics-and-strategies', 17));
         var refBtn = el('button', 'icon-btn');
         refBtn.type = 'button';
         refBtn.dataset.action = 'reference';
@@ -544,12 +555,6 @@
         refBtn.setAttribute('aria-label', 'Price-scale reference point');
         refBtn.appendChild(panelIcon('dt-anchor', 17));
         refBtn.style.display = 'none';
-        var drawBtn = el('button', 'icon-btn');
-        drawBtn.type = 'button';
-        drawBtn.dataset.action = 'draw';
-        drawBtn.title = 'Drawing tools';
-        drawBtn.setAttribute('aria-label', 'Drawing tools');
-        drawBtn.appendChild(panelIcon('draw-brush', 17));
         var statsBtn = el('button', 'icon-btn');
         statsBtn.type = 'button';
         statsBtn.dataset.action = 'stats';
@@ -568,9 +573,7 @@
         closeBtn.title = 'Remove chart';
         closeBtn.setAttribute('aria-label', 'Remove chart');
         closeBtn.appendChild(panelIcon('tab-close', 17));
-        tools.appendChild(indBtn);
         tools.appendChild(refBtn);
-        tools.appendChild(drawBtn);
         tools.appendChild(statsBtn);
         tools.appendChild(maxBtn);
         tools.appendChild(closeBtn);
@@ -966,7 +969,7 @@
             panel.classList.remove('drag-over');
         });
 
-        entry.head.querySelectorAll('.panel-tools .icon-btn').forEach(function (btn) {
+        entry.head.querySelectorAll('.icon-btn').forEach(function (btn) {
             btn.addEventListener('click', function (ev) {
                 ev.stopPropagation();
                 switch (btn.dataset.action) {

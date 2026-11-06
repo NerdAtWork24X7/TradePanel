@@ -461,10 +461,17 @@
 
 .ai-tool-icon {
   flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--accent-text);
+}
+
+.ai-tool-icon svg {
+  width: 14px;
+  height: 14px;
 }
 
 .ai-tool[data-state="running"] .ai-tool-icon {
@@ -472,11 +479,11 @@
 }
 
 .ai-tool[data-state="done"] .ai-tool-icon {
-  background: var(--success);
+  color: var(--success);
 }
 
 .ai-tool[data-state="error"] .ai-tool-icon {
-  background: var(--danger);
+  color: var(--danger);
 }
 
 .ai-tool-label {
@@ -597,6 +604,8 @@
 }
 
 .ai-start-spark {
+  display: inline-flex;
+  align-items: center;
   font-size: var(--text-md);
 }
 
@@ -633,8 +642,12 @@
 
 .ai-send,
 .ai-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   height: var(--input-h);
-  padding: 0 14px;
+  padding: 0 12px;
   font-size: var(--text-base);
 }
 
@@ -1303,4 +1316,10 @@
 
 .ai-auth-status[data-tone="error"] {
   color: var(--danger);
+}
+
+.ai-conv-action.is-confirm {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-soft);
 }

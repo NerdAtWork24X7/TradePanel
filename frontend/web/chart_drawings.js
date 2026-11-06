@@ -248,6 +248,46 @@
         content: ['M4 5h16v14H4z', 'M4 15l4-4 4 4 3-3 5 5', 'M9 9.5a1 1 0 1 0 0-.01']
     };
 
+    /* OpenTrader/TradingView icon names (frontend/web/icons.js). 78 of the 86
+     * kinds match `draw-<kind>`; these aliases cover the rest. */
+    var ICON_ALIASES = {
+        'fib-retracement': 'draw-fib',
+        'xabcd-pattern': 'draw-abcd-pattern',
+        'elliott-impulse': 'draw-elliott-impulse-wave-1-2-3-4-5',
+        'elliott-correction': 'draw-elliott-correction-wave-a-b-c',
+        'elliott-triangle': 'draw-elliott-triangle-wave-a-b-c-d-e',
+        'elliott-double-combo': 'draw-elliott-double-combo-wave-w-x-y',
+        'elliott-triple-combo': 'draw-elliott-triple-combo-wave-w-x-y-x-z',
+        'long-position': 'draw-position'
+    };
+    var FAMILY_ICON_NAMES = {
+        lines: 'draw-linetool-group-trend-line',
+        channels: 'draw-parallel-channel',
+        pitchforks: 'draw-pitchfork',
+        fib: 'draw-fib',
+        gann: 'draw-gann-box',
+        patterns: 'draw-linetool-group-patterns',
+        elliott: 'draw-elliott-impulse-wave-1-2-3-4-5',
+        cycles: 'draw-cyclic-lines',
+        forecast: 'draw-linetool-group-prediction-and-measurement',
+        volume: 'draw-anchored-volume-profile',
+        measure: 'draw-measure',
+        brushes: 'draw-brush',
+        arrows: 'draw-arrow',
+        shapes: 'draw-linetool-group-geometric-shapes',
+        text: 'draw-linetool-group-annotation',
+        content: 'draw-image'
+    };
+
+    function iconNameFor(kind) {
+        if (Object.prototype.hasOwnProperty.call(ICON_ALIASES, kind)) return ICON_ALIASES[kind];
+        return 'draw-' + kind;
+    }
+
+    function familyIconName(family) {
+        return FAMILY_ICON_NAMES[family] || 'draw-linetool-group-trend-line';
+    }
+
     var DEFAULT_FAVORITES = ['trend-line', 'horizontal-line', 'rectangle', 'fib-retracement', 'text', 'brush'];
     var MAX_FAVORITES = 8;
 
@@ -489,6 +529,8 @@
         DEFAULT_FAVORITES: DEFAULT_FAVORITES,
         MAX_FAVORITES: MAX_FAVORITES,
         iconFor: iconFor,
+        iconNameFor: iconNameFor,
+        familyIconName: familyIconName,
         legacyKind: legacyKind,
         isKnownKind: isKnownKind,
         kindLabel: kindLabel,

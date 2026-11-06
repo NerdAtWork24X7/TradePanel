@@ -110,6 +110,10 @@ backend/scripts/test.sh
 
 * Pi Scope theme: warm near-black surfaces, one amber accent, Clash Grotesk /
   Satoshi / Meslo type, light + dark toggle (persisted in `localStorage`).
+* Chart workspace: neutral OpenTrader/TradingView chrome (grey surfaces, blue
+  accent, flat 1 px pane seams), always-on OHLC/study legend, floating
+  zoom/reset/latest bar controls, 86 drawing-tool glyphs and the shell's filled
+  SVG icon set (`frontend/web/icons`, MIT).
 * Resizable, collapsible trade sidebar: Coin/TF + refresh icon, Center /
   Hyperliquid / Open ↗ on one line, QTY/RISK, direction + LIM, TP/SL, Read order,
   Update Order, Set Order. Drag the inner edge (or focus it and use the arrow

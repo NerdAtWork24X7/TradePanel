@@ -6,6 +6,7 @@
  */
 import { toast } from "./toast";
 import { buildSettingsContent, type SettingsContext } from "./settings";
+import { iconSpan } from "../lib/icons";
 import type { AiPanel } from "./ai-panel";
 
 export type SettingsTab = "indicators" | "credentials" | "ai" | "updates";
@@ -14,13 +15,14 @@ interface TabDef {
   id: SettingsTab;
   label: string;
   hint: string;
+  icon: string;
 }
 
 const TABS: TabDef[] = [
-  { id: "indicators", label: "Indicators", hint: "EMA ribbon, VWAP, FVG, sessions" },
-  { id: "credentials", label: "Credentials", hint: "Hyperliquid API keys" },
-  { id: "ai", label: "AI Analysis", hint: "Pi sign-in and model" },
-  { id: "updates", label: "Updates", hint: "Signed release channel" },
+  { id: "indicators", label: "Indicators", hint: "EMA ribbon, VWAP, FVG, sessions", icon: "header-indicators-metrics-and-strategies" },
+  { id: "credentials", label: "Credentials", hint: "Hyperliquid API keys", icon: "dt-cm-lock" },
+  { id: "ai", label: "AI Analysis", hint: "Pi sign-in and model", icon: "ai-sparkle" },
+  { id: "updates", label: "Updates", hint: "Signed release channel", icon: "update-app-download" },
 ];
 
 let panel: HTMLElement | null = null;
@@ -44,13 +46,16 @@ function tabButton(def: TabDef): HTMLButtonElement {
   button.dataset.tab = def.id;
   button.setAttribute("role", "tab");
   button.setAttribute("aria-selected", "false");
+  const head = document.createElement("span");
+  head.className = "settings-nav-head";
   const label = document.createElement("span");
   label.className = "settings-nav-label";
   label.textContent = def.label;
+  head.append(iconSpan(def.icon, 17, "settings-nav-icon"), label);
   const hint = document.createElement("span");
   hint.className = "settings-nav-hint";
   hint.textContent = def.hint;
-  button.append(label, hint);
+  button.append(head, hint);
   button.addEventListener("click", () => setTab(def.id));
   return button;
 }

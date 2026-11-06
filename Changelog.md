@@ -1,3 +1,53 @@
+## 2026-11-06 — OpenTrader chart chrome + shared icon set
+
+- **Neutral chart workspace**: the multi-chart iframe now uses the
+  OpenTrader/TradingView palette instead of the amber shell identity — `#0f0f0f`
+  chart background, `#1f1f1f` bars, `#2e2e2e` hairlines, blue `#2962ff` accent,
+  `#089981`/`#f23645` candles, 1 px pane seams, square panes, 34 px headers and a
+  46 px toolbar + 34 px context bar. Light theme mirrors it with `#ffffff` /
+  `#e0e3eb` / `#131722`. Real `up/-down` text variants keep the always-on legend
+  AA-compliant in both themes.
+- **OpenTrader icon migration (MIT)**: vendored the TradingView-style filled SVG
+  set into `frontend/web/icons/` (attribution + licence included) and generated
+  two registries from it — `frontend/web/icons.js` (`OTIcons`, used by the chart
+  workspace) and `frontend/src/lib/icons-data.ts` (72-icon tree-shaken subset for
+  the shell). `npm --prefix frontend run icons` rebuilds both; a contract test
+  (`tests/icons.test.mjs`) fails if a drawing tool, shell placeholder or family
+  icon loses its glyph. 86 drawing tools now map to their real TradingView
+  glyphs (78 direct `draw-<kind>` names + 8 aliases), including the Elliott,
+  Gann, Fib, pattern and forecasting families.
+- **Chart chrome rebuilt around the pane**:
+  - panel header: 34 px strip with drag handle, group swatch, symbol/timeframe/
+    chart-type controls with chevrons, price/change and 26 px icon tools;
+  - **always-on legend** at the plot's top-left, with O/H/L/C/V + bar change
+    tracking the crosshair and study rows underneath, instead of a hover-only
+    OHLC chip and footer legend;
+  - **floating navigation pad** (zoom out/in, reset view, go to latest) revealed
+    on pane hover, with `fitContent`/`scrollToRealTime` semantics;
+  - **drawing rail** is now a 42 px full-height strip (OpenTrader layout) with
+    32 px cells, and the all-tools palette is a 304 px flyout with search,
+    family icons, per-tool glyphs, pin star and magnet/visibility toggles;
+  - layout switcher, sync toggles, status pill, modals, drawer, popovers,
+    segmented controls and the selected-drawing style bar were restyled to the
+    same 4–6 px neutral language; a theme-aware sun/moon glyph replaces `◐`.
+- **Shell + AI panel**: all 11 inline stroke SVGs in `index.html` were replaced
+  with hydrated filled icons (rail expand/collapse, center, refresh, open,
+  AI history/expand/settings, close), conversation rename/delete use proper
+  glyphs, AI tool rows show a per-tool icon, settings tabs gained section icons,
+  and the brand/boot marks share the new chart-bar logo.
+- **App icons**: `src-tauri/icons/*` regenerated from
+  `frontend/web/icons/tp-app-icon.svg` (warm dark rounded square, three amber
+  bars), including `.ico`, `.icns` and the 32/64/128/256/512 PNGs.
+- Verified: `npm --prefix frontend test` (88 pass, incl. 3 icon-contract tests),
+  `tsc --noEmit`, `vite build`; `tmp/ui_audit.mjs` at 1280/1366/1920/2560 in
+  both themes and the symbol/indicator/credentials modals (0 small-text,
+  contrast, border, clipping or overflow failures); `draw_layout_audit`,
+  `draw_integration_audit`, `draw_favorites_audit`, `draw_drag_audit`,
+  `guide_audit` all pass (86 tools, rail 42 px, palette 304 px, no console
+  errors); chrome measurements at 1440/1280/1024/900 show zero top/sub-bar,
+  panel-header or legend overflow; shell + AI panel audits at both themes show
+  zero missing placeholders and zero contrast/overflow failures.
+
 # Changelog
 
 ## 2026-11-06 — Drawing tools: lightweight-charts-drawing integration (v5)

@@ -204,3 +204,19 @@ button[aria-disabled="true"] {
 svg {
   flex: none;
 }
+
+.ico {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.ico svg {
+  display: block;
+}
+
+.icon-btn > .ico svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}

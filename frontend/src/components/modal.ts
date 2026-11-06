@@ -1,3 +1,5 @@
+import { setIcon } from "../lib/icons";
+
 export interface ModalOptions {
   title: string;
   subtitle?: string;
@@ -47,7 +49,7 @@ export function openModal(options: ModalOptions): ModalHandle {
   closeBtn.type = "button";
   closeBtn.className = "icon-btn close";
   closeBtn.setAttribute("aria-label", "Close dialog");
-  closeBtn.textContent = "✕";
+  setIcon(closeBtn, "tab-close", 16);
   header.appendChild(closeBtn);
 
   const body = document.createElement("div");

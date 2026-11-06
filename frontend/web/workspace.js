@@ -325,6 +325,7 @@
             btn.setAttribute('role', 'menuitem');
             if (item.checked) btn.setAttribute('aria-checked', 'true');
             if (item.disabled) btn.disabled = true;
+            if (item.icon) btn.appendChild(panelIcon(item.icon, 16));
             btn.appendChild(el('span', '', item.label));
             if (item.hint) btn.appendChild(el('span', 'key', item.hint));
             if (item.tag) btn.appendChild(el('span', 'tag', item.tag));
@@ -428,7 +429,12 @@
 
     /* ── Panel construction ───────────────────────────────────────────────── */
 
-    function panelIcon(paths) {
+    function panelIcon(paths, size) {
+        if (typeof paths === 'string') {
+            var named = window.OTIcons && window.OTIcons.el(paths, size || 18);
+            if (named) return named;
+            paths = ['M4 12h16'];
+        }
         var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.setAttribute('viewBox', '0 0 24 24');
         svg.setAttribute('fill', 'none');
@@ -444,6 +450,28 @@
         return svg;
     }
 
+    /** Fill static `data-icon` placeholders from the shared SVG registry. */
+    function hydrateIcons() {
+        if (!window.OTIcons) return;
+        document.querySelectorAll('[data-icon]').forEach(function (node) {
+            var name = node.getAttribute('data-icon');
+            if (!name || !window.OTIcons.has(name)) return;
+            var size = Number(node.getAttribute('data-icon-size')) || 18;
+            var icon = window.OTIcons.el(name, size);
+            if (icon) node.replaceChildren(icon);
+        });
+        syncThemeButton();
+    }
+
+    function syncThemeButton() {
+        var btn = $('#btn-theme');
+        if (!btn) return;
+        var light = currentTheme() === 'light';
+        btn.replaceChildren(panelIcon(light ? 'tp-sun' : 'tp-moon', 18));
+        btn.title = light ? 'Switch to dark theme' : 'Switch to light theme';
+        btn.setAttribute('aria-label', btn.title);
+    }
+
     function buildPanel(entry) {
         var cfg = entry.config;
         var panel = el('section', 'panel');
@@ -451,7 +479,8 @@
 
         var head = el('header', 'panel-head');
 
-        var grip = el('span', 'drag-grip', '⠿');
+        var grip = el('span', 'drag-grip');
+        grip.appendChild(panelIcon('dt-drag', 14));
         grip.title = 'Drag to rearrange panels';
         grip.setAttribute('draggable', 'true');
         head.appendChild(grip);
@@ -473,14 +502,21 @@
         symBtn.appendChild(mktSpan);
         head.appendChild(symBtn);
 
-        var tfBtn = el('button', 'head-btn', tfLabel(cfg.timeframe));
+        var tfBtn = el('button', 'head-btn tf-btn');
         tfBtn.type = 'button';
         tfBtn.title = 'Timeframe';
+        tfBtn.appendChild(el('span', 'tf-label', tfLabel(cfg.timeframe)));
+        tfBtn.appendChild(panelIcon('tp-chevron-down', 12));
         head.appendChild(tfBtn);
 
-        var typeBtn = el('button', 'head-btn type-btn', '');
+        var typeBtn = el('button', 'head-btn type-btn');
         typeBtn.type = 'button';
         typeBtn.title = 'Chart type';
+        var typeIco = el('span', 'type-ico');
+        typeIco.appendChild(panelIcon('header-candles', 15));
+        typeBtn.appendChild(typeIco);
+        typeBtn.appendChild(el('span', 'type-label', ''));
+        typeBtn.appendChild(panelIcon('tp-chevron-down', 12));
         head.appendChild(typeBtn);
 
         var priceSpan = el('span', 'head-price', '—');
@@ -494,20 +530,20 @@
         indBtn.dataset.action = 'indicators';
         indBtn.title = 'Indicators';
         indBtn.setAttribute('aria-label', 'Indicators');
-        indBtn.appendChild(panelIcon(['M4 18V9M9 18V5M14 18v-6M19 18v-9']));
+        indBtn.appendChild(panelIcon('header-indicators-metrics-and-strategies', 17));
         var refBtn = el('button', 'icon-btn');
         refBtn.type = 'button';
         refBtn.dataset.action = 'reference';
         refBtn.title = 'Price-scale reference point';
         refBtn.setAttribute('aria-label', 'Price-scale reference point');
-        refBtn.appendChild(panelIcon(['M12 3v18', 'M6 7h12', 'M8 17h8']));
+        refBtn.appendChild(panelIcon('dt-anchor', 17));
         refBtn.style.display = 'none';
         var drawBtn = el('button', 'icon-btn');
         drawBtn.type = 'button';
         drawBtn.dataset.action = 'draw';
         drawBtn.title = 'Drawing tools';
         drawBtn.setAttribute('aria-label', 'Drawing tools');
-        drawBtn.appendChild(panelIcon(['M4 20l5-1 9-9-3-3-9 9-2 4z', 'M14.5 5.5l3 3']));
+        drawBtn.appendChild(panelIcon('draw-brush', 17));
         var statsBtn = el('button', 'icon-btn');
         statsBtn.type = 'button';
         statsBtn.dataset.action = 'stats';
@@ -519,13 +555,13 @@
         maxBtn.dataset.action = 'maximize';
         maxBtn.title = 'Maximize / restore';
         maxBtn.setAttribute('aria-label', 'Maximize or restore');
-        maxBtn.appendChild(panelIcon(['M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5']));
+        maxBtn.appendChild(panelIcon('chart-maximize', 17));
         var closeBtn = el('button', 'icon-btn');
         closeBtn.type = 'button';
         closeBtn.dataset.action = 'close';
         closeBtn.title = 'Remove chart';
         closeBtn.setAttribute('aria-label', 'Remove chart');
-        closeBtn.appendChild(panelIcon(['M6 6l12 12M18 6L6 18']));
+        closeBtn.appendChild(panelIcon('tab-close', 17));
         tools.appendChild(indBtn);
         tools.appendChild(refBtn);
         tools.appendChild(drawBtn);
@@ -545,11 +581,13 @@
         pane.appendChild(paneCanvas);
         body.appendChild(pane);
 
-        var legend = el('div', 'ind-legend');
-        // Legend lives in the footer so the plot stays unobstructed.
-        legend.classList.add('in-foot');
-
+        // Always-on plot legend: values row tracks the crosshair, studies
+        // stack underneath (TradingView / OpenTrader legend layout).
         var strip = el('div', 'ohlc-strip');
+        var stripValues = el('div', 'lv-values');
+        var legend = el('div', 'ind-legend');
+        strip.appendChild(stripValues);
+        strip.appendChild(legend);
         body.appendChild(strip);
 
         var agg = el('div', 'agg-note');
@@ -575,13 +613,16 @@
         var drawCanvas = el('canvas', 'draw-layer');
         body.appendChild(drawCanvas);
 
+        var controls = buildChartControls(entry);
+        body.appendChild(controls);
+
         var foot = el('footer', 'panel-foot');
         var live = el('span', 'live', 'live');
         var bars = el('span', 'bars', '—');
         var ms = el('span', 'ms', '');
         foot.appendChild(live);
         foot.appendChild(bars);
-        foot.appendChild(legend);
+        foot.appendChild(el('span', 'spacer'));
         foot.appendChild(ms);
 
         panel.appendChild(head);
@@ -593,6 +634,7 @@
         entry.host = hostInner;
         entry.body = body;
         entry.ohlcStrip = strip;
+        entry.stripValues = stripValues;
         entry.aggNote = agg;
         entry.overlay = overlay;
         entry.indCanvas = indCanvas;
@@ -600,6 +642,7 @@
         entry.pane = pane;
         entry.paneCanvas = paneCanvas;
         entry.legend = legend;
+        entry.chartControls = controls;
         entry.textEditor = textEditor;
         entry.textInput = textInput;
         entry.priceSpan = priceSpan;
@@ -621,12 +664,7 @@
     }
 
     function statsToggleIcon(visible) {
-        return visible
-            ? ['M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z',
-               'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z']
-            : ['M3 3l18 18',
-               'M10.6 6.1A10.9 10.9 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.5 3.9',
-               'M6.6 6.7A17.4 17.4 0 0 0 2 12s3.6 6 10 6a10.6 10.6 0 0 0 4.2-.9'];
+        return visible ? 'st-legend-eye-show' : 'draw-hide-indicators';
     }
 
     function syncStatsButtons(entry) {
@@ -646,6 +684,69 @@
         renderDrawings(entry);
     }
 
+    /** Floating pane navigation: zoom, reset view, jump to the latest bar. */
+    function buildChartControls(entry) {
+        var bar = el('div', 'chart-controls');
+        bar.setAttribute('role', 'group');
+        bar.setAttribute('aria-label', 'Chart navigation');
+        bar.addEventListener('pointerdown', function (ev) { ev.stopPropagation(); });
+
+        function control(icon, title, action) {
+            var btn = el('button', 'cc-btn');
+            btn.type = 'button';
+            btn.title = title;
+            btn.setAttribute('aria-label', title);
+            btn.appendChild(panelIcon(icon, 16));
+            btn.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                action();
+            });
+            bar.appendChild(btn);
+            return btn;
+        }
+
+        function zoom(factor) {
+            var chart = entry.chart;
+            if (!chart) return;
+            var ts = chart.timeScale();
+            var range = ts.getVisibleLogicalRange();
+            if (!range) return;
+            var mid = (range.from + range.to) / 2;
+            var half = Math.max(4, (range.to - range.from) * factor / 2);
+            ts.setVisibleLogicalRange({ from: mid - half, to: mid + half });
+        }
+
+        control('chart-zoom-out', 'Zoom out (Ctrl + ↓)', function () { zoom(1.25); });
+        control('chart-zoom-in', 'Zoom in (Ctrl + ↑)', function () { zoom(0.8); });
+        control('chart-reset-view', 'Reset chart view (Alt + R)', function () {
+            if (!entry.chart) return;
+            resetPricePan(entry);
+            entry.chart.timeScale().fitContent();
+        });
+        control('chart-goto-realtime', 'Go to the latest bar (→)', function () {
+            if (!entry.chart) return;
+            var ts = entry.chart.timeScale();
+            if (ts.scrollToRealTime) ts.scrollToRealTime();
+            else {
+                var range = ts.getVisibleLogicalRange();
+                if (range) {
+                    var span = range.to - range.from;
+                    ts.setVisibleLogicalRange({ from: entry.candles.length - span, to: entry.candles.length });
+                }
+            }
+        });
+        return bar;
+    }
+
+    function toolIconName(id) {
+        if (id === 'select') return 'draw-cursor';
+        if (id === 'measure') return 'draw-measure';
+        if (id === 'long') return 'draw-position';
+        if (id === 'short') return 'draw-short-position';
+        return ChartDrawings.iconNameFor(id);
+    }
+
     function railButton(entry, spec, onActivate) {
         var btn = el('button');
         btn.type = 'button';
@@ -653,7 +754,7 @@
         btn.title = spec.label;
         btn.setAttribute('aria-label', spec.label);
         btn.setAttribute('aria-pressed', 'false');
-        btn.appendChild(panelIcon(spec.icon));
+        btn.appendChild(panelIcon(toolIconName(spec.id) || spec.icon));
         btn.addEventListener('click', onActivate);
         return btn;
     }
@@ -701,7 +802,7 @@
         allBtn.title = 'All drawing tools';
         allBtn.setAttribute('aria-label', 'All drawing tools');
         allBtn.setAttribute('aria-haspopup', 'dialog');
-        allBtn.appendChild(panelIcon(['M4 4h7v7H4z', 'M13 4h7v7h-7z', 'M4 13h7v7H4z', 'M13 13h7v7h-7z']));
+        allBtn.appendChild(panelIcon('draw-show-favorite-drawing-tools-toolbar'));
         allBtn.addEventListener('click', function () { openToolPalette(entry); });
         rail.appendChild(allBtn);
 
@@ -709,7 +810,7 @@
         magnetBtn.type = 'button';
         magnetBtn.title = 'Magnet — snap anchors to OHLC';
         magnetBtn.setAttribute('aria-label', 'Toggle magnet');
-        magnetBtn.appendChild(panelIcon(['M6 4h4v8a2 2 0 0 0 4 0V4h4v8a6 6 0 0 1-12 0z', 'M6 4h4M14 4h4']));
+        magnetBtn.appendChild(panelIcon('draw-magnet'));
         magnetBtn.addEventListener('click', function () { toggleDrawMagnet(entry); });
         entry.drawMagnetBtn = magnetBtn;
         rail.appendChild(magnetBtn);
@@ -718,7 +819,7 @@
         eyeBtn.type = 'button';
         eyeBtn.title = 'Hide all drawings';
         eyeBtn.setAttribute('aria-label', 'Hide or show all drawings');
-        eyeBtn.appendChild(panelIcon(['M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z']));
+        eyeBtn.appendChild(panelIcon('draw-hide-all-drawings'));
         eyeBtn.addEventListener('click', function () { toggleDrawVisibility(entry); });
         entry.drawEyeBtn = eyeBtn;
         rail.appendChild(eyeBtn);
@@ -737,8 +838,7 @@
         gear.type = 'button';
         gear.title = 'Trade position tool — account, risk, display';
         gear.setAttribute('aria-label', 'Position settings');
-        gear.appendChild(panelIcon(['M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z',
-            'M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.9 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.54 15a1.7 1.7 0 0 0-1.56-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.7 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.54a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.46 9v.09a1.7 1.7 0 0 0 1.56 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z']));
+        gear.appendChild(panelIcon('dt-settings'));
         gear.addEventListener('click', function () { openPositionSettings(entry); });
         rail.appendChild(gear);
 
@@ -757,7 +857,7 @@
         clear.type = 'button';
         clear.title = 'Clear all drawings, position boxes and the measurement';
         clear.setAttribute('aria-label', 'Clear all drawings');
-        clear.appendChild(panelIcon(['M4 7h16', 'M9 7V5h6v2', 'M6.5 7l.8 12h9.4l.8-12']));
+        clear.appendChild(panelIcon('draw-trash'));
         clear.addEventListener('click', function () {
             if (entry.drawMgr) entry.drawMgr.clear();
             entry.config.drawings = [];
@@ -811,8 +911,8 @@
             : ChartDrawings.kindLabel(kind) + ' pinned to the drawing toolbar');
     }
 
-    function starIcon() {
-        return ['M12 3.6l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.8l5.9-.9z'];
+    function starIcon(on) {
+        return on ? 'draw-remove-from-favorites' : 'draw-add-to-favorites';
     }
 
     function syncFavoriteButtons() {
@@ -822,7 +922,7 @@
             btn.setAttribute('aria-pressed', String(on));
             btn.title = on ? 'Remove from the drawing toolbar' : 'Pin to the drawing toolbar';
             btn.setAttribute('aria-label', btn.title);
-            btn.replaceChildren(panelIcon(starIcon()));
+            btn.replaceChildren(panelIcon(starIcon(on), 15));
         });
     }
 
@@ -933,10 +1033,12 @@
             grid: pick('--chart-grid', 'rgba(255,255,255,0.045)'),
             crosshair: pick('--chart-crosshair', '#6f6e66'),
             border: pick('--chart-border', '#3b3b36'),
-            up: pick('--chart-up', '#83cf9c'),
-            down: pick('--chart-down', '#ff9e96'),
-            upRgb: pick('--chart-up-rgb', '131, 207, 156'),
-            downRgb: pick('--chart-down-rgb', '255, 158, 150'),
+            up: pick('--chart-up', '#089981'),
+            down: pick('--chart-down', '#f23645'),
+            upText: pick('--chart-up-text', '#22ab94'),
+            downText: pick('--chart-down-text', '#f7525f'),
+            upRgb: pick('--chart-up-rgb', '8, 153, 129'),
+            downRgb: pick('--chart-down-rgb', '242, 54, 69'),
             accent: pick('--accent', '#ffd43b'),
             accentRgb: pick('--accent-rgb', '255, 212, 59')
         };
@@ -1647,28 +1749,47 @@
         entry.chgSpan.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
         entry.chgSpan.className = 'head-chg ' + (chg > 0.0001 ? 'up' : chg < -0.0001 ? 'down' : 'flat');
         entry.chgSpan.title = 'Change vs 24h ago (visible data)';
+        if (!entry.stripCandle || entry.candles.indexOf(entry.stripCandle) < 0) {
+            showStrip(entry, last);
+        }
     }
 
     function showStrip(entry, candle) {
         var div = entry.ohlcStrip;
+        var box = entry.stripValues;
+        if (!div || !box || !candle) return;
         entry.stripCandle = candle;
-        div.innerHTML = '';
+        box.innerHTML = '';
         var fields = [
-            ['O', candle.open], ['H', candle.high], ['L', candle.low], ['C', candle.close],
-            ['V', candle.volume]
+            ['O', candle.open], ['H', candle.high], ['L', candle.low], ['C', candle.close]
         ];
         fields.forEach(function (pair) {
             var span = el('span');
-            span.appendChild(document.createTextNode(pair[0] + ' '));
-            var b = el('b', '', pair[0] === 'V' ? compactNumber(pair[1]) : formatPrice(pair[1], entry.precision));
-            if (pair[0] !== 'V') b.style.color = candle.close >= candle.open ? THEME.up : THEME.down;
+            span.appendChild(document.createTextNode(pair[0]));
+            var b = el('b', '', formatPrice(pair[1], entry.precision));
+            b.style.color = candle.close >= candle.open ? THEME.upText : THEME.downText;
             span.appendChild(b);
-            div.appendChild(span);
+            box.appendChild(span);
         });
+        var vol = el('span');
+        vol.appendChild(document.createTextNode('V'));
+        vol.appendChild(el('b', '', compactNumber(candle.volume)));
+        box.appendChild(vol);
+
+        var idx = entry.candles ? entry.candles.indexOf(candle) : -1;
+        var prev = idx > 0 ? entry.candles[idx - 1].close : candle.open;
+        var pct = prev ? (candle.close / prev - 1) * 100 : 0;
+        var chg = el('span', 'lv-change ' + (pct >= 0 ? 'up' : 'down'),
+            (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%');
+        box.appendChild(chg);
         div.classList.add('show');
     }
 
-    function hideStrip(entry) { entry.ohlcStrip.classList.remove('show'); }
+    /** Leaving the plot restores the legend to the latest bar. */
+    function hideStrip(entry) {
+        if (entry.candles && entry.candles.length) showStrip(entry, entry.candles[entry.candles.length - 1]);
+        else if (entry.ohlcStrip) entry.ohlcStrip.classList.remove('show');
+    }
 
     function compactNumber(v) {
         if (!isFinite(v)) return '—';
@@ -1693,12 +1814,24 @@
         entry.symBtn.querySelector('.ex').textContent = entry.config.exchange;
         entry.symBtn.querySelector('.sym').textContent = entry.config.symbol;
         entry.symBtn.querySelector('.mkt').textContent = entry.config.market === 'futures' ? 'PERP' : 'SPOT';
-        entry.tfBtn.textContent = tfLabel(entry.config.timeframe);
+        var tfLabelEl = entry.tfBtn.querySelector('.tf-label');
+        if (tfLabelEl) tfLabelEl.textContent = tfLabel(entry.config.timeframe);
     }
+
+    var TYPE_ICONS = {
+        candles: 'header-candles',
+        bar: 'menu-candles-bars',
+        line: 'menu-candles-line',
+        area: 'menu-candles-area',
+        baseline: 'menu-candles-baseline'
+    };
 
     function updateTypeLabel(entry) {
         var found = CHART_TYPES.filter(function (t) { return t.id === entry.config.chartType; })[0];
-        entry.typeBtn.textContent = found ? found.label : 'Candles';
+        var label = entry.typeBtn.querySelector('.type-label');
+        if (label) label.textContent = found ? found.label : 'Candles';
+        var holder = entry.typeBtn.querySelector('.type-ico');
+        if (holder) holder.replaceChildren(panelIcon(TYPE_ICONS[entry.config.chartType] || 'header-candles', 15));
     }
 
     function notifyFocused(entry) {
@@ -2704,6 +2837,7 @@
         openMenu(entry.typeBtn, CHART_TYPES.map(function (type) {
             return {
                 label: type.label,
+                icon: TYPE_ICONS[type.id] || 'header-candles',
                 checked: entry.config.chartType === type.id,
                 onClick: function () { setChartType(entry, type.id); }
             };
@@ -2766,7 +2900,8 @@
         var view = null;
         try { view = entry.chart.timeScale().getVisibleRange(); } catch (err) { view = null; }
         entry.config.timeframe = tf;
-        entry.tfBtn.textContent = tfLabel(tf);
+        var tfLabelEl = entry.tfBtn.querySelector('.tf-label');
+        if (tfLabelEl) tfLabelEl.textContent = tfLabel(tf);
         if (entry.drawMgr) entry.drawMgr.setInterval(ChartDrawings.intervalForTimeframe(tf));
         resetPricePan(entry);
         entry.loadSeq++;
@@ -3551,6 +3686,15 @@
     function buildLayoutSwitch() {
         var wrap = $('#layout-switch');
         wrap.innerHTML = '';
+        var icons = {
+            '1': 'menu-layout-setup-1',
+            '2h': 'menu-layout-setup-2h',
+            '2v': 'menu-layout-setup-2h',
+            '4': 'menu-layout-setup-4',
+            '6': 'menu-layout-setup-6',
+            '8': 'menu-layout-setup-8',
+            'custom': 'scr-chart-grid'
+        };
         Object.keys(LAYOUTS).forEach(function (key) {
             var spec = LAYOUTS[key];
             var btn = el('button', 'layout-btn');
@@ -3558,35 +3702,10 @@
             btn.title = spec.label;
             btn.setAttribute('aria-label', spec.label);
             btn.dataset.layout = key;
-            var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-            svg.setAttribute('viewBox', '0 0 16 16');
-            svg.setAttribute('fill', 'none');
-            svg.setAttribute('stroke', 'currentColor');
-            svg.setAttribute('stroke-width', '1.2');
-            if (key === 'custom') {
-                var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                r.setAttribute('x', '1.5'); r.setAttribute('y', '1.5');
-                r.setAttribute('width', '13'); r.setAttribute('height', '13'); r.setAttribute('rx', '1');
-                svg.appendChild(r);
-                var line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                line.setAttribute('d', 'M8 1.5v13M1.5 8h13');
-                svg.appendChild(line);
-            } else {
-                var cols = spec.cols, rows = spec.rows;
-                var cellW = 13 / cols, cellH = 13 / rows;
-                for (var yy = 0; yy < rows; yy++) {
-                    for (var xx = 0; xx < cols; xx++) {
-                        var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                        rect.setAttribute('x', String(1.5 + xx * cellW + 0.6));
-                        rect.setAttribute('y', String(1.5 + yy * cellH + 0.6));
-                        rect.setAttribute('width', String(cellW - 1.2));
-                        rect.setAttribute('height', String(cellH - 1.2));
-                        rect.setAttribute('rx', '0.6');
-                        svg.appendChild(rect);
-                    }
-                }
-            }
-            btn.appendChild(svg);
+            var icon = panelIcon(icons[key] || 'menu-layout-setup-1', 17);
+            icon.style.display = 'block';
+            if (key === '2v') icon.style.transform = 'rotate(90deg)';
+            btn.appendChild(icon);
             btn.addEventListener('click', function () { setLayout(key); });
             wrap.appendChild(btn);
         });
@@ -4208,6 +4327,7 @@
             var visible = entry.drawMgr.drawingsVisible();
             entry.drawEyeBtn.setAttribute('aria-pressed', String(!visible));
             entry.drawEyeBtn.title = visible ? 'Hide all drawings' : 'Show all drawings';
+            entry.drawEyeBtn.replaceChildren(panelIcon(visible ? 'draw-hide-all-drawings' : 'draw-hide-all-mode-active'));
         }
     }
 
@@ -4256,6 +4376,7 @@
         if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
         else document.documentElement.removeAttribute('data-theme');
         applyTheme();
+        syncThemeButton();
     }
 
     // The shell writes `tp-theme`; same-origin storage events reach this frame.
@@ -4451,9 +4572,7 @@
             updateDrawStyleBar(entry);
         });
         lock.classList.add('dsb-icon', 'dsb-lock');
-        lock.appendChild(panelIcon(locked
-            ? ['M6 11h12v9H6z', 'M9 11V8a3 3 0 0 1 6 0v3']
-            : ['M6 11h12v9H6z', 'M9 11V8a3 3 0 0 1 5.5-1.7']));
+        lock.appendChild(panelIcon(locked ? 'dt-cm-unlock' : 'draw-lock'));
         if (locked) lock.setAttribute('aria-pressed', 'true');
 
         var remove = styleButton(bar, '', 'Delete selected drawings', function () {
@@ -4462,14 +4581,14 @@
             updateDrawStyleBar(entry);
         });
         remove.classList.add('dsb-icon', 'dsb-danger');
-        remove.appendChild(panelIcon(['M4 7h16', 'M9 7V5h6v2', 'M6.5 7l.8 12h9.4l.8-12']));
+        remove.appendChild(panelIcon('dt-remove'));
 
         var close = styleButton(bar, '', 'Deselect', function () {
             entry.drawMgr.select([]);
             updateDrawStyleBar(entry);
         });
         close.classList.add('dsb-icon');
-        close.appendChild(panelIcon(['M6 6l12 12M18 6L6 18']));
+        close.appendChild(panelIcon('tab-close'));
     }
 
     /* ── Tool palette ───────────────────────────────────────────────────── */
@@ -4500,6 +4619,9 @@
         panel.addEventListener('pointerdown', function (ev) { ev.stopPropagation(); });
 
         var head = el('div', 'dp-head');
+        var searchIcon = el('span', 'dp-search-ico');
+        searchIcon.appendChild(panelIcon('scr-search', 15));
+        head.appendChild(searchIcon);
         var search = el('input', 'dp-search');
         search.type = 'search';
         search.placeholder = 'Search ' + ChartDrawings.TOOLS.length + ' tools…';
@@ -4509,7 +4631,7 @@
         close.type = 'button';
         close.title = 'Close tool palette';
         close.setAttribute('aria-label', 'Close tool palette');
-        close.appendChild(panelIcon(['M6 6l12 12M18 6L6 18']));
+        close.appendChild(panelIcon('tab-close'));
         close.addEventListener('click', function () { closeToolPalette(entry); });
         head.appendChild(close);
         panel.appendChild(head);
@@ -4518,14 +4640,18 @@
         panel.appendChild(body);
 
         var foot = el('div', 'dp-foot');
-        var magnet = el('button', 'dp-toggle', 'Magnet');
+        var magnet = el('button', 'dp-toggle');
         magnet.type = 'button';
+        magnet.appendChild(panelIcon('draw-magnet', 15));
+        magnet.appendChild(document.createTextNode('Magnet'));
         magnet.setAttribute('aria-pressed', String(drawMagnet() !== 'off'));
         magnet.addEventListener('click', function () { toggleDrawMagnet(entry); });
         foot.appendChild(magnet);
 
-        var eye = el('button', 'dp-toggle', 'Hide all');
+        var eye = el('button', 'dp-toggle');
         eye.type = 'button';
+        eye.appendChild(panelIcon('draw-hide-all-drawings', 15));
+        eye.appendChild(document.createTextNode('Hide all'));
         eye.addEventListener('click', function () { toggleDrawVisibility(entry); });
         foot.appendChild(eye);
         foot.appendChild(el('span', 'dp-hint', 'Enter picks · Esc closes'));
@@ -4564,7 +4690,10 @@
         function renderGroup(label, items) {
             var group = el('div', 'dp-group');
             var heading = el('div', 'dp-group-title');
-            heading.appendChild(el('span', '', label));
+            var titleWrap = el('span', 'dp-group-name');
+            if (items.length) titleWrap.appendChild(panelIcon(ChartDrawings.familyIconName(items[0].family), 15));
+            titleWrap.appendChild(el('span', '', label));
+            heading.appendChild(titleWrap);
             heading.appendChild(el('span', 'dp-count', String(items.length)));
             group.appendChild(heading);
             var grid = el('div', 'dp-grid');
@@ -4577,6 +4706,7 @@
                     ? tool.label + ' — place, then type'
                     : tool.label;
                 btn.setAttribute('aria-pressed', String(entry.drawTool === tool.kind));
+                btn.appendChild(panelIcon(toolIconName(tool.kind), 18));
                 btn.appendChild(el('span', 'dp-tool-label', tool.label));
                 btn.addEventListener('click', function () {
                     touchDrawRecent(tool.kind);
@@ -4586,7 +4716,7 @@
                 var favorite = el('button', 'dp-fav');
                 favorite.type = 'button';
                 favorite.dataset.favorite = tool.kind;
-                favorite.appendChild(panelIcon(starIcon()));
+                favorite.appendChild(panelIcon(starIcon(false), 15));
                 favorite.addEventListener('click', function (ev) {
                     ev.preventDefault();
                     ev.stopPropagation();
@@ -6922,6 +7052,7 @@
     /* ── Boot ────────────────────────────────────────────────────────────── */
 
     WS.boot = function () {
+        hydrateIcons();
         loadPrefs();
         Bridge.connect(function (err) {
             if (err) {

@@ -39,6 +39,7 @@ import type {
   Position,
   UnknownRecord,
 } from "../types";
+import { iconSpan, setIcon } from "../lib/icons";
 
 export interface AiFocus {
   symbol: string;
@@ -76,6 +77,15 @@ const TOOL_LABELS: Record<string, string> = {
   panel_portfolio: "Reading position",
   panel_order_ticket: "Reading order ticket",
   panel_submit_trade_plan: "Validating trade plan",
+};
+
+/** Icon per Pi tool call, matching the chart workspace's icon language. */
+const TOOL_ICONS: Record<string, string> = {
+  panel_market_context: "chart-reset-view",
+  panel_indicators: "header-indicators-metrics-and-strategies",
+  panel_portfolio: "draw-position",
+  panel_order_ticket: "dt-add-alert",
+  panel_submit_trade_plan: "scr-check",
 };
 
 interface BuiltContext {
@@ -360,11 +370,15 @@ export class AiPanel {
     const runtimeReady = this.status.runtimeReady;
     const blocked = this.busy || this.streaming;
     this.startButton.disabled = blocked;
-    this.startButton.textContent = blocked
+    const startLabel = blocked
       ? "Working…"
       : configured
         ? "Start analysis"
         : "Connect provider";
+    this.startButton.replaceChildren(
+      iconSpan("ai-sparkle", 17, "ai-start-spark"),
+      document.createTextNode(startLabel),
+    );
     this.startButton.title = runtimeReady
       ? configured
         ? "Render 1d, 4h and 5m charts and start a read-only analysis"
@@ -931,8 +945,7 @@ export class AiPanel {
       row = document.createElement("div");
       row.className = "ai-tool";
       row.dataset.state = "running";
-      const icon = document.createElement("span");
-      icon.className = "ai-tool-icon";
+      const icon = iconSpan(TOOL_ICONS[name] ?? "ai-sparkle", 14, "ai-tool-icon");
       const text = document.createElement("span");
       text.className = "ai-tool-label";
       row.append(icon, text);
@@ -1298,7 +1311,7 @@ export class AiPanel {
     rename.className = "icon-btn ai-conv-action";
     rename.title = "Rename conversation";
     rename.setAttribute("aria-label", "Rename conversation");
-    rename.textContent = "✎";
+    setIcon(rename, "menu-manage-layouts-rename", 15);
     rename.addEventListener("click", () => this.beginRename(row, conversation));
 
     const remove = document.createElement("button");
@@ -1306,15 +1319,15 @@ export class AiPanel {
     remove.className = "icon-btn ai-conv-action ai-conv-delete";
     remove.title = "Delete conversation";
     remove.setAttribute("aria-label", "Delete conversation");
-    remove.textContent = "×";
+    setIcon(remove, "scr-trash", 15);
     remove.addEventListener("click", () => {
       if (remove.dataset.confirm !== "true") {
         remove.dataset.confirm = "true";
-        remove.textContent = "!";
+        remove.classList.add("is-confirm");
         remove.title = "Click again to delete";
         window.setTimeout(() => {
           remove.dataset.confirm = "";
-          remove.textContent = "×";
+          remove.classList.remove("is-confirm");
           remove.title = "Delete conversation";
         }, 3000);
         return;

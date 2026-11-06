@@ -3,6 +3,7 @@ import "./styles/tokens.css";
 import "./styles/shell.css";
 import "./styles/ai.css";
 import { bootstrapApp } from "./app/controller";
+import { hydrateIcons } from "./lib/icons";
 
 /** The critical inline styles keep the boot screen opaque until the module
  *  (and with it the real stylesheet) has run; fade it out only now. */
@@ -14,6 +15,7 @@ function dismissBootScreen(): void {
 }
 
 try {
+  hydrateIcons();
   bootstrapApp();
   dismissBootScreen();
 } catch (error) {

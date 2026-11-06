@@ -1,3 +1,30 @@
+## 2026-11-06 — Explicit session saves, named layout sessions
+
+- **No background writes.** Every chart/study/layout edit used to arm a 650 ms
+  debounced `saveStore`. Sessions are now written only when **Save** (or
+  **Ctrl/Cmd+S**) is pressed: `scheduleSave()` marks the session dirty instead
+  of persisting. The Save button carries the accent plus a `•`, the status pill
+  reads “Unsaved changes”, and the session picker renders `Name •`.
+- **Guard before leaving.** Switching session, creating or deleting one while
+  dirty opens *Save and continue · Discard changes · Cancel*; the picker snaps
+  back to the loaded session until the user decides. Closing the app no longer
+  writes: `beforeunload` blocks while dirty and `WS.shutdown` only logs.
+- **Named sessions.** New **Save as** action (`#ws-save-as`, next to the session
+  picker) clones the current layout into a new named session; `+` still creates
+  a blank one. Rename and delete mark the store dirty and persist on the next
+  Save, and the dropdown loads any saved layout session.
+- Verified in an iframe harness with two initial sessions: zero writes after
+  2.2 s of editing, one write per Save/Ctrl+S, guard on switch with the picker
+  reverted, Save as → third named session persisted, delete + Save removes it,
+  reload restores the session list and the last active session.
+- **Save control follows the theme.** The dirty rule no longer paints
+  `rgba(41, 98, 255, 0.22)` with `--accent-ink` label in both themes (white on
+  pale blue was unreadable in light mode). Clean state: `--accent-text` on
+  `--accent-soft`. Dirty state: solid `--accent` / `--accent-strong` fill with
+  the `--accent-ink` label, i.e. a real primary button in either theme.
+  Also `.hover-hint` now shrinks (`flex: 0 1 auto`, ellipsis) so a narrow
+  subbar can never clip the Save button.
+
 ## 2026-11-06 — Indicator engine: lightweight-charts-indicators + OpenTrader study UX
 
 - **Studies vanished after a restart — stale sidecar.** The staged PyInstaller

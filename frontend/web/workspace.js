@@ -51,9 +51,11 @@
         focused: null,
         pending: {},
         reqSeq: 0,
-        saveTimer: null,
         saving: false,
         saveQueued: false,
+        saveCallback: null,
+        dirty: false,
+        dirtyShown: false,
         staleBackendWarned: false,
         shuttingDown: false,
         active: true,
@@ -378,6 +380,28 @@
         foot.appendChild(cancel);
         foot.appendChild(ok);
         openModal({ title: title, body: body, foot: foot, onOpen: function () { input.focus(); input.select(); } });
+    }
+
+    /** Small blocking dialog: `choices` = [{label, action, primary}] (last = default). */
+    function openChoice(title, message, choices) {
+        var body = el('div', 'choice-body');
+        var text = el('p', 'choice-text');
+        text.textContent = message;
+        body.appendChild(text);
+        var foot = document.createElement('div');
+        foot.style.display = 'flex';
+        foot.style.gap = '8px';
+        foot.style.marginLeft = 'auto';
+        choices.forEach(function (choice) {
+            var button = el('button', 'btn-ghost' + (choice.primary ? ' primary' : ''), choice.label);
+            button.type = 'button';
+            button.addEventListener('click', function () {
+                closeModal();
+                if (typeof choice.action === 'function') choice.action();
+            });
+            foot.appendChild(button);
+        });
+        openModal({ title: title, body: body, foot: foot });
     }
 
     /* ── Sync manager wiring ──────────────────────────────────────────────── */
@@ -7092,9 +7116,63 @@
         return { version: 1, active: WS.activeId, workspaces: WS.store.workspaces };
     }
 
+    /**
+     * Sessions are written only on an explicit Save / Save as. Every mutation
+     * calls this to advertise unsaved work; nothing is flushed in the
+     * background any more.
+     */
     function scheduleSave() {
-        clearTimeout(WS.saveTimer);
-        WS.saveTimer = setTimeout(saveNow, 650);
+        if (WS.shuttingDown) return;
+        markDirty();
+    }
+
+    function markDirty() {
+        if (WS.dirty) return;
+        WS.dirty = true;
+        renderSaveState();
+    }
+
+    function clearDirty() {
+        if (!WS.dirty && !WS.dirtyShown) return;
+        WS.dirty = false;
+        WS.dirtyShown = false;
+        renderSaveState();
+    }
+
+    function renderSaveState() {
+        var button = $('#btn-save');
+        if (button) {
+            button.classList.toggle('is-dirty', WS.dirty);
+            button.title = WS.dirty
+                ? 'Unsaved changes — save this session (Ctrl+S)'
+                : 'Save this session (Ctrl+S)';
+            button.setAttribute('aria-label', WS.dirty ? 'Save session — unsaved changes' : 'Save session');
+        }
+        renderWorkspaceSelect();
+        if (WS.dirty) {
+            WS.dirtyShown = true;
+            setStatus('Unsaved changes', 'dirty');
+        }
+    }
+
+    /** Prompt before leaving a session that has unwritten changes. */
+    function guardUnsaved(intent) {
+        var ws = activeWorkspace();
+        if (!WS.dirty || !ws) { intent(); return; }
+        // Snap the session picker back until the user decides, so the control
+        // never shows a session that is not loaded.
+        renderWorkspaceSelect();
+        openChoice('Unsaved changes', '“' + ws.name + '” has changes that are not saved yet.', [
+            {
+                label: 'Save and continue',
+                primary: true,
+                action: function () {
+                    saveNow(function (ok) { if (ok) intent(); });
+                }
+            },
+            { label: 'Discard changes', action: intent },
+            { label: 'Cancel', action: function () { renderWorkspaceSelect(); } }
+        ]);
     }
 
     /** Total study count in a store payload (0 when the field is unusable). */
@@ -7109,11 +7187,12 @@
         return total;
     }
 
-    function saveNow() {
-        if (!WS.store || WS.shuttingDown) return;
+    function saveNow(onDone) {
+        var done = typeof onDone === 'function' ? onDone : function () {};
+        if (!WS.store || WS.shuttingDown) { done(false); return; }
         var payload = serialize();
-        if (!payload) return;
-        if (WS.saving) { WS.saveQueued = true; return; }
+        if (!payload) { done(false); return; }
+        if (WS.saving) { WS.saveQueued = true; WS.saveCallback = done; return; }
         WS.saving = true;
         setStatus('Saving…', 'saving');
         Bridge.call('saveStore', [JSON.stringify(payload)]).then(function (res) {
@@ -7133,33 +7212,47 @@
                             ' chart indicator(s): the Python sidecar is out of date. ' +
                             'Rebuild it (./start.sh --rebuild-backend).', true);
                     }
+                    // The session stays dirty: part of the payload did not land.
+                    done(false);
                     return;
                 }
                 setStatus('Saved ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+                clearDirty();
+                done(true);
             } else {
                 setStatus('Save failed', 'error');
                 toast((res && res.error) || 'Could not save workspace', true);
+                done(false);
             }
         }).catch(function (err) {
             setStatus('Save failed', 'error');
             toast(err.message || 'Could not save workspace', true);
+            done(false);
         }).finally(function () {
             WS.saving = false;
-            if (WS.saveQueued) { WS.saveQueued = false; saveNow(); }
+            if (WS.saveQueued) {
+                WS.saveQueued = false;
+                var queued = WS.saveCallback;
+                WS.saveCallback = null;
+                saveNow(queued);
+            }
         });
     }
 
-    /* ── Workspace switching ─────────────────────────────────────────────── */
+    /* ── Sessions (workspaces) ───────────────────────────────────────────── */
 
     function renderWorkspaceSelect() {
         var sel = $('#ws-select');
         sel.innerHTML = '';
         WS.store.workspaces.forEach(function (ws) {
-            var opt = el('option', '', ws.name);
+            var active = ws.id === WS.activeId;
+            var opt = el('option', '', ws.name + (active && WS.dirty ? ' •' : ''));
             opt.value = ws.id;
             sel.appendChild(opt);
         });
         sel.value = WS.activeId;
+        sel.title = (WS.dirty ? 'Unsaved changes in this session' : 'Saved')
+            + ' — pick a session to load';
     }
 
     function loadWorkspace(id) {
@@ -7205,10 +7298,14 @@
         syncPanels(ws);
         updateLayoutButtons();
         renderGutters();
-        renderWorkspaceSelect();
         renderGroupChips();
         renderDrawer();
         syncTopbar(ws);
+        // The loaded session mirrors what is on disk (or the copy the user just
+        // made); only later edits mark it dirty again.
+        WS.dirty = false;
+        WS.dirtyShown = false;
+        renderSaveState();
         setStatus('Ready');
     }
 
@@ -7223,12 +7320,33 @@
     }
 
     function newWorkspace() {
-        openPrompt('New workspace', 'Workspace ' + (WS.store.workspaces.length + 1), function (name) {
-            var ws = blankWorkspace(name);
-            WS.store.workspaces.push(ws);
-            WS.activeId = ws.id;
-            loadWorkspace(ws.id);
-            saveNow();
+        guardUnsaved(function () {
+            openPrompt('New session', 'Session ' + (WS.store.workspaces.length + 1), function (name) {
+                var ws = blankWorkspace(name);
+                WS.store.workspaces.push(ws);
+                WS.activeId = ws.id;
+                loadWorkspace(ws.id);
+                markDirty();
+            });
+        });
+    }
+
+    /** Save the current layout under a new name — a second session, same shape. */
+    function saveWorkspaceAs() {
+        var source = activeWorkspace();
+        if (!source) return;
+        openPrompt('Save session as', source.name + ' copy', function (name) {
+            var copy = clone(source);
+            copy.id = 'ws-' + Math.random().toString(36).slice(2, 10);
+            copy.name = name;
+            copy.updatedAt = Date.now();
+            WS.store.workspaces.push(copy);
+            WS.activeId = copy.id;
+            loadWorkspace(copy.id);
+            saveNow(function (ok) {
+                if (ok) toast('Saved session “' + name + '”');
+                else markDirty();
+            });
         });
     }
 
@@ -7276,14 +7394,15 @@
     }
 
     function deleteWorkspace() {
-        if (WS.store.workspaces.length <= 1) { toast('The last workspace cannot be deleted', true); return; }
+        if (WS.store.workspaces.length <= 1) { toast('The last session cannot be deleted', true); return; }
         var ws = activeWorkspace();
         openPrompt('Delete “' + ws.name + '”? Type the name to confirm', '', function (value) {
             if (value !== ws.name) { toast('Name did not match', true); return; }
             WS.store.workspaces = WS.store.workspaces.filter(function (w) { return w.id !== ws.id; });
             WS.activeId = WS.store.workspaces[0].id;
             loadWorkspace(WS.activeId);
-            saveNow();
+            markDirty();
+            toast('“' + ws.name + '” deleted — press Save to keep this');
         });
     }
 
@@ -7292,21 +7411,24 @@
     function wireShell() {
         buildLayoutSwitch();
         $('#ws-select').addEventListener('change', function (ev) {
-            saveNow();
-            loadWorkspace(ev.target.value);
+            var target = ev.target.value;
+            if (target === WS.activeId) { renderWorkspaceSelect(); return; }
+            guardUnsaved(function () { loadWorkspace(target); });
         });
         $('#ws-new').addEventListener('click', newWorkspace);
+        var saveAsBtn = $('#ws-save-as');
+        if (saveAsBtn) saveAsBtn.addEventListener('click', saveWorkspaceAs);
         $('#ws-rename').addEventListener('click', function () {
             var ws = activeWorkspace();
-            openPrompt('Rename workspace', ws.name, function (name) {
+            openPrompt('Rename session', ws.name, function (name) {
                 ws.name = name;
                 renderWorkspaceSelect();
-                saveNow();
+                markDirty();
             });
         });
         $('#ws-delete').addEventListener('click', deleteWorkspace);
         $('#btn-add-chart').addEventListener('click', function () { addChart(); });
-        $('#btn-save').addEventListener('click', saveNow);
+        $('#btn-save').addEventListener('click', function () { saveNow(); });
         $('#btn-groups').addEventListener('click', openDrawer);
         $('#drawer-close').addEventListener('click', closeDrawer);
         var keysBtn = $('#drawer-keys');
@@ -7368,6 +7490,11 @@
 
         document.addEventListener('keydown', function (ev) {
             var inField = ev.target && (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA');
+            if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 's' || ev.key === 'S')) {
+                ev.preventDefault();
+                saveNow();
+                return;
+            }
             if (ev.key === 'Escape') {
                 if (WS.modal) { closeModal(); return; }
                 if (WS.menu) { closeMenu(); return; }
@@ -7457,7 +7584,12 @@
                 wireShell();
                 loadWorkspace(WS.activeId);
                 setStatus('Ready');
-                window.addEventListener('beforeunload', function () { try { saveNow(); } catch (e) { } });
+                window.addEventListener('beforeunload', function (event) {
+                    if (!WS.dirty) return;
+                    event.preventDefault();
+                    event.returnValue = 'Unsaved session changes';
+                    return event.returnValue;
+                });
             }).catch(function (bootErr) {
                 console.error('Workspace boot failed', bootErr);
                 setStatus('Boot failed', 'error');
@@ -7473,7 +7605,8 @@
                 var entry = WS.charts[id];
                 if (entry) clearTimeout(entry.tickTimer);
             });
-            try { saveNow(); } catch (err) { /* ignore */ }
+            // No background write: hiding the workspace keeps unsaved work in
+            // memory and leaves the Save button marked.
             return;
         }
         Object.keys(WS.charts).forEach(function (id) {
@@ -7483,7 +7616,8 @@
     };
 
     WS.shutdown = function () {
-        try { saveNow(); } catch (err) { /* ignore */ }
+        // Sessions persist on an explicit Save only; unsaved work stays unsaved.
+        if (WS.dirty) console.warn('TradePanel: closing with unsaved session changes');
         WS.shuttingDown = true;
         WS.active = false;
         Object.keys(WS.charts).forEach(function (id) {

@@ -332,6 +332,8 @@
         }
         .status-pill.saving { color: var(--accent-text); border-color: var(--accent-line); }
         .status-pill.saving::before { background: var(--accent-text); box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.7); }
+        .status-pill.dirty { color: var(--coral); border-color: color-mix(in srgb, var(--coral) 45%, transparent); }
+        .status-pill.dirty::before { background: var(--coral); box-shadow: 0 0 6px color-mix(in srgb, var(--coral) 60%, transparent); }
         .status-pill.error { color: var(--danger); border-color: rgba(var(--danger-rgb), 0.5); }
         .status-pill.error::before { background: var(--danger); box-shadow: none; }
 
@@ -376,10 +378,39 @@
             background: var(--accent-soft);
         }
         .btn-ghost.primary:hover { background: rgba(var(--accent-rgb), 0.26); }
+        /* Unsaved work: the Save control switches to a solid accent fill until a
+           write lands. Both the fill (--accent) and the label (--accent-ink)
+           are theme tokens, so light and dark stay legible. */
+        .btn-ghost.primary.is-dirty {
+            color: var(--accent-ink);
+            border-color: var(--accent);
+            background: var(--accent);
+        }
+        .btn-ghost.primary.is-dirty:hover {
+            background: var(--accent-strong);
+            border-color: var(--accent-strong);
+            color: var(--accent-ink);
+        }
+        .btn-ghost.primary.is-dirty::after {
+            content: '•';
+            margin-left: 5px;
+        }
         .btn-ghost.add-chart { color: var(--text-3); }
         .btn-ghost.add-chart:hover { color: var(--text); background: var(--surface-3); }
 
-        .hover-hint { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--muted); white-space: nowrap; }
+        .choice-body { padding: 2px 0 4px; }
+        .choice-text {
+            font-size: var(--text-sm); color: var(--text-2);
+            max-width: 380px; line-height: var(--leading-body);
+        }
+
+        /* Truncates before it can push the Save control out of the subbar. */
+        .hover-hint {
+            font-family: var(--font-mono); font-size: var(--text-xs); color: var(--muted);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            flex: 0 1 auto; min-width: 0;
+        }
+        #ws-subbar > .btn-ghost { flex: none; }
 
         /* ── Grid ──────────────────────────────────────────────────────── */
         #ws-grid-wrap { position: relative; min-height: 0; overflow: hidden; }
@@ -1306,11 +1337,12 @@
             </div>
 
             <div class="ws-name-wrap">
-                <select id="ws-select" class="ws-select" aria-label="Workspace"></select>
+                <select id="ws-select" class="ws-select" aria-label="Session"></select>
                 <div class="ws-actions">
-                    <button id="ws-new" class="icon-btn" title="New workspace" aria-label="New workspace"><span class="ico" data-icon="scr-add" data-icon-size="18"></span></button>
-                    <button id="ws-rename" class="icon-btn" title="Rename workspace" aria-label="Rename workspace"><span class="ico" data-icon="menu-manage-layouts-rename" data-icon-size="18"></span></button>
-                    <button id="ws-delete" class="icon-btn" title="Delete workspace" aria-label="Delete workspace"><span class="ico" data-icon="scr-trash" data-icon-size="18"></span></button>
+                    <button id="ws-save-as" class="icon-btn" title="Save current layout as a new session" aria-label="Save as new session"><span class="ico" data-icon="scr-save" data-icon-size="18"></span></button>
+                    <button id="ws-new" class="icon-btn" title="New blank session" aria-label="New session"><span class="ico" data-icon="scr-add" data-icon-size="18"></span></button>
+                    <button id="ws-rename" class="icon-btn" title="Rename session" aria-label="Rename session"><span class="ico" data-icon="menu-manage-layouts-rename" data-icon-size="18"></span></button>
+                    <button id="ws-delete" class="icon-btn" title="Delete session" aria-label="Delete session"><span class="ico" data-icon="scr-trash" data-icon-size="18"></span></button>
                 </div>
             </div>
 
@@ -1376,7 +1408,7 @@
 
             <div class="spacer"></div>
             <span class="hover-hint" id="ws-hint">Drag headers to rearrange · double-click header to maximize</span>
-            <button id="btn-save" class="btn-ghost primary" title="Save workspace now">Save</button>
+            <button id="btn-save" class="btn-ghost primary" title="Save this session (Ctrl+S)">Save</button>
         </div>
 
         <div id="ws-grid-wrap">

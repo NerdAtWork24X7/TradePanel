@@ -1429,7 +1429,14 @@ body.settings-open {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.settings-save-row .inline-ok,
+.settings-save-row .inline-error {
+  flex: 1 1 220px;
+  min-width: 0;
 }
 
 .settings-save-row .inline-error {
@@ -1581,6 +1588,79 @@ body.settings-open {
   accent-color: var(--accent);
 }
 
+/* AI runtime update card (Settings → Updates). The section is a flex column
+   so meta → actions → log → status keep a rhythm without touching the other
+   settings sections, which are laid out as plain blocks. */
+.settings-tab > .section.runtime-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-tab .runtime-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.runtime-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.runtime-chip.accent {
+  border-color: var(--accent-line);
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent-text);
+}
+
+.runtime-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.runtime-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 132px;
+  padding: 8px 10px;
+  overflow-y: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-dense);
+  scrollbar-width: thin;
+}
+
+.runtime-progress:empty {
+  display: none;
+}
+
+.runtime-progress-line {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.runtime-progress-line:last-child {
+  color: var(--text-2);
+}
+
 /* ── Narrow column (container query on .sidebar-body) ──────────────────── */
 
 /* At the 248px minimum the paired actions need a full row each instead of
@@ -1594,4 +1674,246 @@ body.settings-open {
   .instrument-actions .check {
     flex: 1 1 auto;
   }
+}
+
+/* ── Exchange settings ─────────────────────────────────────────────────── */
+
+.venue-badge {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-h-sm);
+  padding: 0 9px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+.exchange-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.exchange-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 66px;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text-2);
+  text-align: left;
+  transition: border-color var(--micro), background var(--micro), color var(--micro);
+}
+
+.exchange-card:hover {
+  border-color: var(--border-strong);
+  background: var(--hover-wash);
+  color: var(--text);
+}
+
+.exchange-card:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.exchange-card.active {
+  border-color: var(--accent);
+  background: var(--hover-wash);
+  color: var(--text);
+}
+
+.exchange-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.exchange-card-name {
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  line-height: 1.2;
+}
+
+.exchange-card-markets,
+.exchange-card-networks {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.2;
+}
+
+.exchange-card-status,
+.exchange-status {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.exchange-card-status.ready,
+.exchange-status.ready {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.exchange-status {
+  white-space: nowrap;
+}
+
+.network-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.network-label {
+  color: var(--text-3);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.network-toggle {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+}
+
+.network-btn {
+  height: var(--control-h-sm);
+  padding: 0 12px;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.network-btn:hover {
+  color: var(--text);
+}
+
+.network-btn.active {
+  background: var(--surface-alt);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.network-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.network-static,
+.network-warning {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.network-warning {
+  color: var(--danger);
+  font-family: var(--font-mono);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.settings-tab .cred-row textarea {
+  width: 100%;
+  min-height: 64px;
+  padding: 8px 10px;
+  resize: vertical;
+  background: var(--bg);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.settings-tab .cred-row textarea:focus {
+  border-color: var(--focus);
+  outline: none;
+}
+
+.exchange-balances {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.balance-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 6px;
+}
+
+.balance-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+}
+
+.balance-currency {
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  min-width: 42px;
+}
+
+.balance-total {
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+.balance-free {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  margin-left: auto;
+}
+
+.exchange-detail > .section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.exchange-detail > .section > .section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.exchange-detail h3 {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-heading);
 }

@@ -168,10 +168,10 @@
           <button id="refresh-coins-rail" class="icon-btn rail-btn" type="button" aria-label="Refresh coin list" title="Refresh coin list">
             <span class="ico" data-icon="scr-refresh" data-icon-size="18"></span>
           </button>
-          <button id="open-browser-rail" class="icon-btn rail-btn" type="button" aria-label="Open Hyperliquid trade page" title="Open Hyperliquid trade page">
+          <button id="open-browser-rail" class="icon-btn rail-btn" type="button" aria-label="Open the exchange trade page" title="Open the exchange trade page">
             <span class="ico" data-icon="st-snapshot-open-in-new-tab" data-icon-size="18"></span>
           </button>
-          <button id="hyperliquid-rail" class="rail-btn rail-toggle mono" type="button" aria-pressed="false" aria-label="Hyperliquid mode" title="Hyperliquid mode">HL</button>
+          <button id="hyperliquid-rail" class="rail-btn rail-toggle mono" type="button" aria-pressed="false" aria-label="Live trading" title="Live trading">LIVE</button>
           <span class="rail-spacer" aria-hidden="true"></span>
         </div>
 
@@ -238,7 +238,7 @@
                   <label for="tf">TF</label>
                   <select id="tf" class="mono" aria-label="Timeframe"></select>
                 </div>
-                <button id="refresh-coins" class="icon-btn field-action" type="button" aria-label="Refresh coin list" title="Refresh coin list from Hyperliquid + Binance">
+                <button id="refresh-coins" class="icon-btn field-action" type="button" aria-label="Refresh coin list" title="Refresh the symbol list from the active exchange">
                   <span class="ico" data-icon="scr-refresh" data-icon-size="18"></span>
                 </button>
               </div>
@@ -246,18 +246,19 @@
                 <button id="center-chart" class="icon-btn" type="button" aria-label="Center focused chart" title="Center focused chart">
                   <span class="ico" data-icon="chart-reset-view" data-icon-size="18"></span>
                 </button>
+                <span id="trade-venue" class="venue-badge mono">Hyperliquid · Perpetual</span>
                 <label class="check" for="hyperliquid">
                   <input id="hyperliquid" type="checkbox" />
-                  <span>Hyperliquid</span>
+                  <span>Live trade</span>
                 </label>
-                <button id="open-browser" class="ghost-btn" type="button" title="Open Hyperliquid trade page">Open ↗</button>
+                <button id="open-browser" class="ghost-btn" type="button" title="Open the exchange trade page">Open ↗</button>
               </div>
             </section>
 
             <section class="sidebar-section" aria-labelledby="ticket-label">
               <div class="section-head">
                 <span id="ticket-label" class="card-label">Ticket</span>
-                <button id="read-order" class="ghost-btn mini" type="button" title="Load the open Hyperliquid position for this coin">Read order</button>
+                <button id="read-order" class="ghost-btn mini" type="button" title="Load the open position for this coin">Read order</button>
               </div>
               <div class="field-row">
                 <div class="field"><label for="qty">QTY</label><input id="qty" class="mono" inputmode="decimal" autocomplete="off" /></div>
@@ -377,7 +378,7 @@
           <span class="brand-mark" data-icon="tp-logo" data-icon-size="18" aria-hidden="true"></span>
           <div>
             <strong>Settings</strong>
-            <span>Indicators, credentials, AI analysis and updates</span>
+            <span>Indicators, exchanges, AI analysis and updates</span>
           </div>
         </div>
         <button id="settings-page-close" class="icon-btn" type="button" aria-label="Close settings" title="Close (Esc)">
@@ -387,7 +388,7 @@
       <div class="settings-page-body">
         <nav id="settings-nav" class="settings-nav" role="tablist" aria-label="Settings sections"></nav>
         <div class="settings-content">
-          <div id="settings-tab-credentials" class="settings-tab" data-tab="credentials"></div>
+          <div id="settings-tab-exchange" class="settings-tab" data-tab="exchange"></div>
           <div id="settings-tab-ai" class="settings-tab" data-tab="ai">
             <div id="settings-ai-mount">
               <div id="ai-settings-view" class="ai-settings" hidden>

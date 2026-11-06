@@ -2,14 +2,14 @@
  * Full-page settings, shaped like Pi Scope's settings surface: a section rail
  * on the left and one scrollable tab at a time. The AI tab hosts the Pi
  * connection view and the AI analysis indicator selection; the other tabs are
- * built from the credential/update form.
+ * built from the exchange/update form.
  */
 import { toast } from "./toast";
 import { buildSettingsContent, type SettingsContext } from "./settings";
 import { iconSpan } from "../lib/icons";
 import type { AiPanel } from "./ai-panel";
 
-export type SettingsTab = "credentials" | "ai" | "updates";
+export type SettingsTab = "exchange" | "ai" | "updates";
 
 interface TabDef {
   id: SettingsTab;
@@ -20,8 +20,8 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   { id: "ai", label: "AI Analysis", hint: "Pi sign-in and model", icon: "ai-sparkle" },
-  { id: "credentials", label: "Credentials", hint: "Hyperliquid API keys", icon: "dt-cm-lock" },
-  { id: "updates", label: "Updates", hint: "Signed release channel", icon: "update-app-download" },
+  { id: "exchange", label: "Exchange", hint: "Connect a venue for live trading", icon: "dt-cm-lock" },
+  { id: "updates", label: "Updates", hint: "App release and Pi runtime", icon: "update-app-download" },
 ];
 
 let panel: HTMLElement | null = null;
@@ -99,7 +99,7 @@ export async function openSettingsPage(
   if (!built) {
     try {
       const settings = await buildSettingsContent(ctx);
-      must<HTMLElement>("settings-tab-credentials").replaceChildren(settings.credentials);
+      must<HTMLElement>("settings-tab-exchange").replaceChildren(settings.exchange);
       must<HTMLElement>("settings-tab-updates").replaceChildren(settings.updates);
       built = true;
     } catch (error) {

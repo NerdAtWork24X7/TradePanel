@@ -3670,12 +3670,17 @@
 
     /* ── Credentials modal (API keys) ────────────────────────────────────── */
 
-    var CRED_GROUP_ORDER = ['Hyperliquid'];
+    var CRED_GROUP_ORDER = ['Hyperliquid', 'Binance', 'Bybit', 'OKX', 'Gate.io', 'Bitget', 'KuCoin', 'Coinbase', 'Kraken'];
+    var CRED_NETWORKS = {
+        kucoin: ['live'],
+        coinbase: ['live'],
+        kraken: ['live']
+    };
 
     function openCredentialsModal() {
         var body = el('div', 'cred-body');
         body.appendChild(el('div', 'cred-note',
-            'Values are stored in keys/.env on this machine. Saved secrets are never sent back to the UI — leave a secret blank to keep the current value.'));
+            'Values are stored in the OS credential store. Saved secrets are never sent back to the UI — leave a secret blank to keep the current value.'));
         var fieldsWrap = el('div');
         fieldsWrap.style.display = 'flex';
         fieldsWrap.style.flexDirection = 'column';
@@ -3724,16 +3729,31 @@
             meta.appendChild(clearBtn);
             row.appendChild(meta);
 
-            var input = el('input', 'input mono');
-            input.id = inputId;
-            input.spellcheck = false;
-            input.autocomplete = 'new-password';
-            if (field.secret) {
-                input.type = 'password';
-                input.placeholder = field.set ? 'Stored — leave blank to keep' : 'Not set';
+            var input;
+            if (field.kind === 'choice') {
+                input = el('select', 'input mono');
+                input.id = inputId;
+                var allowed = CRED_NETWORKS[field.exchange] || ['testnet', 'live'];
+                allowed.forEach(function (network) {
+                    var option = el('option', '', network === 'live' ? 'Live' : 'Testnet');
+                    option.value = network;
+                    input.appendChild(option);
+                });
+                input.value = field.value && allowed.indexOf(field.value) !== -1
+                    ? field.value
+                    : allowed[0];
             } else {
-                input.type = 'text';
-                input.value = field.value || '';
+                input = el('input', 'input mono');
+                input.id = inputId;
+                input.spellcheck = false;
+                input.autocomplete = 'new-password';
+                if (field.secret) {
+                    input.type = 'password';
+                    input.placeholder = field.set ? 'Stored — leave blank to keep' : 'Not set';
+                } else {
+                    input.type = 'text';
+                    input.value = field.value || '';
+                }
             }
             row.appendChild(input);
             group.wrap.appendChild(row);
@@ -3817,7 +3837,7 @@
                 if (!res || res.ok !== true) throw new Error((res && res.error) || 'Save failed');
                 var count = (res.keys || []).length;
                 closeModal();
-                toast(count ? 'Credentials saved to the OS keyring' : 'No credential changes');
+                toast(count ? 'Exchange credentials saved to the OS keyring' : 'No credential changes');
             }).catch(function (err) {
                 save.disabled = false;
                 save.textContent = 'Save keys';
@@ -3829,8 +3849,8 @@
         foot.appendChild(save);
 
         openModal({
-            title: 'API keys',
-            sub: 'Hyperliquid trading wallet · stored in the OS credential store',
+            title: 'Exchange API keys',
+            sub: 'Connect a venue for live trading · stored in the OS credential store',
             body: body,
             foot: foot
         });

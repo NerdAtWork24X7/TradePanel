@@ -9,9 +9,13 @@ Pinned versions:
 
 | Component | Version | Source |
 |---|---|---|
-| Pi coding agent | **1.5.0** | `ai/runtime/package.json` |
+| Pi coding agent | **1.5.0** (bundled) | `ai/runtime/package.json` |
 | Node.js runtime | **22.23.4** | SHA-256 verified download from nodejs.org |
 | Tauri | 2.x | `src-tauri/Cargo.toml` |
+
+Settings → Updates can install a newer Pi release and its npm dependencies into
+`<app-data>/ai/runtime/<target>`; that overlay wins over the bundle while its Pi
+version is newer. See `docs/STANDALONE_BUILD.md` § 5.
 
 ## Architecture
 

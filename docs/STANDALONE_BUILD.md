@@ -19,16 +19,21 @@ The script:
    `@earendil-works/pi-coding-agent@1.5.0` dependency tree. All Pi dependencies
    are pure JavaScript or WASM, so one install is valid for every target; only
    the Node executable differs.
-3. Copies the read-only analysis extension and system prompt.
-4. Verifies the staged runtime before shipping: `node --version`, `pi --version`,
-   and an import of the extension (which resolves `typebox`).
-5. Writes `manifest.json` with the relative paths the Rust host validates.
+3. Copies npm from the same Node distribution (`lib/node_modules/npm`, or
+   `node_modules/npm` in the Windows zip) and prunes its offline docs. This copy
+   powers Settings → Updates, so the target machine needs no Node/npm.
+4. Copies the read-only analysis extension and system prompt.
+5. Verifies the staged runtime before shipping: `node --version`, `pi --version`,
+   `npm --version`, and an import of the extension (which resolves `typebox`).
+6. Writes `manifest.json` (`schema: 2`) with the relative paths the Rust host
+   validates, including `npm`.
 
 Output (git-ignored):
 
 ```
 src-tauri/ai-runtime/<target>/
   node/node
+  npm/                      # npm CLI from the Node distribution
   pi/node_modules/@earendil-works/pi-coding-agent/...
   pi/extensions/tradepanel-analysis.mjs
   pi/prompts/analysis.md
@@ -107,9 +112,16 @@ execute bit where the filesystem is writable, but packaging should preserve it.
   requires Node ≥ 22.19.
 * `ai/runtime/package-lock.json` is committed. Never update Pi transitively
   without rebuilding the runtime and running `npm run test:ai`.
-* Migrations: the runtime loader accepts `manifest.schema == 1`. Bump the
-  schema when the manifest layout changes and implement a migration in
-  `src-tauri/src/ai/runtime.rs`.
+* Migrations: the runtime loader accepts `manifest.schema` 1 and 2 (schema 2
+  adds `npm`). Bump the schema when the manifest layout changes and implement a
+  migration in `src-tauri/src/ai/runtime.rs`.
+* In-app updates (Settings → Updates → AI runtime): `npm view` checks the
+  registry, then `npm install <pi>@<version> --omit=dev --ignore-scripts` writes
+  a fresh Pi tree into `<app-data>/ai/runtime/<target>`; npm's registry
+  integrity data verifies every tarball. The overlay is activated only after
+  `pi --version`, the extension import and the settings-bridge check pass, and
+  only when its Pi version is newer than the bundle's. Delete that folder to
+  fall back to the bundled runtime.
 * User data (sessions, settings, conversations, `agent/auth.json`, legacy
   keyring entries) lives outside the installation and survives application updates. Pi session JSONL is
   forward-compatible; the cached-history reader tolerates unknown entry types.

@@ -6,7 +6,7 @@
 
 use serde::Serialize;
 use serde_json::Value;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::commands::AppState;
 use crate::protocol::RpcErrorPayload;
@@ -14,7 +14,9 @@ use crate::protocol::RpcErrorPayload;
 use super::auth::{AuthModel, AuthProviders, AuthSession};
 use super::manager::{AiStatus, ConnectResult, Diagnostics, ProviderInfo};
 use super::probe::ModelInfo;
+use super::runtime::AiRuntime;
 use super::store::{AiSettings, ConversationStore};
+use super::update::{self, RuntimeUpdateInfo};
 
 #[tauri::command]
 pub async fn ai_status(state: State<'_, AppState>) -> Result<AiStatus, RpcErrorPayload> {
@@ -224,6 +226,69 @@ pub struct AiRuntimeReport {
     pub runtime_error: Option<String>,
     pub node_version: Option<String>,
     pub pi_version: Option<String>,
+    /// True when Pi comes from an in-app update rather than the bundle.
+    pub managed: bool,
+}
+
+/// Ask npm for the latest Pi release. Reads the registry only; nothing is
+/// downloaded and the running runtime is untouched.
+#[tauri::command]
+pub async fn ai_runtime_update_check(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<RuntimeUpdateInfo, RpcErrorPayload> {
+    let runtime = state
+        .ai
+        .runtime()
+        .map_err(|error| RpcErrorPayload::unavailable(error))?;
+    update::check(&app, &runtime).await
+}
+
+/// Download a newer Pi release plus its npm dependencies into the writable
+/// runtime overlay and activate it without restarting TradePanel. The previous
+/// runtime is restored if discovery rejects the new tree.
+#[tauri::command]
+pub async fn ai_runtime_update_install(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<RuntimeUpdateInfo, RpcErrorPayload> {
+    let previous = state
+        .ai
+        .runtime()
+        .map_err(|error| RpcErrorPayload::unavailable(error))?;
+    // Both Pi processes must be gone before the overlay is replaced: Windows
+    // keeps loaded files locked, and a running child must not see a half-written
+    // node_modules tree.
+    state.ai.stop().await?;
+    state.ai.auth().stop().await;
+    state.ai.set_updating(true);
+    state.ai.auth().set_updating(true);
+    let installed = update::install(&app, &previous).await;
+    state.ai.auth().set_updating(false);
+    state.ai.set_updating(false);
+    let installed = match installed {
+        Ok(info) => info,
+        Err(error) => {
+            state.ai.emit_status();
+            return Err(error);
+        }
+    };
+    match AiRuntime::discover(&app) {
+        Ok(active) => {
+            state.ai.set_runtime(Ok(active.clone()));
+            state.ai.auth().replace_runtime(Ok(active)).await;
+            state.ai.emit_status();
+            Ok(installed)
+        }
+        Err(error) => {
+            state.ai.set_runtime(Ok(previous));
+            state.ai.emit_status();
+            Err(RpcErrorPayload::unavailable(format!(
+                "Pi {} was installed but could not be activated: {error}",
+                installed.current_version
+            )))
+        }
+    }
 }
 
 /// Lightweight runtime probe used by the settings header (no process start).
@@ -237,5 +302,10 @@ pub async fn ai_runtime_report(
         runtime_error: diagnostics.runtime_error,
         node_version: diagnostics.node_version,
         pi_version: diagnostics.pi_version,
+        managed: state
+            .ai
+            .runtime()
+            .map(|runtime| runtime.is_overlay())
+            .unwrap_or(false),
     })
 }

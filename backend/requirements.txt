@@ -3,3 +3,4 @@
 python-dotenv==1.2.2
 requests==2.34.2
 hyperliquid-python-sdk==0.24.0
+ccxt==4.5.92

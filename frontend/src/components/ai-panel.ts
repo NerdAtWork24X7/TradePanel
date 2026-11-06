@@ -756,12 +756,18 @@ export class AiPanel {
     let orders: unknown[] = [];
     let error: string | null = null;
     try {
-      position = await account.getPosition(coin);
+      position = await account.getPosition(focus.symbol, {
+        exchange: focus.exchange,
+        market: focus.market,
+      });
     } catch (cause) {
       error = (cause as Error).message;
     }
     try {
-      orders = await account.getOpenOrders(coin);
+      orders = await account.getOpenOrders(focus.symbol, {
+        exchange: focus.exchange,
+        market: focus.market,
+      });
     } catch {
       /* orders are optional context */
     }

@@ -1,0 +1,334 @@
+{
+  "version": 1,
+  "exchanges": [
+    {
+      "id": "hyperliquid",
+      "name": "Hyperliquid",
+      "prefix": "HL",
+      "markets": {
+        "spot": "hyperliquid",
+        "futures": "hyperliquid"
+      },
+      "passphrase": false,
+      "wallet": true,
+      "networks": [
+        "testnet",
+        "live"
+      ],
+      "fields": [
+        {
+          "key": "HL_ADDRESS",
+          "label": "Wallet address",
+          "secret": false,
+          "kind": "text"
+        },
+        {
+          "key": "HL_PRIVATE_KEY",
+          "label": "Private key",
+          "secret": true,
+          "kind": "secret"
+        },
+        {
+          "key": "HL_NETWORK",
+          "label": "Network",
+          "secret": false,
+          "kind": "choice"
+        }
+      ]
+    },
+    {
+      "id": "binance",
+      "name": "Binance",
+      "prefix": "BINANCE",
+      "markets": {
+        "spot": "binance",
+        "futures": "binanceusdm"
+      },
+      "passphrase": false,
+      "wallet": false,
+      "networks": [
+        "testnet",
+        "live"
+      ],
+      "fields": [
+        {
+          "key": "BINANCE_API_KEY",
+          "label": "API key",
+          "secret": true,
+          "kind": "text"
+        },
+        {
+          "key": "BINANCE_API_SECRET",
+          "label": "API secret",
+          "secret": true,
+          "kind": "secret"
+        },
+        {
+          "key": "BINANCE_NETWORK",
+          "label": "Network",
+          "secret": false,
+          "kind": "choice"
+        }
+      ]
+    },
+    {
+      "id": "bybit",
+      "name": "Bybit",
+      "prefix": "BYBIT",
+      "markets": {
+        "spot": "bybit",
+        "futures": "bybit"
+      },
+      "passphrase": false,
+      "wallet": false,
+      "networks": [
+        "testnet",
+        "live"
+      ],
+      "fields": [
+        {
+          "key": "BYBIT_API_KEY",
+          "label": "API key",
+          "secret": true,
+          "kind": "text"
+        },
+        {
+          "key": "BYBIT_API_SECRET",
+          "label": "API secret",
+          "secret": true,
+          "kind": "secret"
+        },
+        {
+          "key": "BYBIT_NETWORK",
+          "label": "Network",
+          "secret": false,
+          "kind": "choice"
+        }
+      ]
+    },
+    {
+      "id": "okx",
+      "name": "OKX",
+      "prefix": "OKX",
+      "markets": {
+        "spot": "okx",
+        "futures": "okx"
+      },
+      "passphrase": true,
+      "wallet": false,
+      "networks": [
+        "testnet",
+        "live"
+      ],
+      "fields": [
+        {
+          "key": "OKX_API_KEY",
+          "label": "API key",
+          "secret": true,
+          "kind": "text"
+        },
+        {
+          "key": "OKX_API_SECRET",
+          "label": "API secret",
+          "secret": true,
+          "kind": "secret"
+        },
+        {
+          "key": "OKX_PASSPHRASE",
+          "label": "Passphrase",
+          "secret": true,
+          "kind": "secret"
+        },
+        {
+          "key": "OKX_NETWORK",
+          "label": "Network",
+          "secret": false,
+          "kind": "choice"
+        }
+      ]
+    },
+    {
+      "id": "gate",
+      "name": "Gate.io",
+      "prefix": "GATE",
+      "markets": {
+        "spot": "gate",
+        "futures": "gate"
+      },
+      "passphrase": false,
+      "wallet": false,
+      "networks": [
+        "testnet",
+        "live"
+      ],
+      "fields": [
+        {
+          "key": "GATE_API_KEY",
+          "label": "API key",
+          "secret": true,
+          "kind": "text"
+        },
+        {
+          "key": "GATE_API_SECRET",
+          "label": "API secret",
+          "secret": true,
+          "kind": "secret"
+        },
+        {
+          "key": "GATE_NETWORK",
+          "label": "Network",
+          "secret": false,
+          "kind": "choice"
+        }
+      ]
+    },
+    {
+      "id": "bitget",
+      "name": "Bitget",
+      "prefix": "BITGET",
+      "markets": {
+        "spot": "bitget",
+        "futures": "bitget"
+      },
+      "passphrase": true,
+      "wallet": false,
+      "networks": [
+        "testnet",
+        "live"
+      ],
+      "fields": [
+        {
+          "key": "BITGET_API_KEY",
+          "label": "API key",
+          "secret": true,
+          "kind": "text"
+        },
+        {
+          "key": "BITGET_API_SECRET",
+          "label": "API secret",
+          "secret": true,
+          "kind": "secret"
+        },
+        {
+          "key": "BITGET_PASSPHRASE",
+          "label": "Passphrase",
+          "secret": true,
+          "kind": "secret"
+        },
+        {
+          "key": "BITGET_NETWORK",
+          "label": "Network",
+          "secret": false,
+          "kind": "choice"
+        }
+      ]
+    },
+    {
+      "id": "kucoin",
+      "name": "KuCoin",
+      "prefix": "KUCOIN",
+      "markets": {
+        "spot": "kucoin",
+        "futures": "kucoinfutures"
+      },
+      "passphrase": true,
+      "wallet": false,
+      "networks": [
+        "live"
+      ],
+      "fields": [
+        {
+          "key": "KUCOIN_API_KEY",
+          "label": "API key",
+          "secret": true,
+          "kind": "text"
+        },
+        {
+          "key": "KUCOIN_API_SECRET",
+          "label": "API secret",
+          "secret": true,
+          "kind": "secret"
+        },
+        {
+          "key": "KUCOIN_PASSPHRASE",
+          "label": "Passphrase",
+          "secret": true,
+          "kind": "secret"
+        },
+        {
+          "key": "KUCOIN_NETWORK",
+          "label": "Network",
+          "secret": false,
+          "kind": "choice"
+        }
+      ]
+    },
+    {
+      "id": "coinbase",
+      "name": "Coinbase",
+      "prefix": "COINBASE",
+      "markets": {
+        "spot": "coinbase"
+      },
+      "passphrase": false,
+      "wallet": false,
+      "networks": [
+        "live"
+      ],
+      "fields": [
+        {
+          "key": "COINBASE_API_KEY",
+          "label": "API key",
+          "secret": true,
+          "kind": "text"
+        },
+        {
+          "key": "COINBASE_API_SECRET",
+          "label": "Private key (PEM)",
+          "secret": true,
+          "kind": "secret",
+          "multiline": true
+        },
+        {
+          "key": "COINBASE_NETWORK",
+          "label": "Network",
+          "secret": false,
+          "kind": "choice"
+        }
+      ]
+    },
+    {
+      "id": "kraken",
+      "name": "Kraken",
+      "prefix": "KRAKEN",
+      "markets": {
+        "spot": "kraken"
+      },
+      "passphrase": false,
+      "wallet": false,
+      "networks": [
+        "live"
+      ],
+      "fields": [
+        {
+          "key": "KRAKEN_API_KEY",
+          "label": "API key",
+          "secret": true,
+          "kind": "text"
+        },
+        {
+          "key": "KRAKEN_API_SECRET",
+          "label": "API secret",
+          "secret": true,
+          "kind": "secret"
+        },
+        {
+          "key": "KRAKEN_NETWORK",
+          "label": "Network",
+          "secret": false,
+          "kind": "choice"
+        }
+      ]
+    }
+  ]
+}

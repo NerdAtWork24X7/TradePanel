@@ -10,11 +10,16 @@ if (-not (Test-Path $Python)) {
     Write-Host "Creating build environment at $Venv"
     if (Get-Command uv -ErrorAction SilentlyContinue) {
         uv venv --python 3.12 $Venv
-        uv pip install --python $Python -r backend\requirements.txt -r backend\build\requirements-build.txt
     } else {
         python -m venv $Venv
-        & (Join-Path $Venv "Scripts\pip.exe") install -r backend\requirements.txt -r backend\build\requirements-build.txt
     }
+}
+
+# Always sync: a new sidecar dependency must reach an existing build venv.
+if (Get-Command uv -ErrorAction SilentlyContinue) {
+    uv pip install --python $Python -r backend\requirements.txt -r backend\build\requirements-build.txt
+} else {
+    & (Join-Path $Venv "Scripts\pip.exe") install -r backend\requirements.txt -r backend\build\requirements-build.txt
 }
 
 Write-Host "Building one-folder sidecar"

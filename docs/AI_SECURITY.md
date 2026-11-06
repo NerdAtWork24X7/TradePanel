@@ -126,7 +126,16 @@ Provider sign-in uses Pi's own authentication runtime, the same flows as the
 
 The model provider is the only network endpoint the bundled analysis extension
 can reach: it has no network code and the runtime is started with no tools that
-can make requests. TradePanel's own market-data connections are unaffected and
+can make requests.
+
+The one other outbound connection is user-initiated: Settings → Updates → AI
+runtime asks the npm registry for the latest `@earendil-works/pi-coding-agent`
+release and, after confirmation, downloads it together with its npm
+dependencies. That install runs the staged npm CLI with `--ignore-scripts`, so
+no package lifecycle code executes; tarballs are checked against the registry's
+SHA-512 integrity values, and the new tree replaces the active runtime only
+after the Pi CLI and the read-only extension both boot. Nothing is checked or
+downloaded in the background. TradePanel's own market-data connections are unaffected and
 are not shared with Pi. User extensions in the optional extension folder are
 not part of the bundled runtime; a user-installed extension such as Pi Scope may
 post session events to its local dashboard.

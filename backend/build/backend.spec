@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(SPECPATH).resolve().parent.parent  # repo root
 
 datas, binaries, hiddenimports = [], [], []
+datas.append((str(ROOT / "shared" / "exchanges.json"), "shared"))
 hiddenimports += [
     "backend",
     "backend.sidecar",
@@ -36,6 +37,21 @@ hiddenimports += [
     "backend.Core.trading_service",
     "backend.Exchange",
     "backend.Exchange.hyperliquid",
+    "backend.Exchange.specs",
+    "backend.Exchange.ccxt_broker",
+    "ccxt",
+    "ccxt.base.exchange",
+    "ccxt.binance",
+    "ccxt.binanceusdm",
+    "ccxt.bybit",
+    "ccxt.okx",
+    "ccxt.gate",
+    "ccxt.bitget",
+    "ccxt.kucoin",
+    "ccxt.kucoinfutures",
+    "ccxt.hyperliquid",
+    "ccxt.coinbase",
+    "ccxt.kraken",
     "dotenv",
     "hyperliquid",
     "hyperliquid.info",

@@ -145,6 +145,8 @@ pub fn run() {
             ai::commands::ai_auth_logout,
             ai::commands::ai_diagnostics,
             ai::commands::ai_runtime_report,
+            ai::commands::ai_runtime_update_check,
+            ai::commands::ai_runtime_update_install,
             ai::commands::ai_connect,
             ai::commands::ai_disconnect,
             ai::commands::ai_models,

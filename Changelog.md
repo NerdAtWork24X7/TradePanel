@@ -1,3 +1,31 @@
+## 2026-11-06 — In-app Pi (AI runtime) updates from Settings → Updates
+
+- **Settings → Updates is now two cards.** The signed TradePanel release channel is
+  unchanged; a new *Pi coding agent* card shows the active Pi/Node versions and the
+  runtime target, flags runtimes that already come from npm, and offers
+  **Check for AI updates** / **Update to Pi X.Y.Z**.
+- **Registry check without a resolver rewrite.** The build stages npm from the same
+  official Node archive (`src-tauri/ai-runtime/<target>/npm`, docs/man pruned), so
+  `npm view @earendil-works/pi-coding-agent@latest version engines dependencies --json`
+  answers the check on machines without Node/npm installed.
+- **Updates land in user data, never in the installation.** `npm install
+  <pkg>@<version> --omit=dev --ignore-scripts --save-exact` writes a staging tree,
+  which is verified (`pi --version`, extension import, settings-bridge `--check`) and
+  only then renamed over `<app-data>/ai/runtime/<target>`. The read-only bundle is
+  untouched; a failed install keeps the previous runtime and a release that needs a
+  newer Node than the bundled one is refused with an actionable message.
+- **No restart required.** `AiManager` and `AuthService` now hold the runtime behind
+  an `RwLock`: the update stops both Pi processes, swaps the snapshot, emits
+  `ai:status`, and the next analysis spawns from the new tree. A stale overlay is
+  ignored automatically once a TradePanel update ships an equal or newer Pi.
+- **Progress is visible.** `ai:runtime-update` events stream npm output into a
+  bounded log under an `aria-live` status; only one install runs at a time, and the
+  npm child inherits the same sanitized environment (proxies, CA bundles) as Pi.
+- Verified: `cargo test --lib ai::` (32 tests incl. version ordering, overlay
+  preference/target matching, npm arg construction, engine floor parsing),
+  `tsc --noEmit`, a rebuilt linux-x64 runtime (`schema: 2`, npm 10.9.9), and a real
+  staged-npm install whose CLI/extension/settings checks match the Rust flow.
+
 ## 2026-11-06 — Explicit session saves, named layout sessions
 
 - **No background writes.** Every chart/study/layout edit used to arm a 650 ms

@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -131,7 +131,9 @@ pub struct AiManager {
     store: Arc<AiStore>,
     credentials: Arc<SecretStore>,
     auth: Arc<AuthService>,
-    runtime: Result<AiRuntime, String>,
+    /// Swapped in place by an in-app Pi update; never mutated while a child
+    /// process is being spawned from it (each call clones the snapshot).
+    runtime: RwLock<Result<AiRuntime, String>>,
     child: AsyncMutex<Option<Child>>,
     stdin: AsyncMutex<Option<ChildStdin>>,
     pending: Mutex<HashMap<String, Pending>>,
@@ -145,6 +147,8 @@ pub struct AiManager {
     ready: AtomicBool,
     has_key: AtomicBool,
     streaming: AtomicBool,
+    /// Set while an in-app Pi update replaces the runtime tree.
+    updating: AtomicBool,
     shutting_down: AtomicBool,
     restart_attempts: AtomicU32,
     health_failures: AtomicU32,
@@ -166,7 +170,7 @@ impl AiManager {
             store,
             credentials,
             auth,
-            runtime,
+            runtime: RwLock::new(runtime),
             child: AsyncMutex::new(None),
             stdin: AsyncMutex::new(None),
             pending: Mutex::new(HashMap::new()),
@@ -183,11 +187,28 @@ impl AiManager {
             ready: AtomicBool::new(false),
             has_key: AtomicBool::new(false),
             streaming: AtomicBool::new(false),
+            updating: AtomicBool::new(false),
             shutting_down: AtomicBool::new(false),
             restart_attempts: AtomicU32::new(0),
             health_failures: AtomicU32::new(0),
             self_ref: OnceLock::new(),
         })
+    }
+
+    /// Snapshot of the active runtime. Cloning keeps an update swap from
+    /// changing paths under a process that is already starting.
+    pub fn runtime(&self) -> Result<AiRuntime, String> {
+        self.runtime.read().unwrap().clone()
+    }
+
+    /// Install a newly discovered runtime (used by the in-app Pi update).
+    pub fn set_runtime(&self, runtime: Result<AiRuntime, String>) {
+        *self.runtime.write().unwrap() = runtime;
+    }
+
+    /// Refuse new spawns while an update replaces the files they would run.
+    pub fn set_updating(&self, value: bool) {
+        self.updating.store(value, Ordering::SeqCst);
     }
 
     /// Bind the manager to its owning Arc so reader tasks can keep a weak
@@ -219,7 +240,8 @@ impl AiManager {
         let run = self.state.lock().unwrap();
         let streaming = self.streaming.load(Ordering::SeqCst);
         let has_key = self.has_key.load(Ordering::SeqCst);
-        let runtime = self.runtime.as_ref().ok();
+        let runtime_state = self.runtime.read().unwrap().clone();
+        let runtime = runtime_state.as_ref().ok();
         let configured = runtime.is_some()
             && has_key
             && !settings.provider.is_empty()
@@ -229,7 +251,7 @@ impl AiManager {
             message: run.message.clone(),
             pid: run.pid,
             runtime_ready: runtime.is_some(),
-            runtime_error: self.runtime.as_ref().err().cloned(),
+            runtime_error: runtime_state.as_ref().err().cloned(),
             node_version: runtime.map(|runtime| runtime.node_version.clone()),
             pi_version: runtime.map(|runtime| runtime.pi_version.clone()),
             configured,
@@ -254,11 +276,12 @@ impl AiManager {
     }
 
     pub fn diagnostics(&self) -> Diagnostics {
-        let runtime = self.runtime.as_ref().ok();
+        let runtime_state = self.runtime.read().unwrap().clone();
+        let runtime = runtime_state.as_ref().ok();
         let last_error = self.state.lock().unwrap().last_error.clone();
         Diagnostics {
             runtime_ready: runtime.is_some(),
-            runtime_error: self.runtime.as_ref().err().cloned(),
+            runtime_error: runtime_state.as_ref().err().cloned(),
             runtime_root: runtime.map(|runtime| runtime.root.to_string_lossy().into_owned()),
             node_version: runtime.map(|runtime| runtime.node_version.clone()),
             pi_version: runtime.map(|runtime| runtime.pi_version.clone()),
@@ -358,9 +381,13 @@ impl AiManager {
             validate_model(model).map_err(invalid)?;
         }
         let runtime = self
-            .runtime
-            .as_ref()
-            .map_err(|error| RpcErrorPayload::new(ERR_AI_RUNTIME, error.clone()))?;
+            .runtime()
+            .map_err(|error| RpcErrorPayload::new(ERR_AI_RUNTIME, error))?;
+        if self.updating.load(Ordering::SeqCst) {
+            return Err(RpcErrorPayload::unavailable(
+                "The AI runtime is being updated. Try again when the update finishes.",
+            ));
+        }
         if self.streaming.load(Ordering::SeqCst) {
             return Err(busy());
         }
@@ -461,7 +488,7 @@ impl AiManager {
         }
         auth::restrict_auth_file(&self.paths);
 
-        let outcome = probe::probe(runtime, &self.paths, &provider, "", model.as_deref())
+        let outcome = probe::probe(&runtime, &self.paths, &provider, "", model.as_deref())
             .await
             .map_err(|error| {
                 self.set_error(format!("Provider check failed: {error}"));
@@ -775,13 +802,17 @@ impl AiManager {
         if self.shutting_down.load(Ordering::SeqCst) {
             return Err(RpcErrorPayload::unavailable("Application is shutting down"));
         }
+        if self.updating.load(Ordering::SeqCst) {
+            return Err(RpcErrorPayload::unavailable(
+                "The AI runtime is being updated. Try again when the update finishes.",
+            ));
+        }
         if self.ready.load(Ordering::SeqCst) && self.session.lock().unwrap().clone() == session_id {
             return Ok(());
         }
         let runtime = self
-            .runtime
-            .as_ref()
-            .map_err(|error| RpcErrorPayload::new(ERR_AI_RUNTIME, error.clone()))?;
+            .runtime()
+            .map_err(|error| RpcErrorPayload::new(ERR_AI_RUNTIME, error))?;
         let settings = self.store.settings();
         if settings.provider.is_empty() || settings.model.is_empty() {
             return Err(not_configured());
@@ -800,7 +831,7 @@ impl AiManager {
         self.fail_pending("AI runtime is restarting", ERR_UNAVAILABLE);
 
         let launch = Launch {
-            runtime,
+            runtime: &runtime,
             paths: &self.paths,
             provider: &settings.provider,
             model: &settings.model,

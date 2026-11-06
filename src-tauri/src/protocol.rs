@@ -253,7 +253,10 @@ pub const FRONTEND_METHODS: &[&str] = &[
     "trading.update_tp_sl",
     "trading.calc_qty",
     "trading.sz_decimals",
+    "trading.price_precision",
     "trading.coins",
+    "trading.exchanges",
+    "trading.connection",
     "settings.window_state.get",
     "settings.window_state.save",
 ];

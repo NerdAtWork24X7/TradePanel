@@ -2,9 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { RpcError } from "./backend";
 
-export async function openTradePage(coin: string): Promise<void> {
+export async function openTradePage(
+  coin: string,
+  exchange: string,
+  market: string,
+): Promise<void> {
   try {
-    await invoke("open_trade_page", { coin });
+    await invoke("open_trade_page", { coin, exchange, market });
   } catch (error) {
     throw RpcError.from(error);
   }

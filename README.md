@@ -125,7 +125,8 @@ backend/scripts/test.sh
   window.
 * Backend status pill and banner. Any non-running backend disables trading controls;
   reconnection never submits an order.
-* Settings (Ctrl+,): AI analysis indicators, credential management, signed updates.
+* Settings (Ctrl+,): AI analysis indicators, credential management, signed app updates
+  and in-app Pi (AI runtime) updates.
 * Ctrl+Shift+T collapses the sidebar to the floating rail (the workspace's
   **Trade** button does the same).
 * Preferences persist in the existing window-state JSON (merged, never reset).
@@ -263,6 +264,12 @@ page opened from the gear button to the right of **Trade** (or `Ctrl+,`).
   API keys are handled by the bundled agent and stored in its owner-only
   `agent/auth.json`. Settings → AI Analysis lists every provider Pi supports,
   highlights signed-in accounts and shows the models they unlock.
+* Settings → Updates keeps Pi current: it asks npm for the latest
+  `@earendil-works/pi-coding-agent` release, installs it with its npm
+  dependencies into `<app-data>/ai/runtime/<target>` (never into the read-only
+  installation), verifies the CLI and the analysis extension, then restarts Pi
+  on the new tree. No Node or npm is needed on the machine — the build ships
+  both — and no lifecycle scripts run during the install.
 
 Stage and test the runtime:
 
@@ -330,7 +337,12 @@ Details: [`docs/SECURITY.md`](docs/SECURITY.md) and
 * Absolute price sync deliberately skips charts with incompatible quote currency/scale.
 * Symbol entry is search-driven: only instruments listed by the exchange/market can be used.
 * Update installation requires a configured signing key and endpoint; unconfigured builds
-  refuse updates by design.
+  refuse updates by design. Pi updates are independent of that channel, need
+  registry access, and are installed only after verification.
+* An in-app Pi update is user data, not a signed artifact: tarballs are checked
+  against npm's registry integrity values by the staged npm CLI, and updates
+  only run with `--ignore-scripts`. Delete `<app-data>/ai/runtime/<target>` to
+  return to the bundled Pi.
 
 ## Design principles
 

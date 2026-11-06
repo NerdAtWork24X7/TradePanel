@@ -1,5 +1,6 @@
-/** Price formatting for Hyperliquid perps: 5 significant figures and at most
- *  `6 - szDecimals` decimal places (the same rule the SDK applies to the wire). */
+/** Price formatting for the active venue. Hyperliquid uses 5 significant
+ *  figures plus `6 - szDecimals` decimals; other venues return a 15-digit
+ *  sig-fig cap so their fixed tick size is the only rounding constraint. */
 
 export interface PricePrecision {
   price_decimals: number;

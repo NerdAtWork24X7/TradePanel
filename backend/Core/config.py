@@ -51,6 +51,7 @@ SHORT_SL_PCT = 1.005    # +0.5%
 # ── Exchange credentials (loaded from .env) ─────────────────────────────────
 HL_PRIVATE_KEY = ""
 HL_ADDRESS = ""
+HL_NETWORK = "testnet"
 
 
 def refresh_credentials() -> None:
@@ -59,9 +60,11 @@ def refresh_credentials() -> None:
     Called at import and after the UI writes ``keys/.env`` so new keys apply
     without restarting the app.
     """
-    global HL_PRIVATE_KEY, HL_ADDRESS
+    global HL_PRIVATE_KEY, HL_ADDRESS, HL_NETWORK
     HL_PRIVATE_KEY = os.environ.get("HL_PRIVATE_KEY", "")
     HL_ADDRESS = os.environ.get("HL_ADDRESS", "")
+    network = os.environ.get("HL_NETWORK", "").strip().lower()
+    HL_NETWORK = network if network in ("testnet", "live") else "testnet"
 
 
 refresh_credentials()

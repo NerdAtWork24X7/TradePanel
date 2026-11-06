@@ -1,4 +1,5 @@
 import * as account from "../services/account";
+import * as ai from "../services/ai";
 import * as backend from "../services/backend";
 import * as credentials from "../services/credentials";
 import * as marketData from "../services/market-data";
@@ -18,6 +19,7 @@ import type {
   BackendStatus,
   AiChartIndicator,
   Direction,
+  ExchangeCatalog,
   MarketMeta,
   OpenOrder,
   Position,
@@ -92,6 +94,7 @@ class AppController {
   private readonly refreshRail = must<HTMLButtonElement>("refresh-coins-rail");
   private readonly openBrowserRail = must<HTMLButtonElement>("open-browser-rail");
   private readonly hyperliquidRail = must<HTMLButtonElement>("hyperliquid-rail");
+  private readonly venueLabel = must<HTMLElement>("trade-venue");
   private readonly frame = must<HTMLIFrameElement>("workspace-frame");
   private readonly workspaceError = must<HTMLElement>("workspace-error");
   private readonly workspaceErrorMessage = must<HTMLElement>("workspace-error-message");
@@ -114,6 +117,10 @@ class AppController {
     updatedAtMs: 0,
   };
   private direction: Direction = "long";
+  private focusExchange = trading.DEFAULT_VENUE.exchange;
+  private focusMarket = trading.DEFAULT_VENUE.market;
+  private focusSymbol = "";
+  private exchangeCatalog: ExchangeCatalog | null = null;
   private coinList: string[] = [];
   private meta: MarketMeta | null = null;
   private bootstrapped = false;
@@ -314,11 +321,17 @@ class AppController {
   }
 
   private async bootstrap(): Promise<void> {
-    const [metaResult, coinsResult, stateResult] = await Promise.allSettled([
+    const [metaResult, coinsResult, stateResult, catalogResult] = await Promise.allSettled([
       marketData.getMeta(),
-      trading.getCoins(false),
+      trading.getCoins(this.venue(), false),
       settingsStore.loadWindowState(),
+      trading.getExchanges(),
     ]);
+
+    if (catalogResult.status === "fulfilled") {
+      this.exchangeCatalog = catalogResult.value;
+      this.updateVenueBadge();
+    }
 
     if (metaResult.status === "fulfilled") {
       this.meta = metaResult.value;
@@ -482,6 +495,8 @@ class AppController {
     this.coin.addEventListener("change", () => {
       const coin = this.coin.value;
       if (!coin) return;
+      // A manual selection is a base symbol; drop the chart's exact quote.
+      this.focusSymbol = "";
       this.host.setFocusedCoin(coin);
       void this.refreshPrecisionFor(coin);
       void this.refreshPosition(false);
@@ -724,11 +739,42 @@ class AppController {
       `Direction: ${short ? "short" : "long"} (does not submit an order)`;
   }
 
+  private venue(): trading.Venue {
+    return { exchange: this.focusExchange, market: this.focusMarket };
+  }
+
+  /** Base coin from the select, upgraded to the chart's exact quote symbol. */
+  private ticketCoin(): string {
+    const coin = this.coin.value;
+    if (!coin) return "";
+    const base = this.focusSymbol.split("/")[0];
+    return this.focusSymbol && base.toUpperCase() === coin.toUpperCase()
+      ? this.focusSymbol
+      : coin;
+  }
+
+  private venueName(): string {
+    return (
+      this.exchangeCatalog?.exchanges.find((entry) => entry.id === this.focusExchange)?.name ??
+      this.focusExchange.replace(/^./, (letter) => letter.toUpperCase())
+    );
+  }
+
+  private updateVenueBadge(): void {
+    const entry = this.exchangeCatalog?.exchanges.find((item) => item.id === this.focusExchange);
+    const market = entry?.markets.find((item) => item.id === this.focusMarket);
+    this.venueLabel.textContent = `${entry?.name ?? this.venueName()} · ${
+      market?.label ?? (this.focusMarket === "spot" ? "Spot" : "Perpetual")
+    }`;
+    this.venueLabel.title = "The ticket follows the focused chart's exchange and market";
+  }
+
   /** Mirror instrument state onto the collapsed rail so it never drifts. */
   private updateRailState(): void {
-    const hl = this.hyperliquid.checked;
-    this.hyperliquidRail.setAttribute("aria-pressed", String(hl));
-    this.hyperliquidRail.title = hl ? "Hyperliquid mode: on" : "Hyperliquid mode: off";
+    const live = this.hyperliquid.checked;
+    this.hyperliquidRail.setAttribute("aria-pressed", String(live));
+    this.hyperliquidRail.title = live ? "Live trading: on" : "Live trading: off";
+    this.hyperliquidRail.setAttribute("aria-label", live ? "Disable live trading" : "Enable live trading");
     this.centerRail.disabled = !this.coin.value;
   }
 
@@ -756,8 +802,24 @@ class AppController {
       this.aiFocus = { symbol, exchange, market, timeframe };
       this.aiPanel.setFocus(this.aiFocus);
     }
+    const venueChanged =
+      Boolean(exchange) &&
+      (exchange !== this.focusExchange || (market || "futures") !== this.focusMarket);
+    if (exchange) {
+      this.focusExchange = exchange;
+      this.focusMarket = market || "futures";
+    }
+    if (symbol) this.focusSymbol = symbol;
+    if (venueChanged) {
+      this.pricePrecision.clear();
+      this.precisionRequests.clear();
+      this.qtyRequest += 1;
+      this.updateVenueBadge();
+      this.updateRailState();
+      void this.reloadCoinsForVenue();
+    }
     const base = (symbol || "").split("/")[0];
-    if (base && base !== this.coin.value) {
+    if (base && (base !== this.coin.value || venueChanged)) {
       this.applyCoins(this.coinList, base);
     }
     if (timeframe && timeframe !== this.tf.value) {
@@ -768,20 +830,48 @@ class AppController {
     this.scheduleSave();
   }
 
+  /** Reload the symbol catalog when the focused chart changes venue. */
+  private async reloadCoinsForVenue(): Promise<void> {
+    const exchange = this.focusExchange;
+    const market = this.focusMarket;
+    try {
+      const coins = await trading.getCoins({ exchange, market }, false);
+      // Ignore a slow response if the user focused another venue meanwhile.
+      if (this.focusExchange !== exchange || this.focusMarket !== market) return;
+      if (coins.length) this.applyCoins(coins, this.coin.value);
+    } catch (error) {
+      shell.logFrontend(
+        "warn",
+        `coin list for ${this.focusExchange}/${this.focusMarket} unavailable: ${(error as Error).message}`,
+      );
+    }
+  }
+
   private async refreshPosition(report: boolean): Promise<void> {
-    const coin = this.coin.value;
+    const coin = this.ticketCoin();
     if (!coin || this.status.state !== "running") return;
     try {
       // Kick the tick metadata off in parallel but never make positions wait
       // on a slow exchange meta request.
       void this.loadPricePrecision(coin);
-      const position = await account.getPosition(coin);
+      const venue = this.venue();
+      const position = await account.getPosition(coin, venue);
+      if (this.venue().exchange !== venue.exchange || this.venue().market !== venue.market) {
+        return;
+      }
       this.applyPosition(position);
-      if (report && !position.has_position) toast(`No open position for ${coin}`, "info");
+      if (report && !position.has_position) {
+        toast(position.note ?? `No open position for ${coin}`, "info");
+      }
     } catch (error) {
       const rpcError = error as backend.RpcError;
       if (rpcError.code === backend.RpcCodes.UNAVAILABLE) {
-        if (report) toast("No Hyperliquid credentials configured — open Settings → Credentials", "info");
+        if (report) {
+          toast(
+            `No ${this.venueName()} credentials configured — open Settings → Exchange`,
+            "info",
+          );
+        }
         return;
       }
       if (report) toast(rpcError.message, "error");
@@ -799,27 +889,28 @@ class AppController {
     coin: string,
   ): Promise<trading.ExchangePricePrecision | null> {
     if (!coin) return null;
-    const cached = this.pricePrecision.get(coin);
+    const cacheKey = `${this.focusExchange}|${this.focusMarket}|${coin}`;
+    const cached = this.pricePrecision.get(cacheKey);
     if (cached) return cached;
-    const pending = this.precisionRequests.get(coin);
+    const pending = this.precisionRequests.get(cacheKey);
     if (pending) return pending;
     const request = trading
-      .getPricePrecision(coin)
+      .getPricePrecision(coin, this.venue())
       .then((precision) => {
-        if (precision.coin === coin) this.pricePrecision.set(coin, precision);
+        this.pricePrecision.set(cacheKey, precision);
         return precision;
       })
       .catch(() => null)
       .finally(() => {
-        this.precisionRequests.delete(coin);
+        this.precisionRequests.delete(cacheKey);
       });
-    this.precisionRequests.set(coin, request);
+    this.precisionRequests.set(cacheKey, request);
     return request;
   }
 
   /** Re-format the ticket once the coin's tick is known (or changed). */
   private async refreshPrecisionFor(coin: string): Promise<void> {
-    const precision = await this.loadPricePrecision(coin);
+    const precision = await this.loadPricePrecision(this.ticketCoin());
     if (!precision || this.coin.value !== coin) return;
     // Never rewrite a field the user is currently editing.
     const active = document.activeElement;
@@ -831,7 +922,9 @@ class AppController {
   /** Format a price with the selected coin's tick; falls back to 6 dp while
    *  metadata is still loading so raw float tails never reach the ticket. */
   private formatPrice(value: number): string {
-    const precision = this.pricePrecision.get(this.coin.value);
+    const precision = this.pricePrecision.get(
+      `${this.focusExchange}|${this.focusMarket}|${this.ticketCoin()}`,
+    );
     if (precision) return formatExchangePrice(value, precision);
     return String(round(value, 6));
   }
@@ -938,13 +1031,13 @@ class AppController {
     const risk = parseNumber(this.risk.value);
     const entry = this.normalizePriceInput(this.limit);
     const sl = this.normalizePriceInput(this.sl);
-    const coin = this.coin.value;
+    const coin = this.ticketCoin();
     if (risk === null || entry === null || sl === null || !coin) return;
     if (entry === sl || risk <= 0) return;
     const request = ++this.qtyRequest;
     try {
       const result = await trading.calculateQty(
-        risk, entry, sl, this.direction === "short", coin,
+        risk, entry, sl, this.direction === "short", coin, this.venue(),
       );
       // Ignore stale responses when the user kept typing.
       if (request !== this.qtyRequest) return;
@@ -963,13 +1056,13 @@ class AppController {
       toast("Backend unavailable — no order was sent", "error");
       return;
     }
-    const coin = this.coin.value;
+    const coin = this.ticketCoin();
     if (!coin) {
       toast("Select a coin first", "error");
       return;
     }
-    if (kind === "update" && !this.hyperliquid.checked) {
-      toast("Enable Hyperliquid to update orders", "info");
+    if (!this.hyperliquid.checked) {
+      toast("Enable Live trade to submit orders", "info");
       return;
     }
 
@@ -1004,6 +1097,7 @@ class AppController {
       const result =
         kind === "set"
           ? await trading.placeOrder({
+              ...this.venue(),
               coin,
               is_buy: !isShort,
               qty: qty as number,
@@ -1011,7 +1105,13 @@ class AppController {
               tp_price: tpPrice as number,
               sl_price: slPrice as number,
             })
-          : await trading.updateTpSl({ coin, is_short: isShort, tp: tpPrice as number, sl: slPrice as number });
+          : await trading.updateTpSl({
+              ...this.venue(),
+              coin,
+              is_short: isShort,
+              tp: tpPrice as number,
+              sl: slPrice as number,
+            });
 
       this.showOrderResult(kind, coin, result.success, result.message);
       await this.saveWindowState();
@@ -1022,7 +1122,7 @@ class AppController {
       } else if (rpcError.code === backend.RpcCodes.DUPLICATE_REQUEST) {
         toast(rpcError.message, "info");
       } else if (rpcError.code === backend.RpcCodes.UNAVAILABLE) {
-        toast("Hyperliquid credentials are not configured", "error");
+        toast(`${this.venueName()} credentials are not configured`, "error");
       } else {
         this.showOrderResult(kind, coin, false, rpcError.message);
       }
@@ -1131,7 +1231,7 @@ class AppController {
     close.addEventListener("click", modal.close);
 
     try {
-      const orders = await account.getOpenOrders(coin);
+      const orders = await account.getOpenOrders(coin, this.venue());
       body.replaceChildren(this.renderOrders(orders));
     } catch (error) {
       status.textContent = (error as Error).message;
@@ -1179,7 +1279,7 @@ class AppController {
   private async refreshCoinList(): Promise<void> {
     this.setRefreshBusy(true);
     try {
-      const coins = await trading.getCoins(true);
+      const coins = await trading.getCoins(this.venue(), true);
       this.applyCoins(coins);
       toast(`Coin list refreshed (${coins.length})`, "success");
     } catch (error) {
@@ -1201,13 +1301,15 @@ class AppController {
     const coin = this.coin.value;
     if (!coin) return;
     try {
-      await shell.openTradePage(coin);
+      await shell.openTradePage(coin, this.focusExchange, this.focusMarket);
     } catch (error) {
       toast((error as Error).message, "error");
     }
   }
 
-  private async openSettingsDialog(tab: "ai" = "ai"): Promise<void> {
+  private async openSettingsDialog(
+    tab: "ai" | "exchange" | "updates" = "exchange",
+  ): Promise<void> {
     if (this.status.state !== "running") {
       toast("Backend unavailable — settings cannot be saved", "error");
       return;
@@ -1225,8 +1327,25 @@ class AppController {
             const imported = await credentials.importLegacyCredentials();
             return imported.fields;
           },
+          exchangeCatalog: () => trading.getExchanges(),
+          testConnection: (exchange, market) =>
+            trading.testConnection({ exchange, market }),
           checkUpdates: () => updates.checkForUpdates(),
           installUpdate: () => updates.installUpdate(),
+          runtimeInfo: async () => {
+            const report = await ai.getRuntimeReport();
+            return {
+              ready: report.runtimeReady,
+              nodeVersion: report.nodeVersion,
+              piVersion: report.piVersion,
+              managed: report.managed,
+              error: report.runtimeError,
+            };
+          },
+          checkAiRuntimeUpdate: () => updates.checkAiRuntimeUpdate(),
+          installAiRuntimeUpdate: () => updates.installAiRuntimeUpdate(),
+          onAiRuntimeUpdateProgress: (handler) =>
+            updates.onAiRuntimeUpdateProgress(handler),
         },
         this.aiPanel,
         tab,

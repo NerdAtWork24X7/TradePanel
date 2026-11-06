@@ -9,11 +9,15 @@
  * The output (src-tauri/ai-runtime) is a build artifact and is git-ignored:
  *
  *   node/node                     official Node.js executable (pinned)
+ *   npm/                          npm CLI from the same Node distribution
  *   pi/node_modules/...           pinned @earendil-works/pi-coding-agent + deps
  *   pi/extensions/*.mjs           read-only analysis tools
  *   pi/prompts/analysis.md        analysis system prompt
  *   pi/settings-service.mjs      provider login/model catalogue bridge
  *   manifest.json                 paths + versions used by the Rust host
+ *
+ * The staged npm lets Settings → Updates refresh Pi and its npm dependencies
+ * in a writable app-data overlay; the bundle itself stays read-only.
  *
  * Nothing here runs at application startup except the staged executables.
  * Downloads are SHA-256 verified against nodejs.org's SHASUMS256.txt.
@@ -182,6 +186,28 @@ function installPi(staging) {
   return prefix;
 }
 
+/**
+ * Stage npm next to the Node binary. In-app Pi updates shell out to this copy,
+ * so the user's machine needs neither Node nor npm installed. `docs/` and
+ * `man/` are ~2.7 MiB of offline help the updater never reads.
+ */
+function stageNpm(extractedNode, out, nodeOut) {
+  const candidates = [
+    join(extractedNode, "lib/node_modules/npm"),
+    join(extractedNode, "node_modules/npm"),
+  ];
+  const source = candidates.find((candidate) => existsSync(join(candidate, "bin/npm-cli.js")));
+  if (!source) throw new Error(`npm is missing from the Node distribution at ${extractedNode}`);
+  const target = join(out, "npm");
+  rmSync(target, { recursive: true, force: true });
+  cpSync(source, target, { recursive: true });
+  for (const unused of ["docs", "man"]) rmSync(join(target, unused), { recursive: true, force: true });
+  const npmCli = join(target, "bin/npm-cli.js");
+  const version = execFileSync(nodeOut, [npmCli, "--version"], { encoding: "utf8" }).trim();
+  if (!/^\d+\.\d+\.\d+/.test(version)) throw new Error(`Unexpected staged npm version: ${version}`);
+  log(`staged npm ${version}`);
+}
+
 function removeMaps(directory) {
   let entries;
   try {
@@ -223,6 +249,7 @@ async function buildTarget(target, installedPiDir) {
   const nodeOut = join(out, "node", spec.exe);
   copyFileSync(nodeBinary, nodeOut);
   if (spec.exe !== "node.exe") chmodSync(nodeOut, 0o755);
+  stageNpm(extracted, out, nodeOut);
   cpSync(installedPiDir, join(out, "pi"), { recursive: true });
 
   // Verify the staged runtime actually runs before it is shipped.
@@ -256,7 +283,7 @@ async function buildTarget(target, installedPiDir) {
   execFileSync(nodeOut, ["--check", settingsService], { stdio: "inherit" });
 
   const manifest = {
-    schema: 1,
+    schema: 2,
     target,
     nodeVersion,
     piVersion: PI_VERSION,
@@ -265,6 +292,7 @@ async function buildTarget(target, installedPiDir) {
     extension: "pi/extensions/tradepanel-analysis.mjs",
     systemPrompt: "pi/prompts/analysis.md",
     settingsService: "pi/settings-service.mjs",
+    npm: "npm",
     builtAt: new Date().toISOString(),
   };
   writeFileSync(join(out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

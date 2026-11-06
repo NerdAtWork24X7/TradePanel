@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -124,7 +124,8 @@ struct Pending {
 
 pub struct AuthService {
     app: AppHandle,
-    runtime: Result<AiRuntime, String>,
+    /// Swapped in place by an in-app Pi update; every spawn clones a snapshot.
+    runtime: RwLock<Result<AiRuntime, String>>,
     paths: AiPaths,
     child: AsyncMutex<Option<Child>>,
     stdin: AsyncMutex<Option<ChildStdin>>,
@@ -132,6 +133,7 @@ pub struct AuthService {
     sessions: Mutex<HashMap<String, AuthSession>>,
     next_id: AtomicU64,
     started: AtomicBool,
+    updating: AtomicBool,
     start_lock: AsyncMutex<()>,
     self_ref: OnceLock<Weak<Self>>,
 }
@@ -140,7 +142,7 @@ impl AuthService {
     pub fn new(app: AppHandle, runtime: Result<AiRuntime, String>, paths: AiPaths) -> Self {
         Self {
             app,
-            runtime,
+            runtime: RwLock::new(runtime),
             paths,
             child: AsyncMutex::new(None),
             stdin: AsyncMutex::new(None),
@@ -148,6 +150,7 @@ impl AuthService {
             sessions: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             started: AtomicBool::new(false),
+            updating: AtomicBool::new(false),
             start_lock: AsyncMutex::new(()),
             self_ref: OnceLock::new(),
         }
@@ -167,6 +170,8 @@ impl AuthService {
     /// it; the analysis panel still works.)
     pub fn available(&self) -> bool {
         self.runtime
+            .read()
+            .unwrap()
             .as_ref()
             .ok()
             .and_then(|runtime| runtime.settings_service.as_ref())
@@ -174,7 +179,8 @@ impl AuthService {
     }
 
     pub fn unavailable_reason(&self) -> Option<String> {
-        match self.runtime.as_ref() {
+        let runtime = self.runtime.read().unwrap();
+        match runtime.as_ref() {
             Err(error) => Some(error.clone()),
             Ok(runtime) if runtime.settings_service.is_none() => Some(
                 "This AI runtime has no provider settings service. Rebuild it with \
@@ -185,7 +191,26 @@ impl AuthService {
         }
     }
 
+    /// Refuse new settings-service spawns while an update replaces the tree.
+    pub fn set_updating(&self, value: bool) {
+        self.updating.store(value, Ordering::SeqCst);
+    }
+
+    /// Activate a runtime discovered after an in-app Pi update. The settings
+    /// child is stopped first so the next request resolves the new package tree
+    /// (and so Windows can release its file handles).
+    pub async fn replace_runtime(&self, runtime: Result<AiRuntime, String>) {
+        self.stop().await;
+        *self.runtime.write().unwrap() = runtime;
+    }
+
     async fn ensure_started(&self) -> Result<(), RpcErrorPayload> {
+        if self.updating.load(Ordering::SeqCst) {
+            return Err(RpcErrorPayload::new(
+                ERR_AI_AUTH,
+                "The AI runtime is being updated. Try again when the update finishes.",
+            ));
+        }
         if self.started.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -195,9 +220,11 @@ impl AuthService {
         }
         let runtime = self
             .runtime
-            .as_ref()
-            .map_err(|error| RpcErrorPayload::new(ERR_AI_AUTH, error.clone()))?;
-        let mut child = spawn::auth_command(runtime, &self.paths)
+            .read()
+            .unwrap()
+            .clone()
+            .map_err(|error| RpcErrorPayload::new(ERR_AI_AUTH, error))?;
+        let mut child = spawn::auth_command(&runtime, &self.paths)
             .map_err(|error| RpcErrorPayload::new(ERR_AI_AUTH, error))?
             .spawn()
             .map_err(|error| {

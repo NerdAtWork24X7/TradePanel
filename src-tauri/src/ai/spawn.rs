@@ -181,17 +181,24 @@ pub fn args(launch: &Launch<'_>) -> Vec<String> {
     args
 }
 
-/// Build the isolated child environment. The provider key is passed by the
-/// caller (sourced from the OS keyring) and is the only credential present.
-pub fn env_pairs(launch: &Launch<'_>, provider_key: &str) -> Vec<(String, String)> {
-    let mut env: Vec<(String, String)> = ENV_ALLOWLIST
+/// Host variables (proxy, CA bundles, locale, temp dirs) that child processes
+/// may inherit. Shared with the npm updater so registry access honours the same
+/// proxy/TLS configuration as the AI runtime.
+pub(crate) fn sanitized_env() -> Vec<(String, String)> {
+    ENV_ALLOWLIST
         .iter()
         .filter_map(|name| {
             std::env::var(name)
                 .ok()
                 .map(|value| ((*name).to_string(), value))
         })
-        .collect();
+        .collect()
+}
+
+/// Build the isolated child environment. The provider key is passed by the
+/// caller (sourced from the OS keyring) and is the only credential present.
+pub fn env_pairs(launch: &Launch<'_>, provider_key: &str) -> Vec<(String, String)> {
+    let mut env = sanitized_env();
     env.push((
         "HOME".into(),
         launch.paths.root.to_string_lossy().into_owned(),
@@ -276,11 +283,13 @@ mod tests {
         let root = PathBuf::from("/tmp/tradepanel-ai-test");
         let runtime = AiRuntime {
             root: root.join("runtime"),
+            base_root: root.join("runtime"),
             node: root.join("runtime/node/node"),
             pi_cli: root.join("runtime/pi/cli.js"),
             extension: root.join("runtime/pi/extensions/a.mjs"),
             system_prompt: root.join("runtime/pi/prompts/a.md"),
             settings_service: None,
+            npm_cli: None,
             node_version: "v22.0.0".into(),
             pi_version: "1.5.0".into(),
             target: "linux-x64".into(),

@@ -11,11 +11,16 @@ if [[ ! -x "$BUILD_VENV/bin/python" ]]; then
   echo "Creating build environment at $BUILD_VENV"
   if command -v uv >/dev/null 2>&1; then
     uv venv --python 3.12 "$BUILD_VENV"
-    uv pip install --python "$BUILD_VENV/bin/python" -r backend/requirements.txt -r backend/build/requirements-build.txt
   else
     python3 -m venv "$BUILD_VENV"
-    "$BUILD_VENV/bin/pip" install -r backend/requirements.txt -r backend/build/requirements-build.txt
   fi
+fi
+
+# Always sync: a new sidecar dependency must reach an existing build venv.
+if command -v uv >/dev/null 2>&1; then
+  uv pip install --python "$BUILD_VENV/bin/python" -r backend/requirements.txt -r backend/build/requirements-build.txt
+else
+  "$BUILD_VENV/bin/pip" install -r backend/requirements.txt -r backend/build/requirements-build.txt
 fi
 
 echo "Building one-folder sidecar"

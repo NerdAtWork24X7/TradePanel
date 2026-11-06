@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass
 
 from eth_account import Account
 from hyperliquid.info import Info
@@ -15,11 +14,25 @@ from hyperliquid.exchange import Exchange
 from hyperliquid.utils import constants as hl_constants
 
 from backend.Core import config
-from backend.Core.models import OrderParams
+from backend.Core.models import (
+    OrderParams,
+    OrderResult,
+    PositionData,
+    UpdateTpSlResult,
+)
 
-# Also make OrderParams available from this module for backward compat
+# Also make the result models available from this module for backward compat.
 
 log = logging.getLogger(__name__)
+
+
+def _base_url() -> str:
+    """Hyperliquid endpoint for the configured network (testnet by default)."""
+    return (
+        hl_constants.MAINNET_API_URL
+        if (getattr(config, "HL_NETWORK", "") or "testnet").strip().lower() == "live"
+        else hl_constants.TESTNET_API_URL
+    )
 
 
 def _make_info(base_url: str) -> Info:
@@ -33,39 +46,6 @@ def _make_info(base_url: str) -> Info:
     anyway.
     """
     return Info(base_url, skip_ws=True)
-
-
-@dataclass
-class UpdateTpSlResult:
-    """Result of updating TP/SL on an existing position."""
-    success: bool
-    cancel_response: dict | None = None
-    tp_response: dict | None = None
-    sl_response: dict | None = None
-    error: str | None = None
-
-
-@dataclass
-class OrderResult:
-    """Result of placing an order."""
-    success: bool
-    limit_response: dict | None = None
-    sl_response: dict | None = None
-    tp_response: dict | None = None
-    error: str | None = None
-
-
-@dataclass
-class PositionData:
-    """Open position data for a single coin."""
-    coin: str
-    entry_price: float | None = None
-    size: float = 0.0        # positive = long, negative = short
-    unrealized_pnl: float = 0.0
-    tp_price: float | None = None
-    sl_price: float | None = None
-    has_position: bool = False
-    mark_price: float | None = None  # current mid price (optional)
 
 
 class HyperliquidClient:
@@ -105,8 +85,8 @@ class HyperliquidClient:
             raise RuntimeError(
                 "Failed to initialize Hyperliquid wallet (private key invalid)"
             ) from e
-        self._info = _make_info(hl_constants.TESTNET_API_URL)
-        self._exchange = Exchange(wallet, hl_constants.TESTNET_API_URL)
+        self._info = _make_info(_base_url())
+        self._exchange = Exchange(wallet, _base_url())
         self._address = config.HL_ADDRESS
         self._ensure_sz_decimals()
         self._initialized = True
@@ -130,7 +110,7 @@ class HyperliquidClient:
         try:
             info = getattr(cls._instance, "_info", None) if cls._instance is not None else None
             if info is None:
-                info = _make_info(hl_constants.TESTNET_API_URL)
+                info = _make_info(_base_url())
             meta = info.meta()
         except Exception as e:
             log.error("Failed to fetch szDecimals meta: %s", e)

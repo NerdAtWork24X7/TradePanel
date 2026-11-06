@@ -17,14 +17,13 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from backend.Core import (
-    coin_service,
-    config,
     credentials,
     market_data,
     trading_service,
     window_state,
     workspace_store,
 )
+from backend.Exchange import specs
 
 from .credentials import CredentialStore
 from .protocol import (
@@ -187,6 +186,17 @@ def _credential_keys() -> tuple[str, ...]:
     return tuple(field[0] for field in credentials.FIELDS)
 
 
+def _venue(params: dict) -> tuple[str, str]:
+    """Exchange/market pair; defaults keep pre-multi-exchange clients working."""
+    exchange = _text(
+        params, "exchange", required=False, default=specs.DEFAULT_EXCHANGE, max_len=32
+    ).lower() or specs.DEFAULT_EXCHANGE
+    market = _text(
+        params, "market", required=False, default=specs.DEFAULT_MARKET, max_len=16
+    ).lower() or specs.DEFAULT_MARKET
+    return exchange, market
+
+
 def _meta(params: dict, ctx: Context) -> dict:
     return {
         "exchanges": market_data.exchanges_meta(),
@@ -234,61 +244,95 @@ def _workspace_save(params: dict, ctx: Context) -> dict:
 
 
 def _account_position(params: dict, ctx: Context) -> dict:
-    coin = _text(params, "coin", max_len=20)
-    return trading_service.position_snapshot(coin)
+    exchange, market = _venue(params)
+    coin = _text(params, "coin", max_len=48)
+    return trading_service.position_snapshot(exchange, market, coin)
 
 
 def _account_open_orders(params: dict, ctx: Context) -> dict:
-    coin = _text(params, "coin", max_len=20)
-    return {"coin": coin, "orders": trading_service.open_orders(coin)}
+    exchange, market = _venue(params)
+    coin = _text(params, "coin", max_len=48)
+    return {
+        "coin": coin,
+        "exchange": exchange,
+        "market": market,
+        "orders": trading_service.open_orders(exchange, market, coin),
+    }
 
 
 def _place_order(params: dict, ctx: Context) -> dict:
-    coin = _text(params, "coin", max_len=20)
+    exchange, market = _venue(params)
+    coin = _text(params, "coin", max_len=48)
     is_buy = _boolean(params, "is_buy")
     qty = _number(params, "qty")
     limit_price = _number(params, "limit_price")
     tp_price = _number(params, "tp_price")
     sl_price = _number(params, "sl_price")
     success, message = trading_service.place_order(
-        coin, is_buy, qty, limit_price, tp_price, sl_price
+        exchange, market, coin, is_buy, qty, limit_price, tp_price, sl_price
     )
     return {"success": success, "message": message}
 
 
 def _update_tp_sl(params: dict, ctx: Context) -> dict:
-    coin = _text(params, "coin", max_len=20)
+    exchange, market = _venue(params)
+    coin = _text(params, "coin", max_len=48)
     is_short = _boolean(params, "is_short")
     tp = _number(params, "tp")
     sl = _number(params, "sl")
-    success, message = trading_service.update_tp_sl(coin, is_short, tp, sl)
+    success, message = trading_service.update_tp_sl(
+        exchange, market, coin, is_short, tp, sl
+    )
     return {"success": success, "message": message}
 
 
 def _calc_qty(params: dict, ctx: Context) -> dict:
-    coin = _text(params, "coin", max_len=20)
+    exchange, market = _venue(params)
+    coin = _text(params, "coin", max_len=48)
     risk = _number(params, "risk")
     entry = _number(params, "entry")
     sl = _number(params, "sl")
     is_short = _boolean(params, "is_short")
-    qty = trading_service.calculate_qty(risk, entry, sl, is_short, coin)
-    return {"qty": qty, "sz_decimals": trading_service.sz_decimals(coin)}
+    qty = trading_service.calculate_qty(
+        risk, entry, sl, is_short, coin, exchange, market
+    )
+    return {
+        "qty": qty,
+        "sz_decimals": trading_service.sz_decimals(exchange, market, coin),
+    }
 
 
 def _sz_decimals(params: dict, ctx: Context) -> dict:
-    coin = _text(params, "coin", max_len=20)
-    return {"coin": coin, "sz_decimals": trading_service.sz_decimals(coin)}
+    exchange, market = _venue(params)
+    coin = _text(params, "coin", max_len=48)
+    return {
+        "coin": coin,
+        "sz_decimals": trading_service.sz_decimals(exchange, market, coin),
+    }
 
 
 def _price_precision(params: dict, ctx: Context) -> dict:
-    coin = _text(params, "coin", max_len=20)
-    return trading_service.price_precision(coin)
+    exchange, market = _venue(params)
+    coin = _text(params, "coin", max_len=48)
+    return trading_service.price_precision(exchange, market, coin)
 
 
 def _coins(params: dict, ctx: Context) -> dict:
-    refresh = _boolean(params, "refresh", required=False, default=False)
-    coins = coin_service.refresh_coins() if refresh else coin_service.load_coins()
-    return {"coins": coins}
+    exchange, market = _venue(params)
+    return {"coins": trading_service.list_coins(exchange, market)}
+
+
+def _exchanges(params: dict, ctx: Context) -> dict:
+    return {
+        "exchanges": trading_service.exchange_catalog(),
+        "default_exchange": specs.DEFAULT_EXCHANGE,
+        "default_market": specs.DEFAULT_MARKET,
+    }
+
+
+def _connection(params: dict, ctx: Context) -> dict:
+    exchange, market = _venue(params)
+    return trading_service.test_connection(exchange, market)
 
 
 def _window_state_get(params: dict, ctx: Context) -> dict:
@@ -335,6 +379,8 @@ METHODS: dict[str, MethodSpec] = {
     "trading.sz_decimals": MethodSpec(_sz_decimals),
     "trading.price_precision": MethodSpec(_price_precision),
     "trading.coins": MethodSpec(_coins),
+    "trading.exchanges": MethodSpec(_exchanges),
+    "trading.connection": MethodSpec(_connection),
     "settings.window_state.get": MethodSpec(_window_state_get),
     "settings.window_state.save": MethodSpec(_window_state_save),
 }

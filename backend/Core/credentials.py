@@ -15,15 +15,12 @@ import threading
 from pathlib import Path
 
 from backend.Core import config
+from backend.Exchange import specs
 
-# (env key, label, secret, group) — order defines the UI order.
-FIELDS: tuple[tuple[str, str, bool, str], ...] = (
-    ("HL_ADDRESS", "Wallet address", False, "Hyperliquid"),
-    ("HL_PRIVATE_KEY", "Private key", True, "Hyperliquid"),
-)
-
-_KNOWN_KEYS = {key for key, _label, _secret, _group in FIELDS}
-_SECRET_KEYS = {key for key, _label, secret, _group in FIELDS if secret}
+# The catalog is the single source of truth for credential keys and groups.
+FIELDS = specs.FIELDS
+_KNOWN_KEYS = set(specs.KNOWN_KEYS)
+_SECRET_KEYS = set(specs.SECRET_KEYS)
 
 # Env var -> Core.config attribute, used to refresh live settings on save.
 _CONFIG_ATTR = {
@@ -31,8 +28,6 @@ _CONFIG_ATTR = {
     "HL_PRIVATE_KEY": "HL_PRIVATE_KEY",
 }
 
-_HEX64 = re.compile(r"^(?:0x)?[0-9a-fA-F]{64}$")
-_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
 _LOCK = threading.RLock()
@@ -61,6 +56,9 @@ def status() -> list[dict]:
             "label": label,
             "secret": secret,
             "group": group,
+            "exchange": specs.field_exchange(key),
+            "kind": specs.field_kind(key),
+            "multiline": specs.field_multiline(key),
             "set": bool(value),
             "value": "" if secret else value,
         }
@@ -80,22 +78,23 @@ def validate(key: str, value: str) -> None:
 
 
 def _validate(key: str, value: str) -> None:
-    label = next(lbl for k, lbl, _s, _g in FIELDS if k == key)
-    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
-        raise CredentialError(f"{label} contains control characters")
-    if key == "HL_PRIVATE_KEY" and not _HEX64.fullmatch(value):
-        raise CredentialError(
-            "Hyperliquid private key must be 64 hex characters (optional 0x prefix)"
-        )
-    if key == "HL_ADDRESS" and not _ADDRESS.fullmatch(value):
-        raise CredentialError("Wallet address must be 0x followed by 40 hex characters")
+    try:
+        specs.validate_credential(key, value)
+    except ValueError as exc:
+        raise CredentialError(str(exc)) from exc
 
 
 def _format(value: str) -> str:
     """Serialise a value for a KEY=value line (quote only when needed)."""
     if re.fullmatch(r"[^\s#'\"\\=]+", value):
         return value
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+    )
     return f'"{escaped}"'
 
 
@@ -173,7 +172,11 @@ def save(values: dict[str, str] | None = None, clear: list[str] | None = None) -
         value = str(raw if raw is not None else "")
         if not value.strip():
             continue
-        updates[key] = value if key in _SECRET_KEYS else value.strip()
+        updates[key] = (
+            value
+            if key in _SECRET_KEYS and specs.field_multiline(key)
+            else value.strip()
+        )
     unknown = cleanup - _KNOWN_KEYS
     if unknown:
         raise CredentialError(f"Unknown credential: {sorted(unknown)[0]}")
@@ -204,4 +207,11 @@ def save(values: dict[str, str] | None = None, clear: list[str] | None = None) -
     for key in changed:
         _sync_process(key, updates.get(key, ""))
     config.refresh_credentials()
+    # Drop cached SDK clients so the new keys/network apply without a restart.
+    try:
+        from backend.Core import trading_service
+
+        trading_service.reset_client()
+    except Exception:  # pragma: no cover - defensive during shutdown
+        pass
     return {"ok": True, "keys": changed}

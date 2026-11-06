@@ -1,8 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { RpcError, RpcCodes, rpc } from "./backend";
-import type { OrderResult } from "../types";
+import type { ConnectionResult, ExchangeCatalog, OrderResult } from "../types";
 
-export interface OrderInput {
+export interface Venue {
+  exchange: string;
+  market: string;
+}
+
+export const DEFAULT_VENUE: Venue = { exchange: "hyperliquid", market: "futures" };
+
+export interface OrderInput extends Venue {
   coin: string;
   is_buy: boolean;
   qty: number;
@@ -11,7 +18,7 @@ export interface OrderInput {
   sl_price: number;
 }
 
-export interface TpSlInput {
+export interface TpSlInput extends Venue {
   coin: string;
   is_short: boolean;
   tp: number;
@@ -64,6 +71,7 @@ export function calculateQty(
   sl: number,
   isShort: boolean,
   coin: string,
+  venue: Venue = DEFAULT_VENUE,
 ): Promise<QtyResult> {
   return rpc<QtyResult>("trading.calc_qty", {
     risk,
@@ -71,11 +79,23 @@ export function calculateQty(
     sl,
     is_short: isShort,
     coin,
+    ...venue,
   });
 }
 
-export function getPricePrecision(coin: string): Promise<ExchangePricePrecision> {
-  return rpc<ExchangePricePrecision>("trading.price_precision", { coin });
+export function getPricePrecision(
+  coin: string,
+  venue: Venue = DEFAULT_VENUE,
+): Promise<ExchangePricePrecision> {
+  return rpc<ExchangePricePrecision>("trading.price_precision", { coin, ...venue });
+}
+
+export async function getExchanges(): Promise<ExchangeCatalog> {
+  return rpc<ExchangeCatalog>("trading.exchanges");
+}
+
+export function testConnection(venue: Venue): Promise<ConnectionResult> {
+  return rpc<ConnectionResult>("trading.connection", { ...venue });
 }
 
 export async function orderUncertain(): Promise<boolean> {
@@ -87,7 +107,10 @@ export async function orderUncertain(): Promise<boolean> {
   }
 }
 
-export async function getCoins(refresh = false): Promise<string[]> {
-  const result = await rpc<{ coins: string[] }>("trading.coins", { refresh });
+export async function getCoins(
+  venue: Venue = DEFAULT_VENUE,
+  refresh = false,
+): Promise<string[]> {
+  const result = await rpc<{ coins: string[] }>("trading.coins", { ...venue, refresh });
   return result.coins ?? [];
 }

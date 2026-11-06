@@ -380,7 +380,7 @@ pub async fn credentials_legacy_status() -> Result<LegacyCredentials, RpcErrorPa
                 .lines()
                 .filter_map(|line| line.split_once('='))
                 .map(|(key, _)| key.trim().trim_start_matches("export ").to_string())
-                .filter(|key| key == "HL_PRIVATE_KEY" || key == "HL_ADDRESS")
+                .filter(|key| crate::security::is_known_key(key))
                 .collect();
             Ok(LegacyCredentials {
                 found: true,
@@ -477,15 +477,48 @@ pub async fn app_info(
 }
 
 #[tauri::command]
-pub async fn open_trade_page(coin: String) -> Result<(), RpcErrorPayload> {
+pub async fn open_trade_page(
+    coin: String,
+    exchange: Option<String>,
+    market: Option<String>,
+) -> Result<(), RpcErrorPayload> {
     let coin = coin.trim();
     if coin.is_empty() || coin.len() > 20 || !coin.chars().all(|ch| ch.is_ascii_alphanumeric()) {
         return Err(RpcErrorPayload::new(ERR_INVALID_REQUEST, "Invalid coin"));
     }
-    let url = format!("https://app.hyperliquid.xyz/trade/{coin}");
+    let exchange = exchange.unwrap_or_else(|| "hyperliquid".to_string());
+    let market = market.unwrap_or_else(|| "futures".to_string());
+    let url = trade_page_url(&coin.to_ascii_uppercase(), &exchange, &market)
+        .ok_or_else(|| RpcErrorPayload::new(ERR_INVALID_REQUEST, "Unknown exchange"))?;
     open::that(url).map_err(|error| {
         RpcErrorPayload::new(ERR_INTERNAL, format!("Cannot open the browser: {error}"))
     })
+}
+
+/// Public web URLs for the focused chart. Futures use the USDT-margined page
+/// for every venue that lists it; spot URLs mirror each venue's own route.
+fn trade_page_url(coin: &str, exchange: &str, market: &str) -> Option<String> {
+    let lower = coin.to_ascii_lowercase();
+    let futures = market == "futures";
+    let url = match (exchange, futures) {
+        ("hyperliquid", _) => format!("https://app.hyperliquid.xyz/trade/{coin}"),
+        ("binance", true) => format!("https://www.binance.com/en/futures/{coin}USDT"),
+        ("binance", false) => format!("https://www.binance.com/en/trade/{coin}_USDT"),
+        ("bybit", true) => format!("https://www.bybit.com/trade/usdt/{coin}USDT"),
+        ("bybit", false) => format!("https://www.bybit.com/trade/spot/{coin}/USDT"),
+        ("okx", true) => format!("https://www.okx.com/trade-swap/{lower}-usdt-swap"),
+        ("okx", false) => format!("https://www.okx.com/trade-spot/{lower}-usdt"),
+        ("gate", true) => format!("https://www.gate.io/futures/USDT/{coin}_USDT"),
+        ("gate", false) => format!("https://www.gate.io/trade/{coin}_USDT"),
+        ("bitget", true) => format!("https://www.bitget.com/futures/usdt/{coin}USDT"),
+        ("bitget", false) => format!("https://www.bitget.com/spot/{coin}USDT"),
+        ("kucoin", true) => format!("https://www.kucoin.com/futures/trade/{coin}USDTM"),
+        ("kucoin", false) => format!("https://www.kucoin.com/trade/{coin}-USDT"),
+        ("coinbase", false) => format!("https://advanced.coinbase.com/trade/{coin}-USD"),
+        ("kraken", false) => format!("https://pro.kraken.com/app/trade/{lower}-usd"),
+        _ => return None,
+    };
+    Some(url)
 }
 
 /// Open a provider sign-in URL in the user's browser. Only HTTPS is accepted:

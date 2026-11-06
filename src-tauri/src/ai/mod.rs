@@ -10,5 +10,6 @@ pub mod probe;
 pub mod runtime;
 pub mod spawn;
 pub mod store;
+pub mod update;
 
 pub use manager::AiManager;

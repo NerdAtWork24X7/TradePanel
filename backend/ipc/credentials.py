@@ -14,6 +14,7 @@ import os
 import threading
 
 from backend.Core import config, credentials, trading_service
+from backend.Exchange import specs
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +41,11 @@ class CredentialStore:
                 credentials.validate(key, value)
             else:
                 credentials.validate(key, value.strip())
-            updates[key] = value if key in SECRET_KEYS else value.strip()
+            updates[key] = (
+                value
+                if key in SECRET_KEYS and specs.field_multiline(key)
+                else value.strip()
+            )
 
         unknown = [key for key in cleanup if key not in KNOWN_KEYS]
         if unknown:
@@ -63,13 +68,18 @@ class CredentialStore:
     def describe(self) -> list[dict]:
         out = []
         for key, label, secret, group in credentials.FIELDS:
+            value = os.environ.get(key, "")
             out.append(
                 {
                     "key": key,
                     "label": label,
                     "secret": bool(secret),
                     "group": group,
-                    "set": bool(os.environ.get(key, "")),
+                    "exchange": specs.field_exchange(key),
+                    "kind": specs.field_kind(key),
+                    "multiline": specs.field_multiline(key),
+                    "set": bool(value),
+                    "value": "" if secret else value,
                 }
             )
         return out

@@ -41,6 +41,7 @@ export function getRuntimeReport(): Promise<{
   runtimeError: string | null;
   nodeVersion: string | null;
   piVersion: string | null;
+  managed: boolean;
 }> {
   return call("ai_runtime_report");
 }

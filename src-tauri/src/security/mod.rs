@@ -4,41 +4,95 @@
 //! macOS Keychain, Linux Secret Service via D-Bus). There is no plaintext
 //! fallback: if the store is unavailable the command fails explicitly.
 //!
-//! Only `set` flags and labels ever cross the IPC boundary back into the
-//! WebView; secret values are pushed to the Python sidecar environment or via
-//! the internal `system.set_credentials` RPC.
+//! Only `set` flags, labels and non-secret values ever cross the IPC boundary
+//! back into the WebView; secret values are pushed to the Python sidecar
+//! environment or via the internal `system.set_credentials` RPC.
+//!
+//! The credential key catalogue is embedded from `shared/exchanges.json`, the
+//! same file the Python sidecar reads, so the two layers cannot drift.
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use keyring::{Entry, Error as KeyringError};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 pub const SERVICE: &str = "TradePanel";
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct FieldSpec {
-    pub key: &'static str,
-    pub label: &'static str,
+    pub key: String,
+    pub label: String,
     pub secret: bool,
-    pub group: &'static str,
+    pub group: String,
+    pub exchange: String,
+    pub kind: String,
+    pub multiline: bool,
+    pub networks: Vec<String>,
 }
 
-pub const FIELDS: [FieldSpec; 2] = [
-    FieldSpec {
-        key: "HL_ADDRESS",
-        label: "Wallet address",
-        secret: false,
-        group: "Hyperliquid",
-    },
-    FieldSpec {
-        key: "HL_PRIVATE_KEY",
-        label: "Private key",
-        secret: true,
-        group: "Hyperliquid",
-    },
-];
+#[derive(Debug, Deserialize)]
+struct CatalogFile {
+    exchanges: Vec<CatalogExchange>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogExchange {
+    id: String,
+    name: String,
+    #[serde(default)]
+    networks: Vec<String>,
+    fields: Vec<CatalogField>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogField {
+    key: String,
+    label: String,
+    #[serde(default)]
+    secret: bool,
+    #[serde(default = "default_kind")]
+    kind: String,
+    #[serde(default)]
+    multiline: bool,
+}
+
+fn default_kind() -> String {
+    "text".to_string()
+}
+
+/// Parsed once at first use. The JSON is embedded at compile time and covered
+/// by unit tests, so a malformed file is a build-time defect, not a runtime one.
+pub fn fields() -> &'static [FieldSpec] {
+    static FIELDS: OnceLock<Vec<FieldSpec>> = OnceLock::new();
+    FIELDS.get_or_init(|| {
+        let raw = include_str!("../../../shared/exchanges.json");
+        let catalog: CatalogFile =
+            serde_json::from_str(raw).expect("shared/exchanges.json is malformed");
+        let mut out = Vec::new();
+        for exchange in catalog.exchanges {
+            for field in exchange.fields {
+                out.push(FieldSpec {
+                    key: field.key,
+                    label: field.label,
+                    secret: field.secret,
+                    group: exchange.name.clone(),
+                    exchange: exchange.id.clone(),
+                    kind: field.kind,
+                    multiline: field.multiline,
+                    networks: exchange.networks.clone(),
+                });
+            }
+        }
+        out
+    })
+}
+
+pub fn is_known_key(key: &str) -> bool {
+    fields().iter().any(|spec| spec.key == key)
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,7 +101,11 @@ pub struct CredentialField {
     pub label: String,
     pub secret: bool,
     pub group: String,
+    pub exchange: String,
+    pub kind: String,
+    pub multiline: bool,
     pub set: bool,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -72,10 +130,10 @@ impl SecretStore {
     /// Secret values for sidecar startup. Missing entries are skipped.
     pub fn load_into_env(&self) -> HashMap<String, String> {
         let mut out = HashMap::new();
-        for spec in FIELDS {
-            match self.get(spec.key) {
+        for spec in fields() {
+            match self.get(&spec.key) {
                 Ok(Some(value)) => {
-                    out.insert(spec.key.to_string(), value.to_string());
+                    out.insert(spec.key.clone(), value.to_string());
                 }
                 Ok(None) => {}
                 Err(error) => {
@@ -91,7 +149,7 @@ impl SecretStore {
 
     /// Read a non-trading secret (used for the AI provider key). The caller is
     /// responsible for the key namespace and validation; trading credentials
-    /// keep using the fixed `FIELDS` allow-list above.
+    /// keep using the fixed catalogue above.
     pub fn get_external(&self, key: &str) -> Result<Option<Zeroizing<String>>, String> {
         self.get(key)
     }
@@ -130,22 +188,35 @@ impl SecretStore {
     }
 
     pub fn status(&self) -> Result<Vec<CredentialField>, String> {
-        let mut fields = Vec::with_capacity(FIELDS.len());
-        for spec in FIELDS {
-            let set = match Self::entry(spec.key)?.get_password() {
-                Ok(_) => true,
-                Err(KeyringError::NoEntry) => false,
+        let catalogue = fields();
+        let mut out = Vec::with_capacity(catalogue.len());
+        for spec in catalogue {
+            let stored = match Self::entry(&spec.key)?.get_password() {
+                Ok(value) => Some(value),
+                Err(KeyringError::NoEntry) => None,
                 Err(error) => return Err(store_error(error)),
             };
-            fields.push(CredentialField {
-                key: spec.key.to_string(),
-                label: spec.label.to_string(),
+            let set = stored.is_some();
+            // Non-secret values (wallet address, network) are rendered in the
+            // settings form; secrets never cross the IPC boundary.
+            let value = if spec.secret {
+                String::new()
+            } else {
+                stored.unwrap_or_default()
+            };
+            out.push(CredentialField {
+                key: spec.key.clone(),
+                label: spec.label.clone(),
                 secret: spec.secret,
-                group: spec.group.to_string(),
+                group: spec.group.clone(),
+                exchange: spec.exchange.clone(),
+                kind: spec.kind.clone(),
+                multiline: spec.multiline,
                 set,
+                value,
             });
         }
-        Ok(fields)
+        Ok(out)
     }
 
     pub fn save(
@@ -156,7 +227,7 @@ impl SecretStore {
         let mut changed = Vec::new();
 
         for key in clear {
-            if !FIELDS.iter().any(|spec| spec.key == key) {
+            if !is_known_key(key) {
                 return Err(format!("Unknown credential: {key}"));
             }
             let entry = Self::entry(key)?;
@@ -168,18 +239,18 @@ impl SecretStore {
         }
 
         for (key, raw) in values {
-            let spec = FIELDS
+            let spec = fields()
                 .iter()
-                .find(|spec| spec.key == key)
+                .find(|spec| spec.key == *key)
                 .ok_or_else(|| format!("Unknown credential: {key}"))?;
             let value = Zeroizing::new(raw.trim().to_string());
             if value.is_empty() {
                 continue;
             }
-            validate(spec.key, &value)?;
-            let entry = Self::entry(spec.key)?;
+            validate(&spec.key, &value)?;
+            let entry = Self::entry(&spec.key)?;
             entry.set_password(&value).map_err(store_error)?;
-            changed.push(spec.key.to_string());
+            changed.push(spec.key.clone());
         }
 
         changed.sort();
@@ -201,7 +272,7 @@ impl SecretStore {
         };
         let mut imported = 0usize;
         for (key, value) in parse_env(&text) {
-            if !FIELDS.iter().any(|spec| spec.key == key) || value.trim().is_empty() {
+            if !is_known_key(&key) || value.trim().is_empty() {
                 continue;
             }
             match self.get(&key) {
@@ -253,26 +324,56 @@ fn is_hex(value: &str) -> bool {
 }
 
 pub fn validate(key: &str, value: &str) -> Result<(), String> {
-    if value.chars().any(|ch| ch.is_control()) {
-        return Err("Credential contains control characters".to_string());
+    let spec = fields()
+        .iter()
+        .find(|spec| spec.key == key)
+        .ok_or_else(|| format!("Unknown credential: {key}"))?;
+
+    if spec.kind == "choice" {
+        if !spec.networks.iter().any(|network| network == value) {
+            return Err(format!(
+                "{} network must be one of: {}",
+                spec.group,
+                spec.networks.join(", ")
+            ));
+        }
+        return Ok(());
     }
-    match key {
-        "HL_PRIVATE_KEY" => {
-            let digits = value.strip_prefix("0x").unwrap_or(value);
-            if digits.len() != 64 || !is_hex(digits) {
-                return Err(
-                    "Hyperliquid private key must be 64 hex characters (optional 0x prefix)"
-                        .to_string(),
-                );
-            }
+    if key == "HL_PRIVATE_KEY" {
+        let digits = value.strip_prefix("0x").unwrap_or(value);
+        if digits.len() != 64 || !is_hex(digits) {
+            return Err(
+                "Hyperliquid private key must be 64 hex characters (optional 0x prefix)"
+                    .to_string(),
+            );
         }
-        "HL_ADDRESS" => {
-            let digits = value.strip_prefix("0x").unwrap_or("");
-            if digits.len() != 40 || !is_hex(digits) {
-                return Err("Wallet address must be 0x followed by 40 hex characters".to_string());
-            }
+    }
+    if key == "HL_ADDRESS" {
+        let digits = value.strip_prefix("0x").unwrap_or("");
+        if digits.len() != 40 || !is_hex(digits) {
+            return Err("Wallet address must be 0x followed by 40 hex characters".to_string());
         }
-        _ => return Err(format!("Unknown credential: {key}")),
+    }
+    let bad_control = value.chars().any(|ch| {
+        let allowed_multiline = spec.multiline && matches!(ch, '\r' | '\n' | '\t');
+        ch.is_control() && !allowed_multiline
+    });
+    if bad_control {
+        return Err(format!("{} contains control characters", spec.label));
+    }
+    if value.trim().is_empty() {
+        return Err(format!("{} must not be empty", spec.label));
+    }
+    let limit = if spec.secret && spec.multiline {
+        4096
+    } else {
+        512
+    };
+    if value.len() > limit {
+        return Err(format!("{} is too long", spec.label));
+    }
+    if spec.kind == "text" && value.trim().len() < 8 {
+        return Err(format!("{} looks too short", spec.label));
     }
     Ok(())
 }
@@ -313,6 +414,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn catalogue_covers_every_chart_exchange() {
+        let keys: Vec<&str> = fields().iter().map(|spec| spec.key.as_str()).collect();
+        for expected in [
+            "HL_PRIVATE_KEY",
+            "BINANCE_API_KEY",
+            "BYBIT_API_SECRET",
+            "OKX_PASSPHRASE",
+            "GATE_NETWORK",
+            "BITGET_API_KEY",
+            "KUCOIN_PASSPHRASE",
+            "COINBASE_API_SECRET",
+            "KRAKEN_API_KEY",
+        ] {
+            assert!(keys.contains(&expected), "missing {expected}");
+        }
+        assert!(fields().iter().all(|spec| !spec.exchange.is_empty()));
+        assert!(fields()
+            .iter()
+            .all(|spec| ["text", "secret", "choice"].contains(&spec.kind.as_str())));
+    }
+
+    #[test]
     fn validates_hyperliquid_values() {
         assert!(validate("HL_PRIVATE_KEY", &format!("0x{}", "ab".repeat(32))).is_ok());
         assert!(validate("HL_PRIVATE_KEY", &"ab".repeat(32)).is_ok());
@@ -323,6 +446,21 @@ mod tests {
         assert!(validate("HL_ADDRESS", &format!("0x{}", "cd".repeat(21))).is_err());
         assert!(validate("HL_PRIVATE_KEY", "ab\ncd").is_err());
         assert!(validate("UNKNOWN", "x").is_err());
+    }
+
+    #[test]
+    fn validates_network_choices() {
+        assert!(validate("BINANCE_NETWORK", "testnet").is_ok());
+        assert!(validate("BINANCE_NETWORK", "live").is_ok());
+        assert!(validate("BINANCE_NETWORK", "demo").is_err());
+        assert!(validate("KUCOIN_NETWORK", "testnet").is_err());
+    }
+
+    #[test]
+    fn accepts_multiline_coinbase_secret() {
+        let pem = "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----";
+        assert!(validate("COINBASE_API_SECRET", pem).is_ok());
+        assert!(validate("BINANCE_API_SECRET", "a\nb").is_err());
     }
 
     #[test]

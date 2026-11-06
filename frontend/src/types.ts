@@ -50,6 +50,7 @@ export interface WorkspaceStore {
 
 export interface Position {
   coin: string;
+  note?: string;
   has_position: boolean;
   entry: number | null;
   tp: number | null;
@@ -80,7 +81,48 @@ export interface CredentialField {
   label: string;
   secret: boolean;
   group: string;
+  exchange: string;
+  kind: "text" | "secret" | "choice";
+  multiline: boolean;
   set: boolean;
+  value: string;
+}
+
+export interface ExchangeMarket {
+  id: string;
+  label: string;
+  ccxt: string;
+}
+
+export interface ExchangeCatalogEntry {
+  id: string;
+  name: string;
+  markets: ExchangeMarket[];
+  networks: string[];
+  default_network: string;
+  passphrase: boolean;
+  wallet: boolean;
+}
+
+export interface ExchangeCatalog {
+  exchanges: ExchangeCatalogEntry[];
+  default_exchange: string;
+  default_market: string;
+}
+
+export interface BalanceEntry {
+  currency: string;
+  total: number;
+  free: number;
+}
+
+export interface ConnectionResult {
+  ok: boolean;
+  exchange: string;
+  market: string;
+  network: string;
+  label: string;
+  balances: BalanceEntry[];
 }
 
 export interface CredentialSaveResult {

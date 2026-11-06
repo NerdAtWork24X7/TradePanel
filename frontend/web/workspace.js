@@ -824,7 +824,7 @@
             layout: {
                 background: { type: 'solid', color: THEME.bg },
                 textColor: THEME.text,
-                fontSize: 11,
+                fontSize: 12,
                 fontFamily: "'MesloLGS NFM', 'JetBrains Mono', ui-monospace, monospace"
             },
             grid: {

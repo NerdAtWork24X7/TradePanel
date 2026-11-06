@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-11-06 — application-wide typography, icon and readability standard
+- One text family (bundled Satoshi; mono reserved for numeric readouts) and a
+  centralized scale on `--text-xs` 12 → `--text-xl` 24 with 14 px as the interface
+  floor. Removed the 7.5–11.5 px tier that carried ticket labels, table headers,
+  AI transcript, chart-panel chrome and settings hints; the duplicated
+  "settings readability" override layers in `shell.css` are gone (their layout
+  rules were folded into the base declarations).
+- Tokens added to `tokens.css` + `workspace.html`: `--text-*` sizes, weights,
+  line heights, `--icon-*`, `--control-h*`, `--input-h`, `--hit-min`,
+  `--control-border`, `--accent-text`, `--focus`. Buttons 36 px, inputs 38 px,
+  icon buttons 36 px, navigation 14/500 with 20 px icons.
+- Contrast: dark `--muted` and light `--text-3`/`--muted` raised past 4.5:1,
+  light `--coral`/`--cyan` darkened, `--accent-text` introduced for amber text on
+  white, focus rings moved from yellow to `--focus`, and control boundaries use
+  `--control-border` (≥3:1). Disabled opacity 0.45 → 0.55.
+- Icons: every inline SVG normalized to an 18 px/1.7-stroke metric (20 px in the
+  collapsed rail), text glyphs (✕) replaced with vectors, chart-panel tools 30 px,
+  group colour swatch given a 24 × 30 px hit box, tooltips on every icon-only
+  action.
+- Responsive: the sidebar is now a container (ticket actions stack and the
+  instrument row wraps at the 248 px minimum), the Scale/Snap selectors moved to
+  the workspace sub-bar (with labels) so the top bar no longer squeezes the
+  workspace name, and chart-panel chrome degrades by hiding labels — never by
+  shrinking type.
+- Verified: `tmp/ui_audit.mjs` green at 1280/1366/1920/2560 in both themes for the
+  trade ticket, AI panel (248/296/560 px), settings (four tabs), workspace, symbol
+  picker and indicators modal (0 text <12 px, 0 icons <14 px, 0 AA failures,
+  0 clipped labels, 0 overflow); `tmp/webkit_audit.py` repeats the probe in
+  WebKitGTK including container queries; `tauri build` debug binary rebuilt and
+  running under Xvfb with live data. Standards: `docs/UI_STANDARDS.md`.
+
 ## 2026-11-05 — maximized chart fills the grid
 - Maximizing a chart left a dead band at the bottom whenever the workspace held
   more panels than the layout's explicit tracks. Sibling panels were hidden with

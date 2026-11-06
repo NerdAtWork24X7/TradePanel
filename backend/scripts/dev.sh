@@ -20,6 +20,15 @@ if ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
   _webkit_pc="$(find /tmp /opt /usr/local -name 'webkit2gtk-4.1.pc' -print -quit 2>/dev/null || true)"
   if [[ -n "${_webkit_pc:-}" ]]; then
     export PKG_CONFIG_PATH="$(dirname "$_webkit_pc")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    # The pc file lives in a sysroot whose prefix is /usr; without a sysroot
+    # the linker resolves -lwebkit2gtk-4.1 against /usr/lib where only the
+    # versioned .so.0 exists. Point pkg-config at the sysroot root so the
+    # unversioned .so symlinks staged there are used.
+    _webkit_sysroot="$(cd "$(dirname "$_webkit_pc")/../../../.." && pwd 2>/dev/null || true)"
+    if [[ -n "${_webkit_sysroot:-}" && -d "${_webkit_sysroot}/usr/lib" ]]; then
+      export PKG_CONFIG_SYSROOT_DIR="$_webkit_sysroot"
+    fi
+    unset _webkit_sysroot
   fi
   unset _webkit_pc
 fi
@@ -59,6 +68,57 @@ if [[ $REBUILD -eq 1 || ! -f "$SIDECAR" ]]; then
   echo "Building the Python sidecar"
   backend/scripts/build-backend.sh
 fi
+
+# Reclaim a stale dev server left behind by a previous run. A previous
+# `tauri dev` (or its Vite child) that did not shut down cleanly keeps
+# port 5173 bound, which makes the next `beforeDevCommand` fail with
+# "Port 5173 is already in use". Only processes that belong to this
+# checkout are touched.
+reclaim_stale_dev() {
+  local port=5173
+  local pids="" pid cwd cmd
+
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -ti "tcp:${port}" -sTCP:LISTEN 2>/dev/null || true)"
+  elif command -v fuser >/dev/null 2>&1; then
+    pids="$(fuser "${port}/tcp" 2>/dev/null | tr -s ' ' '\n' || true)"
+  fi
+
+  for pid in $pids; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    [[ "$pid" == "$$" || "$pid" == "$PPID" ]] && continue
+    cwd="$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)"
+    cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+    if [[ -n "$cwd" && "$cwd" == "$ROOT/frontend" ]]; then
+      kill "$pid" 2>/dev/null || true
+    elif [[ "$cmd" == *"$ROOT"* && "$cmd" == *vite* ]]; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+
+  # Previous tauri dev instances for this checkout (and their Vite children).
+  if command -v pgrep >/dev/null 2>&1; then
+    for pid in $(pgrep -f "tauri dev" 2>/dev/null || true); do
+      [[ "$pid" == "$$" || "$pid" == "$PPID" ]] && continue
+      cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+      case "$cmd" in
+        *"$ROOT"*) kill "$pid" 2>/dev/null || true ;;
+      esac
+    done
+  fi
+
+  # Wait for the port to be released.
+  local i
+  for ((i = 0; i < 25; i++)); do
+    if command -v lsof >/dev/null 2>&1; then
+      lsof -ti "tcp:${port}" -sTCP:LISTEN >/dev/null 2>&1 || return 0
+    else
+      return 0
+    fi
+    sleep 0.2
+  done
+}
+reclaim_stale_dev
 
 # bash 3.2 (macOS) errors on an empty "${arr[@]}" under `set -u`.
 if [[ ${#TAURI_ARGS[@]} -gt 0 ]]; then

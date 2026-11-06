@@ -1,4 +1,9 @@
-/* Pi Scope warm theme tokens (dark default). Light override below. */
+/* Pi Scope warm theme tokens (dark default). Light override below.
+ *
+ * Everything visual — colour, type scale, icon sizes, control heights — is
+ * declared here. Components consume tokens only; hard-coded px type or icon
+ * sizes in component CSS are a regression (see docs/UI_STANDARDS.md).
+ */
 :root {
   --bg: #1c1c1b;
   --surface: #222220;
@@ -7,13 +12,16 @@
   --field-bg: #2e2e2a;
   --text: #f3f1e9;
   --text-2: #b1b0a7;
-  --text-3: #a09f95;
-  --muted: #7a7970;
+  --text-3: #a8a79d;
+  --muted: #97968c;
   --border: #3b3b36;
   --border-strong: #4a4a42;
+  /* Form-control boundary: ≥3:1 against the surfaces it sits on. */
+  --control-border: #75756d;
   --hairline: rgba(255, 255, 255, 0.055);
   --hairline-strong: rgba(255, 255, 255, 0.12);
   --accent: #ffd43b;
+  --accent-text: #ffd43b;
   --accent-rgb: 255, 212, 59;
   --accent-soft: #48401e;
   --accent-strong: #f5ca2f;
@@ -39,9 +47,39 @@
   --radius-card: 12px;
   --radius-panel: 16px;
   --sidebar-width: 296px;
-  --font-body: "Satoshi", "Clash Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-display: "Clash Grotesk", "Satoshi", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "MesloLGS NFM", "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* ── Type system ──────────────────────────────────────────────────────
+     One text family for the whole application (bundled Satoshi, variable
+     300–900, with the platform UI stack as fallback) plus a monospace face
+     reserved for numeric/terminal readouts. */
+  --font-body: "Satoshi", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "MesloLGS NFM", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  /* Scale — never go below --text-xs for interface text. */
+  --text-xs: 12px;   /* metadata, status labels, table headers */
+  --text-sm: 13px;   /* secondary copy, tooltips, dense table cells */
+  --text-base: 14px; /* body, inputs, buttons, navigation, tabs, table cells */
+  --text-md: 16px;   /* card heading */
+  --text-lg: 19px;   /* section heading */
+  --text-xl: 24px;   /* page title */
+  --leading-heading: 1.3;
+  --leading-body: 1.5;
+  --leading-dense: 1.4;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* ── Icons & controls ───────────────────────────────────────────────── */
+  --icon-sm: 16px;   /* status glyphs */
+  --icon-md: 18px;   /* toolbar / button / input / table action icons */
+  --icon-lg: 20px;   /* main navigation */
+  --icon-xl: 22px;   /* prominent standalone actions */
+  --control-h-sm: 32px;
+  --control-h: 36px;
+  --control-h-lg: 38px;
+  --input-h: 38px;
+  --hit-min: 36px;
+
   --micro: 160ms cubic-bezier(0.2, 0.7, 0.3, 1);
   --macro: 700ms cubic-bezier(0.22, 1, 0.36, 1);
   --emoji: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
@@ -64,14 +102,17 @@ body[data-theme="light"] {
   --surface-3: #ffffff;
   --field-bg: #efefec;
   --text: #242423;
-  --text-2: #656560;
-  --text-3: #71716c;
-  --muted: #71716c;
+  --text-2: #55554f;
+  --text-3: #64645e;
+  --muted: #6d6d67;
   --border: #e3e3df;
   --border-strong: #d3d3cc;
+  --control-border: #86867f;
   --hairline: rgba(36, 36, 35, 0.055);
   --hairline-strong: rgba(36, 36, 35, 0.12);
   --accent: #ffd43b;
+  /* Yellow is a background colour on white; text uses a dark amber. */
+  --accent-text: #7a5c00;
   --accent-rgb: 255, 212, 59;
   --accent-soft: #fff1b6;
   --accent-strong: #f5ca2f;
@@ -82,10 +123,10 @@ body[data-theme="light"] {
   --danger-soft: rgba(176, 53, 53, 0.07);
   --success: #237345;
   --success-soft: rgba(35, 115, 69, 0.10);
-  --coral: #a8700a;
-  --orange: #a8700a;
+  --coral: #8a5c00;
+  --orange: #8a5c00;
   --purple: #7a4fc7;
-  --cyan: #2f6fc7;
+  --cyan: #2a63b4;
   --row-hover: #f1f1ef;
   --hover-wash: rgba(36, 36, 35, 0.05);
   --pill-bg: #f1f1ef;
@@ -125,21 +166,20 @@ body {
   gap: 8px;
   padding: 8px;
   background:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+    radial-gradient(1100px 320px at 8% -12%, rgba(var(--accent-rgb), 0.07), transparent 65%),
     var(--bg-gradient, var(--bg));
-  background-size: 24px 24px, 24px 24px, auto;
   color: var(--text);
   font-family: var(--font-body), var(--emoji);
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
   color: inherit;
 }
@@ -151,10 +191,16 @@ button {
 button:disabled,
 button[aria-disabled="true"] {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: 0.55;
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  /* --focus clears 3:1 on both themes; --accent (yellow) does not on white. */
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+/* Icon geometry: icons are inline-flex children that never shrink. */
+svg {
+  flex: none;
 }

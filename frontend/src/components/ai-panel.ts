@@ -375,10 +375,10 @@ export class AiPanel {
     this.sendButton.disabled = !canChat || this.input.value.trim().length === 0;
     this.stopButton.hidden = !this.streaming;
     this.input.placeholder = !configured
-      ? "Connect a provider to begin…"
+      ? "Connect a provider"
       : this.analysisStarted
-        ? "Ask a follow-up about this analysis…"
-        : "Click Start analysis to begin";
+        ? "Ask a follow-up…"
+        : "Start analysis first";
     this.settingsButton.disabled = false;
   }
 

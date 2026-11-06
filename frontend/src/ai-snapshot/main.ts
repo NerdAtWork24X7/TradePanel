@@ -86,7 +86,7 @@ function chartOptions(height: number, showTime: boolean, bottomMargin = 0.08): R
     layout: {
       background: { type: LWC.ColorType.Solid, color: COLORS.background },
       textColor: COLORS.muted,
-      fontSize: 11,
+      fontSize: 12,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
     },
     grid: {
@@ -165,7 +165,7 @@ function drawHeader(ctx: CanvasRenderingContext2D, request: SnapshotRequest, can
   ctx.fillText(request.symbol, 20, 24);
 
   const symbolWidth = ctx.measureText(request.symbol).width;
-  ctx.font = "600 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+  ctx.font = "600 12px ui-monospace, SFMono-Regular, Menlo, monospace";
   ctx.fillStyle = COLORS.muted;
   ctx.fillText(`${request.exchange} · ${request.market}`, 20, 42);
 
@@ -199,17 +199,17 @@ function drawHeader(ctx: CanvasRenderingContext2D, request: SnapshotRequest, can
 
 function drawLabel(ctx: CanvasRenderingContext2D, text: string, top: number): void {
   ctx.fillStyle = COLORS.background;
-  ctx.fillRect(0, top, WIDTH, 18);
-  ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
+  ctx.fillRect(0, top, WIDTH, 20);
+  ctx.font = "600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
   ctx.fillStyle = COLORS.muted;
   ctx.textBaseline = "middle";
-  ctx.fillText(text, 14, top + 9);
+  ctx.fillText(text, 14, top + 10);
 }
 
 function drawFooter(ctx: CanvasRenderingContext2D, request: SnapshotRequest): void {
   ctx.fillStyle = "#1b1b17";
   ctx.fillRect(0, FOOTER_TOP, WIDTH, HEIGHT - FOOTER_TOP);
-  ctx.font = "500 10px ui-sans-serif, system-ui, sans-serif";
+  ctx.font = "500 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
   ctx.fillStyle = COLORS.faint;
   ctx.textBaseline = "middle";
   const stamp = new Date(request.capturedAtMs).toISOString().replace("T", " ").slice(0, 19);

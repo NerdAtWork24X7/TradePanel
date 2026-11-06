@@ -18,15 +18,12 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 cd "$ROOT"
 
-# Expose the local webkit2gtk pkg-config sysroot to cargo when present.
-# Locate webkit2gtk pkg-config metadata (system install or the bundled sysroot).
-if ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
-  _webkit_pc="$(find /tmp /opt /usr/local -name 'webkit2gtk-4.1.pc' -print -quit 2>/dev/null || true)"
-  if [[ -n "${_webkit_pc:-}" ]]; then
-    export PKG_CONFIG_PATH="$(dirname "$_webkit_pc")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-  fi
-  unset _webkit_pc
-fi
+# Tauri's Linux webview (webkit2gtk) needs pkg-config metadata. Use the system
+# -dev packages when installed, otherwise fall back to a persistent local
+# sysroot (see backend/scripts/webkit-env.sh).
+# shellcheck source=backend/scripts/webkit-env.sh
+source "$ROOT/backend/scripts/webkit-env.sh"
+tradepanel_webkit_env
 
 usage() {
   sed -n '3,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'

@@ -31,6 +31,16 @@ sudo apt install -y \
 * Python 3.12 + [uv](https://docs.astral.sh/uv/) (or plain venv/pip).
 * Node 20+ and Rust 1.77+.
 
+If the `-dev` packages are missing, `start.sh` / `build.sh` fall back to a
+pkg-config sysroot under `${XDG_DATA_HOME:-~/.local/share}/tradepanel/webkit-sysroot`
+(see `backend/scripts/webkit-env.sh`). That fallback only works when the
+runtime packages (`libwebkit2gtk-4.1-0`, `libjavascriptcoregtk-4.1-0`,
+`libsoup-3.0-0`) are installed, and it is meant for development hosts. Install
+the `-dev` packages for a normal build. To force a rebuild of the fallback,
+delete that directory; to place it elsewhere, set
+`TRADEPANEL_WEBKIT_SYSROOT`. The `pkg-config` error after a reboot was caused
+by an older fallback staged in `/tmp`, which the system clears on restart.
+
 ### Windows 10/11
 
 * Visual Studio Build Tools with "Desktop development with C++".

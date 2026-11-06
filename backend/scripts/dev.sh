@@ -14,24 +14,12 @@ for _d in "$HOME/.cargo/bin" "$HOME/.local/bin" "$HOME/.nvm/versions/node"/*/bin
 done
 export PATH
 
-# Expose the local webkit2gtk pkg-config sysroot to cargo when present.
-# Locate webkit2gtk pkg-config metadata (system install or the bundled sysroot).
-if ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
-  _webkit_pc="$(find /tmp /opt /usr/local -name 'webkit2gtk-4.1.pc' -print -quit 2>/dev/null || true)"
-  if [[ -n "${_webkit_pc:-}" ]]; then
-    export PKG_CONFIG_PATH="$(dirname "$_webkit_pc")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-    # The pc file lives in a sysroot whose prefix is /usr; without a sysroot
-    # the linker resolves -lwebkit2gtk-4.1 against /usr/lib where only the
-    # versioned .so.0 exists. Point pkg-config at the sysroot root so the
-    # unversioned .so symlinks staged there are used.
-    _webkit_sysroot="$(cd "$(dirname "$_webkit_pc")/../../../.." && pwd 2>/dev/null || true)"
-    if [[ -n "${_webkit_sysroot:-}" && -d "${_webkit_sysroot}/usr/lib" ]]; then
-      export PKG_CONFIG_SYSROOT_DIR="$_webkit_sysroot"
-    fi
-    unset _webkit_sysroot
-  fi
-  unset _webkit_pc
-fi
+# Tauri's Linux webview (webkit2gtk) needs pkg-config metadata. Use the system
+# -dev packages when installed, otherwise fall back to a persistent local
+# sysroot (see backend/scripts/webkit-env.sh).
+# shellcheck source=backend/scripts/webkit-env.sh
+source "$ROOT/backend/scripts/webkit-env.sh"
+tradepanel_webkit_env
 
 REBUILD=0
 TAURI_ARGS=()

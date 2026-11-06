@@ -27,6 +27,9 @@
            shares a value; the chart workspace deliberately uses the neutral
            grey/blue set instead of the shell's amber identity. */
         :root {
+            /* Native controls (select popups, scrollbars, colour pickers) follow
+               the chart theme; the light override redeclares this below. */
+            color-scheme: dark;
             --bg: #0f0f0f;
             --surface: #1f1f1f;
             --surface-2: #262626;
@@ -236,7 +239,9 @@
         }
         select.ws-select:hover { border-color: var(--border-strong); background-color: var(--surface-3); }
         select.ws-select:focus-visible { border-color: var(--focus); box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.16); }
-        select.ws-select option { background: var(--surface-2); color: var(--text); }
+        /* Native select popups are painted by the UA, outside the page's
+           background rules; theme them explicitly for every dropdown. */
+        select option { background: var(--surface-2); color: var(--text); }
 
         .ws-actions { display: flex; align-items: center; gap: 2px; }
 
@@ -557,20 +562,9 @@
         .cc-btn[disabled] { opacity: 0.4; cursor: default; }
         .cc-btn[disabled]:hover { background: var(--surface); color: var(--text-2); }
 
-        .osc-pane {
-            position: relative; flex: none; height: 0; overflow: hidden;
-            border-top: 1px solid var(--hairline); display: none;
-            background: color-mix(in srgb, var(--chart-bg) 55%, transparent);
-        }
-        .osc-pane.show { display: block; }
-
-        .draw-layer, .osc-layer {
+        .draw-layer {
             position: absolute; inset: 0; width: 100%; height: 100%;
             pointer-events: none; z-index: 3;
-        }
-        .ind-layer {
-            position: absolute; inset: 0; width: 100%; height: 100%;
-            pointer-events: none; z-index: 2;
         }
         .draw-layer.active { pointer-events: auto; cursor: crosshair; }
 
@@ -771,8 +765,6 @@
         .ohlc-strip .lv-change { font-weight: var(--weight-medium); }
         .ohlc-strip .lv-change.up { color: var(--success); }
         .ohlc-strip .lv-change.down { color: var(--danger); }
-        .ohlc-strip .ind-legend { flex-direction: column; align-items: flex-start; gap: 1px; }
-        .ohlc-strip .ind-legend span { padding: 0 2px; background: transparent; }
 
         .agg-note {
             position: absolute; right: 84px; top: 9px; z-index: 5;
@@ -795,19 +787,41 @@
             color: var(--text); font-family: var(--font-mono); font-size: var(--text-base);
         }
 
-        .ind-legend {
-            display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none;
+        /* Per-pane indicator legend (OpenTrader pattern): one compact row at
+           the top-left of each pane, with eye + settings controls. */
+        .ind-legend-layer {
+            position: absolute; inset: 0; z-index: 5; pointer-events: none; overflow: hidden;
         }
-        .ind-legend span {
-            font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.01em;
-            color: var(--text-3); background: transparent; border: 0; padding: 0;
-            display: inline-flex; align-items: center; gap: 4px;
+        .ind-pane-legend {
+            position: absolute; display: flex; align-items: center; gap: 4px;
+            padding: 1px 5px 1px 2px; border-radius: 5px;
+            background: color-mix(in srgb, var(--chart-bg) 72%, transparent);
+            border: 1px solid transparent; pointer-events: auto; white-space: nowrap;
+            font-family: var(--font-mono); font-size: var(--text-xs); line-height: 16px;
+            transition: border-color 120ms var(--ease), opacity 120ms var(--ease);
         }
-        .ind-legend span::before {
-            content: ''; width: 4px; height: 4px; border-radius: 50%;
+        .ind-pane-legend:hover { border-color: var(--border); }
+        .ind-pane-legend::before {
+            content: ''; width: 4px; height: 4px; border-radius: 50%; flex: none;
             background: var(--lite, var(--text-3));
         }
-        .ind-legend span b { color: var(--lite); font-weight: 500; }
+        .ind-pane-legend.hidden { opacity: 0.55; }
+        .ind-pane-legend.hidden .ind-legend-title { text-decoration: line-through; }
+        .ind-pane-legend.error .ind-legend-value { color: var(--danger); }
+        .ind-legend-title {
+            color: var(--lite, var(--text-2)); cursor: pointer;
+            max-width: 190px; overflow: hidden; text-overflow: ellipsis;
+        }
+        .ind-legend-title:hover { text-decoration: underline; text-underline-offset: 2px; }
+        .ind-legend-value { color: var(--text-2); font-weight: var(--weight-medium); }
+        .ind-legend-btn {
+            width: 17px; height: 17px; display: inline-flex; align-items: center; justify-content: center;
+            border: 0; border-radius: 4px; background: transparent; color: var(--text-3);
+            cursor: pointer; padding: 0; opacity: 0.75;
+        }
+        .ind-legend-btn:hover { color: var(--text); background: var(--surface-3); opacity: 1; }
+        .ind-legend-btn.danger:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+        .ind-legend-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
         .ind-legend.in-foot { position: static; max-width: none; overflow: hidden; flex-wrap: nowrap; }
 
         .panel-foot {
@@ -1002,26 +1016,94 @@
         }
         .mini-chip:hover { color: var(--text); border-color: var(--border-strong); }
 
-        .ind-row {
-            display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 14px;
-            padding: 12px 8px; border-bottom: 1px solid var(--hairline);
+        /* Indicator picker (lightweight-charts-indicators catalog) */
+        .ind-picker { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+        .ind-name-wrap { min-width: 0; }
+        .ind-search {
+            width: 100%; height: 38px; padding: 0 12px; border-radius: var(--radius-control);
+            border: 1px solid var(--control-border); background: var(--surface-2);
+            color: var(--text); font-family: var(--font-sans); font-size: var(--text-sm);
+            outline: none; transition: border-color 140ms var(--ease), box-shadow 140ms var(--ease);
         }
-        .ind-row:last-child { border-bottom: 0; }
-        .ind-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); justify-self: center; box-shadow: 0 0 8px color-mix(in srgb, var(--c) 60%, transparent); }
-        .ind-name { font-size: var(--text-base); color: var(--text); }
-        .ind-desc { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--muted); margin-top: 3px; }
-        .ind-params { display: flex; gap: 6px; align-items: center; }
-        .ind-params input {
-            width: 62px; height: var(--control-h-sm); background: var(--surface-2);
-            border: 1px solid var(--control-border);
-            border-radius: 6px; padding: 0 8px; font-family: var(--font-mono); font-size: var(--text-base);
-            color: var(--text-2); outline: none; text-align: center;
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
-            transition: border-color 140ms var(--ease), opacity 140ms var(--ease);
+        .ind-search::placeholder { color: var(--text-3); }
+        .ind-search:focus { border-color: var(--focus); box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.14); }
+        .ind-cats { display: flex; flex-wrap: wrap; gap: 6px; }
+        .ind-cat {
+            border: 1px solid var(--control-border); border-radius: 999px; background: var(--field-bg);
+            color: var(--text-3); font-family: var(--font-mono); font-size: var(--text-xs);
+            padding: 5px 10px; cursor: pointer; transition: color 140ms var(--ease), border-color 140ms var(--ease), background 140ms var(--ease);
         }
-        .ind-params input:hover:not(:disabled) { border-color: var(--text-3); }
-        .ind-params input:focus { border-color: var(--focus); box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.12); }
-        .ind-params input:disabled { opacity: 0.5; }
+        .ind-cat:hover { color: var(--text); border-color: var(--border-strong); }
+        .ind-cat[aria-pressed="true"] { background: rgba(var(--accent-rgb), 0.16); border-color: var(--accent); color: var(--accent); }
+        .ind-cat:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+        .ind-list { display: flex; flex-direction: column; max-height: 320px; overflow: auto; border: 1px solid var(--hairline); border-radius: var(--radius-control); }
+        .ind-pick .dot, .ind-pick .ind-dot {
+            width: 8px; height: 8px; border-radius: 50%; flex: none;
+            justify-self: center; background: var(--c, var(--text-3));
+            box-shadow: 0 0 6px color-mix(in srgb, var(--c, #71717a) 55%, transparent);
+        }
+        .ind-pick {
+            display: grid; grid-template-columns: 18px 1fr auto auto; align-items: center; gap: 10px;
+            padding: 8px 10px; border: 0; border-bottom: 1px solid var(--hairline);
+            background: transparent; color: var(--text-2); text-align: left; cursor: pointer;
+            transition: background 120ms var(--ease), color 120ms var(--ease);
+        }
+        .ind-pick:last-child { border-bottom: 0; }
+        .ind-pick:hover { background: var(--surface-3); color: var(--text); }
+        .ind-pick:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+        .ind-pick[aria-pressed="true"] { background: rgba(var(--accent-rgb), 0.08); color: var(--text); }
+        .ind-pick-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ind-pick-name em { font-style: normal; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-3); flex: none; }
+        .ind-pick-cat { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-3); }
+        .ind-list:not(.searching) .ind-pick-cat { display: none; }
+        .ind-pick-state { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--accent); }
+        .ind-icon-btn {
+            width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
+            border: 1px solid transparent; border-radius: 6px; background: transparent;
+            color: var(--text-3); font-size: 15px; line-height: 1; cursor: pointer;
+            transition: color 120ms var(--ease), background 120ms var(--ease), border-color 120ms var(--ease);
+        }
+        .ind-icon-btn:hover { color: var(--text); background: var(--surface-3); border-color: var(--control-border); }
+        .ind-icon-btn.danger:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
+        .ind-icon-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+        .ind-settings {
+            display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 14px;
+            background: color-mix(in srgb, var(--surface-3) 55%, transparent);
+            border-bottom: 1px solid var(--hairline);
+        }
+        .ind-group { display: grid; gap: 6px; }
+        .ind-group-title { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+        .ind-field { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(110px, 170px); align-items: center; gap: 12px; }
+        .ind-field-label { font-size: var(--text-sm); color: var(--text-2); }
+        .ind-field input, .ind-field select {
+            height: 28px; width: 100%; min-width: 0; padding: 0 8px; border-radius: 6px;
+            border: 1px solid var(--control-border); background: var(--field-bg); color: var(--text-2);
+            font-family: var(--font-mono); font-size: var(--text-sm); outline: none;
+        }
+        .ind-field input:focus, .ind-field select:focus { border-color: var(--focus); box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.12); }
+        .ind-field input:disabled, .ind-field select:disabled { opacity: 0.45; }
+        .ind-field input[type="checkbox"] { justify-self: start; width: 16px; height: 16px; padding: 0; accent-color: var(--accent); }
+        .ind-empty, .ind-status { padding: 10px 4px; font-size: var(--text-xs); color: var(--text-3); font-family: var(--font-mono); }
+        .ind-status.error { color: var(--danger); }
+        .ind-list-group { position: sticky; top: 0; z-index: 1; padding: 7px 10px 4px; background: var(--surface-2); }
+        .ind-picker-top { display: flex; gap: 8px; align-items: center; }
+        .ind-settings-dialog { display: flex; flex-direction: column; gap: 10px; }
+        .ind-settings-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--hairline); }
+        .ind-settings-tab {
+            border: 0; border-bottom: 2px solid transparent; background: transparent;
+            color: var(--text-3); font-family: var(--font-sans); font-size: var(--text-sm);
+            padding: 6px 10px 7px; cursor: pointer; transition: color 120ms var(--ease), border-color 120ms var(--ease);
+        }
+        .ind-settings-tab:hover { color: var(--text); }
+        .ind-settings-tab[aria-pressed="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+        .ind-settings-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+        .ind-settings-pane { min-height: 140px; }
+        .ind-settings-pane .ind-settings { padding: 4px 0 6px; background: transparent; border: 0; }
+        .ind-style-controls { display: flex; align-items: center; gap: 8px; }
+        .ind-style-controls input[type="color"] { width: 30px; height: 28px; padding: 2px; cursor: pointer; }
+        .ind-style-controls select { width: 72px; }
+        .ind-style-controls input[type="checkbox"] { width: 16px; height: 16px; }
+        .ind-style-controls .ind-icon-btn { width: 26px; height: 26px; border: 1px solid var(--control-border); }
 
         .switch {
             position: relative; width: 40px; height: 24px; flex: none;

@@ -78,9 +78,9 @@ same charts the user sees:
 1. The shell fetches 1d, 4h and 5m candles through the existing market-data
    service (no new exchange connections).
 2. A hidden, same-origin iframe (`frontend/snapshot.html`) draws each timeframe
-   with the bundled Lightweight Charts build: candles, EMA ribbon (user's
-   configured lengths), Bollinger Bands 20/2, volume, RSI 14, MACD 12/26/9 and
-   the current entry/TP/SL price lines.
+   with the bundled Lightweight Charts build: candles, volume, the current
+   entry/TP/SL price lines and the indicators enabled on the user's focused
+   chart (overlays on the price pane, up to three oscillator panes).
 3. Each pane is captured with `chart.takeScreenshot()`, composited into one
    960×680 PNG, and returned as base64.
 4. The three PNGs are attached to Pi's `prompt` command as images. The numeric
@@ -100,8 +100,11 @@ panel loads cached history from Pi's session files without starting Pi.
 Start analysis:
 
 1. Fetch 1d/4h/5m candles in parallel; drop timeframes that fail and report them.
-2. Compute RSI, MACD, EMA, Bollinger, ATR, volume stats, trends and structural
-   levels in `frontend/src/lib/technical.ts`.
+2. Compute the focused chart's active indicators with
+   `lightweight-charts-indicators` (`frontend/src/lib/indicator-kit.ts`) and the
+   structural levels in `frontend/src/lib/market-levels.ts`. The workspace
+   mirrors its visible studies to the shell on every focus/visibility/input
+   change, so there is no second indicator picker to drift.
 3. Render the screenshots.
 4. Build the read-only snapshot and write it atomically to
    `<app-data>/ai/context.json`.
@@ -150,7 +153,7 @@ the ticket.
 | Tool | Purpose |
 |---|---|
 | `panel_market_context` | Instrument, price, freshness, indicator summary, levels, portfolio status, ticket summary |
-| `panel_indicators` | Exact per-timeframe RSI/MACD/EMA/Bollinger/ATR/volume values and structural levels |
+| `panel_indicators` | Exact per-timeframe values of the chart's active indicators and structural levels |
 | `panel_portfolio` | Position, open orders, P&L and exposure when the user enabled portfolio context |
 | `panel_order_ticket` | Current ticket fields, read-only |
 | `panel_submit_trade_plan` | Validate and return the final plan card |
@@ -179,7 +182,7 @@ have no such escape hatch.
 | Check | Command |
 |---|---|
 | Rust unit tests (framing, snapshot validation, args isolation, store, history) | `cd src-tauri && cargo test` |
-| Frontend unit tests (markdown safety, indicator math, context) | `npm --prefix frontend test` |
+| Frontend unit tests (markdown safety, bridge contract, drawings) | `npm --prefix frontend test` |
 | TypeScript | `npm --prefix frontend run typecheck` |
 | Pi end-to-end with a mock OpenAI-compatible provider (images, tools, plan validation, streaming, abort, session file) | `npm run test:ai` |
 | Provider settings bridge (catalogue, API-key prompt, auth.json mode, models, logout) | `npm run test:ai` |

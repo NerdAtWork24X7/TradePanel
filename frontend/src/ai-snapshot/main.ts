@@ -2,29 +2,28 @@
  * Offscreen chart snapshot renderer for TradePanel AI Analysis.
  *
  * Runs inside a hidden, same-origin iframe. It never talks to the network:
- * the host posts candles and the renderer draws the panes with the bundled
- * Lightweight Charts build, composites them into one PNG and posts the data
- * URL back. This replaces sending hundreds of candles to the model as text.
+ * the host posts candles and the renderer draws the price pane plus the
+ * user-selected lightweight-charts-indicators studies, composites them into
+ * one PNG and posts the data URL back.
  */
 import type { Candle } from "../types";
+import { normalizeCandles } from "../lib/candles";
 import {
-  DEFAULT_EMA_CONFIG,
-  computeIndicatorSeries,
-  normalizeCandles,
-  type EmaConfig,
-  type IndicatorSeries,
-} from "../lib/technical";
+  findRegistryEntry,
+  indicatorBars,
+  loadIndicatorEngine,
+  mergeIndicatorInputs,
+  type IndicatorSelection,
+  type RegistryEntry,
+} from "../lib/indicator-kit";
 
 const WIDTH = 960;
 const HEIGHT = 680;
 const HEADER = 56;
-const MAIN_HEIGHT = 380;
-const MAIN_TOP = HEADER;
-const RSI_TOP = MAIN_TOP + MAIN_HEIGHT + 4;
-const RSI_HEIGHT = 96;
-const MACD_TOP = RSI_TOP + RSI_HEIGHT + 4;
-const MACD_HEIGHT = HEIGHT - MACD_TOP - 34;
-const FOOTER_TOP = HEIGHT - 34;
+const FOOTER = 34;
+const CHART_HEIGHT = HEIGHT - HEADER - FOOTER;
+const MAIN_PANE_HEIGHT = 340;
+const MAX_OSCILLATORS = 3;
 
 interface TicketLevels {
   entry?: number | null;
@@ -42,8 +41,13 @@ interface SnapshotRequest {
   price?: number | null;
   change24h?: number | null;
   levels?: TicketLevels;
-  ema?: Partial<EmaConfig>;
+  indicators: IndicatorSelection[];
   capturedAtMs: number;
+}
+
+interface PaneApiLike {
+  setHeight(height: number): void;
+  getHTMLElement(): HTMLElement;
 }
 
 type Lwc = {
@@ -69,9 +73,6 @@ const COLORS = {
   accent: "#ffd43b",
   up: "#83cf9c",
   down: "#ff9e96",
-  blue: "#6aa2f0",
-  orange: "#e3b24f",
-  purple: "#ad8cf2",
 };
 
 function raf(): Promise<void> {
@@ -82,7 +83,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function chartOptions(height: number, showTime: boolean, bottomMargin = 0.08): Record<string, unknown> {
+function chartOptions(height: number, bottomMargin = 0.08): Record<string, unknown> {
   return {
     width: WIDTH,
     height,
@@ -91,6 +92,7 @@ function chartOptions(height: number, showTime: boolean, bottomMargin = 0.08): R
       textColor: COLORS.muted,
       fontSize: 12,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+      panes: { separatorColor: COLORS.border, separatorHoverColor: COLORS.border },
     },
     grid: {
       vertLines: { color: COLORS.grid },
@@ -106,7 +108,7 @@ function chartOptions(height: number, showTime: boolean, bottomMargin = 0.08): R
       scaleMargins: { top: 0.08, bottom: bottomMargin },
     },
     timeScale: {
-      visible: showTime,
+      visible: true,
       borderColor: COLORS.border,
       timeVisible: true,
       secondsVisible: false,
@@ -115,27 +117,6 @@ function chartOptions(height: number, showTime: boolean, bottomMargin = 0.08): R
     handleScroll: false,
     handleScale: false,
   };
-}
-
-function pane(): HTMLElement {
-  const element = document.createElement("div");
-  element.className = "pane";
-  stage.appendChild(element);
-  return element;
-}
-
-function lineData(
-  candles: Candle[],
-  series: Array<number | null>,
-): Array<{ time: number; value: number }> {
-  const out: Array<{ time: number; value: number }> = [];
-  for (let i = 0; i < candles.length; i += 1) {
-    const value = series[i];
-    if (value !== null && Number.isFinite(value)) {
-      out.push({ time: Math.floor(candles[i].time), value });
-    }
-  }
-  return out;
 }
 
 function setRange(chart: any, count: number): void {
@@ -197,21 +178,11 @@ function drawHeader(ctx: CanvasRenderingContext2D, request: SnapshotRequest, can
     }
     ctx.textAlign = "left";
   }
-
 }
 
-function drawLabel(ctx: CanvasRenderingContext2D, text: string, top: number): void {
-  ctx.fillStyle = COLORS.background;
-  ctx.fillRect(0, top, WIDTH, 20);
-  ctx.font = "600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
-  ctx.fillStyle = COLORS.muted;
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, 14, top + 10);
-}
-
-function drawFooter(ctx: CanvasRenderingContext2D, request: SnapshotRequest): void {
+function drawFooter(ctx: CanvasRenderingContext2D, request: SnapshotRequest, names: string[]): void {
   ctx.fillStyle = "#1b1b17";
-  ctx.fillRect(0, FOOTER_TOP, WIDTH, HEIGHT - FOOTER_TOP);
+  ctx.fillRect(0, HEIGHT - FOOTER, WIDTH, FOOTER);
   ctx.font = "500 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
   ctx.fillStyle = COLORS.faint;
   ctx.textBaseline = "middle";
@@ -219,16 +190,21 @@ function drawFooter(ctx: CanvasRenderingContext2D, request: SnapshotRequest): vo
   ctx.fillText(
     `TradePanel read-only AI snapshot · ${request.symbol} · ${request.timeframe} · ${request.candles.length} candles · ${stamp}Z`,
     14,
-    FOOTER_TOP + 17,
+    HEIGHT - FOOTER + 17,
   );
-  const ema = request.ema ?? DEFAULT_EMA_CONFIG;
   ctx.textAlign = "right";
-  ctx.fillText(
-    `EMA ${ema.length1}/${ema.length2}/${ema.length3} · BB 20,2 · RSI 14 · MACD 12/26/9`,
-    WIDTH - 14,
-    FOOTER_TOP + 17,
-  );
+  ctx.fillText(names.length ? names.join(" · ") : "price + volume", WIDTH - 14, HEIGHT - FOOTER + 17);
   ctx.textAlign = "left";
+}
+
+function drawPaneLabel(ctx: CanvasRenderingContext2D, text: string, top: number): void {
+  ctx.font = "600 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+  const width = ctx.measureText(text).width + 16;
+  ctx.fillStyle = "rgba(18,18,15,0.82)";
+  ctx.fillRect(8, top + 6, width, 19);
+  ctx.fillStyle = COLORS.muted;
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 16, top + 16);
 }
 
 async function render(
@@ -238,21 +214,13 @@ async function render(
   if (candles.length < 5) {
     throw new Error("Not enough candles to render a chart (need at least 5).");
   }
-  const config: EmaConfig = {
-    length1: Math.max(2, Number(request.ema?.length1) || DEFAULT_EMA_CONFIG.length1),
-    length2: Math.max(3, Number(request.ema?.length2) || DEFAULT_EMA_CONFIG.length2),
-    length3: Math.max(4, Number(request.ema?.length3) || DEFAULT_EMA_CONFIG.length3),
-    maType: request.ema?.maType === "sma" ? "sma" : "ema",
-  };
-  const series: IndicatorSeries = computeIndicatorSeries(candles, config);
 
   stage.replaceChildren();
-  const mainElement = pane();
-  const rsiElement = pane();
-  const macdElement = pane();
+  const chartElement = document.createElement("div");
+  stage.appendChild(chartElement);
 
-  const main = LWC.createChart(mainElement, chartOptions(MAIN_HEIGHT, false, 0.28));
-  const candleSeries = main.addSeries(LWC.CandlestickSeries, {
+  const chart = LWC.createChart(chartElement, chartOptions(CHART_HEIGHT, 0.24));
+  const candleSeries = chart.addSeries(LWC.CandlestickSeries, {
     upColor: COLORS.up,
     downColor: COLORS.down,
     borderVisible: false,
@@ -271,39 +239,13 @@ async function render(
     })),
   );
 
-  const emaColors = [COLORS.blue, COLORS.orange, COLORS.purple];
-  [series.ema1, series.ema2, series.ema3].forEach((values, index) => {
-    const line = main.addSeries(LWC.LineSeries, {
-      color: emaColors[index],
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-    line.setData(lineData(candles, values));
-  });
-  for (const [values, color] of [
-    [series.bbUpper, COLORS.faint],
-    [series.bbLower, COLORS.faint],
-  ] as const) {
-    const line = main.addSeries(LWC.LineSeries, {
-      color,
-      lineWidth: 1,
-      lineStyle: LWC.LineStyle.Dashed,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-    line.setData(lineData(candles, values));
-  }
-
-  const volume = main.addSeries(LWC.HistogramSeries, {
+  const volume = chart.addSeries(LWC.HistogramSeries, {
     priceScaleId: "volume",
     priceFormat: { type: "volume" },
     priceLineVisible: false,
     lastValueVisible: false,
   });
-  main.priceScale("volume").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+  chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
   volume.setData(
     candles.map((candle) => ({
       time: Math.floor(candle.time),
@@ -330,65 +272,75 @@ async function render(
       });
     }
   }
-  setRange(main, candles.length);
 
-  const rsiChart = LWC.createChart(rsiElement, chartOptions(RSI_HEIGHT, false, 0.08));
-  const rsiLine = rsiChart.addSeries(LWC.LineSeries, {
-    color: COLORS.purple,
-    lineWidth: 1,
-    priceLineVisible: false,
-    lastValueVisible: true,
-    autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
-  });
-  rsiLine.setData(lineData(candles, series.rsi));
-  rsiLine.createPriceLine({
-    price: 70,
-    color: COLORS.faint,
-    lineWidth: 1,
-    lineStyle: LWC.LineStyle.Dashed,
-    axisLabelVisible: false,
-    title: "",
-  });
-  rsiLine.createPriceLine({
-    price: 30,
-    color: COLORS.faint,
-    lineWidth: 1,
-    lineStyle: LWC.LineStyle.Dashed,
-    axisLabelVisible: false,
-    title: "",
-  });
-  setRange(rsiChart, candles.length);
+  const notes: string[] = [];
+  const renderedNames: string[] = [];
+  const selection = Array.isArray(request.indicators) ? request.indicators : [];
+  let oscillatorCount = 0;
 
-  const macdChart = LWC.createChart(macdElement, chartOptions(MACD_HEIGHT, true, 0.08));
-  const histogram = macdChart.addSeries(LWC.HistogramSeries, {
-    priceLineVisible: false,
-    lastValueVisible: false,
-  });
-  histogram.setData(
-    candles.map((candle, index) => ({
-      time: Math.floor(candle.time),
-      value: series.macdHistogram[index] ?? 0,
-      color:
-        (series.macdHistogram[index] ?? 0) >= 0
-          ? "rgba(131,207,156,0.45)"
-          : "rgba(255,158,150,0.45)",
-    })),
-  );
-  const macdLine = macdChart.addSeries(LWC.LineSeries, {
-    color: COLORS.blue,
-    lineWidth: 1,
-    priceLineVisible: false,
-    lastValueVisible: false,
-  });
-  macdLine.setData(lineData(candles, series.macd));
-  const signalLine = macdChart.addSeries(LWC.LineSeries, {
-    color: COLORS.orange,
-    lineWidth: 1,
-    priceLineVisible: false,
-    lastValueVisible: false,
-  });
-  signalLine.setData(lineData(candles, series.macdSignal));
-  setRange(macdChart, candles.length);
+  if (selection.length) {
+    let engineReady = true;
+    try {
+      await loadIndicatorEngine();
+    } catch (error) {
+      engineReady = false;
+      notes.push(`engine: ${(error as Error).message || String(error)}`);
+    }
+    const bars = indicatorBars(candles);
+    const entries: Array<{ entry: RegistryEntry; inputs: Record<string, unknown> }> = [];
+    if (engineReady) {
+      for (const item of selection) {
+        const entry = findRegistryEntry(item.id);
+        if (!entry) {
+          notes.push(`${item.id}: unknown`);
+          continue;
+        }
+        entries.push({ entry, inputs: mergeIndicatorInputs(entry, item.inputs) });
+      }
+    }
+    const overlays = entries.filter(({ entry }) => entry.overlay === true);
+    const oscillators = entries.filter(({ entry }) => entry.overlay !== true).slice(0, MAX_OSCILLATORS);
+    oscillatorCount = oscillators.length;
+    const oscPaneHeight = oscillatorCount
+      ? Math.max(64, Math.floor((CHART_HEIGHT - MAIN_PANE_HEIGHT) / oscillatorCount))
+      : CHART_HEIGHT;
+
+    const drawSet = async (
+      set: Array<{ entry: RegistryEntry; inputs: Record<string, unknown> }>,
+      paneIndex: number,
+    ): Promise<void> => {
+      const kit = (window as unknown as { TradePanelIndicators: any }).TradePanelIndicators;
+      for (const { entry, inputs } of set) {
+        try {
+          const result = entry.calculate(bars, inputs);
+          const renderer = new kit.IndicatorRenderer(chart, {
+            paneIndex,
+            mainSeries: candleSeries,
+          });
+          renderer.render(entry, result, bars, { inputs, lastValueVisible: false });
+          renderedNames.push(entry.shortName || entry.name);
+        } catch (error) {
+          notes.push(`${entry.id}: ${(error as Error).message || String(error)}`);
+        }
+      }
+    };
+
+    await drawSet(overlays, 0);
+    for (let index = 0; index < oscillators.length; index += 1) {
+      await drawSet([oscillators[index]], index + 1);
+    }
+
+    const panes = chart.panes() as PaneApiLike[];
+    try {
+      panes[0]?.setHeight(oscillatorCount ? MAIN_PANE_HEIGHT : CHART_HEIGHT);
+      for (let index = 0; index < oscillatorCount; index += 1) {
+        panes[index + 1]?.setHeight(oscPaneHeight);
+      }
+    } catch {
+      /* pane sizing is cosmetic */
+    }
+  }
+  setRange(chart, candles.length);
 
   await raf();
   await raf();
@@ -402,26 +354,36 @@ async function render(
   ctx.fillStyle = COLORS.background;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  const drawPane = (chart: any, top: number, height: number): void => {
-    const shot = chart.takeScreenshot();
-    ctx.drawImage(shot, 0, 0, shot.width, shot.height, 0, top, WIDTH, height);
-  };
+  const shot = chart.takeScreenshot();
+  ctx.drawImage(shot, 0, 0, shot.width, shot.height, 0, HEADER, WIDTH, CHART_HEIGHT);
   drawHeader(ctx, request, candles);
-  drawPane(main, MAIN_TOP, MAIN_HEIGHT);
-  drawLabel(ctx, "RSI 14", RSI_TOP - 18);
-  drawPane(rsiChart, RSI_TOP, RSI_HEIGHT);
-  drawLabel(ctx, "MACD 12/26/9", MACD_TOP - 18);
-  drawPane(macdChart, MACD_TOP, MACD_HEIGHT);
-  drawFooter(ctx, request);
+  drawFooter(ctx, request, renderedNames);
 
-  ctx.fillStyle = COLORS.border;
-  ctx.fillRect(0, MAIN_TOP + MAIN_HEIGHT, WIDTH, 1);
-  ctx.fillRect(0, RSI_TOP + RSI_HEIGHT, WIDTH, 1);
+  if (oscillatorCount) {
+    const paneHeight = Math.max(64, Math.floor((CHART_HEIGHT - MAIN_PANE_HEIGHT) / oscillatorCount));
+    drawPaneLabel(ctx, request.timeframe.toUpperCase(), HEADER);
+    let top = HEADER + MAIN_PANE_HEIGHT;
+    const selectedEntries = selection
+      .map((item) => findRegistryEntry(item.id))
+      .filter((entry): entry is RegistryEntry => entry !== null && entry.overlay !== true)
+      .slice(0, MAX_OSCILLATORS);
+    for (const entry of selectedEntries) {
+      drawPaneLabel(ctx, entry.shortName || entry.name, top);
+      top += paneHeight;
+    }
+  }
 
-  main.remove();
-  rsiChart.remove();
-  macdChart.remove();
+  chart.remove();
   stage.replaceChildren();
+
+  if (notes.length) {
+    ctx.font = "500 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.fillStyle = COLORS.down;
+    ctx.textAlign = "right";
+    ctx.fillText(`skipped: ${notes.slice(0, 2).join("; ")}`, WIDTH - 14, HEIGHT - FOOTER - 6);
+    ctx.textAlign = "left";
+  }
+
   return { dataUrl: composite.toDataURL("image/png"), width: WIDTH, height: HEIGHT };
 }
 

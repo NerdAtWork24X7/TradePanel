@@ -429,15 +429,25 @@ class SidecarEndToEndTests(unittest.TestCase):
         self.assertIs(loaded["sidebar_collapsed"], True)
         self.assertNotIn("unknown_field", loaded)
 
-    def test_indicator_config_roundtrip(self):
-        config = self.sidecar.rpc("indicator.get_config")["result"]["config"]
-        self.assertIn("fvg", config)
-        config["fvg"]["gap_pct"] = 1.25
-        saved = self.sidecar.rpc("indicator.save_config", {"config": config})["result"]
-        self.assertEqual(saved["config"]["fvg"]["gap_pct"], 1.25)
-        self.assertTrue(
-            (self.data_dir / "data" / "indicator_config.json").exists()
-        )
+    def test_workspace_roundtrip_keeps_indicator_selection(self):
+        store = self.sidecar.rpc("workspace.load")["result"]
+        chart = store["workspaces"][0]["charts"][0]
+        chart["indicators"] = [
+            {"id": "rsi", "inputs": {"length": 21}, "plots": {}, "visible": True},
+            {"id": "../evil", "inputs": {}},
+            {"id": "rsi", "inputs": {"length": 3}},
+        ]
+        self.sidecar.rpc("workspace.save", {"store": {
+            "version": 1,
+            "active": store["active"],
+            "workspaces": store["workspaces"],
+        }})
+        loaded = self.sidecar.rpc("workspace.load")["result"]
+        chart = loaded["workspaces"][0]["charts"][0]
+        # Duplicate ids are separate instances; the invalid id is still dropped.
+        self.assertEqual([item["id"] for item in chart["indicators"]], ["rsi", "rsi"])
+        self.assertEqual(chart["indicators"][0]["inputs"]["length"], 21)
+        self.assertEqual(chart["indicators"][1]["inputs"]["length"], 3)
 
     # ── Credentials / trading safety ──────────────────────────────────────
 

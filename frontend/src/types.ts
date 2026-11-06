@@ -108,32 +108,10 @@ export interface WindowState {
   [key: string]: unknown;
 }
 
-export interface IndicatorConfig {
-  fvg: { gap_pct: number; enabled: boolean };
-  vwap: { anchor_intraday: string; anchor_daily: string; enabled: boolean };
-  sessions: {
-    asian_start: string; asian_end: string;
-    london_start: string; london_end: string;
-    ny_am_start: string; ny_am_end: string;
-    ny_pm_start: string; ny_pm_end: string;
-    asian_enabled: boolean; london_enabled: boolean;
-    ny_am_enabled: boolean; ny_pm_enabled: boolean;
-  };
-  ema_ribbon: { ma_type: string; length1: number; length2: number; length3: number; enabled: boolean };
-  volume_profile: { length: number; rows: number; enabled: boolean };
-  session_vp: { enabled: boolean };
-  hl_ema: { length: number; enabled: boolean };
-  adx: {
-    length: number; pane_height: number; levels: number[];
-    show_di_lines: boolean; enabled: boolean;
-  };
-  lines?: { entry_visible: boolean; tp_visible: boolean; sl_visible: boolean };
-  [key: string]: unknown;
-}
-
-export interface IndicatorConfigResult {
-  ok: boolean;
-  config: IndicatorConfig;
+/** A study enabled on a chart panel, mirrored to the shell for AI analysis. */
+export interface AiChartIndicator {
+  id: string;
+  inputs: Record<string, unknown>;
 }
 
 export interface BackendStatus {
@@ -153,11 +131,6 @@ export interface BackendStatus {
 }
 
 export type Direction = "long" | "short";
-
-export interface IndicatorComputeResult {
-  ok: boolean;
-  [key: string]: unknown;
-}
 
 // ── AI Analysis ────────────────────────────────────────────────────────────
 

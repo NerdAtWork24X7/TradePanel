@@ -273,11 +273,18 @@ function snapshot() {
       missing: [],
     },
     indicators: {
-      available: ["rsi14", "macd", "ema", "bollinger", "atr14", "volume", "levels"],
+      selected: [{ id: "rsi", name: "Relative strength index", overlay: false, inputs: { length: 14 } }],
+      available: ["rsi"],
       unavailable: [],
-      summary: { primaryBias: "up", dailyBias: "up", fourHourBias: "up", alignment: "aligned", rsi14: 58 },
+      summary: { timeframe: "5m", values: [{ id: "rsi", name: "Relative strength index", inputs: { length: 14 }, values: { RSI: 58 } }] },
       perTimeframe: {
-        "5m": { values: { close: 64250.5, rsi14: 58, ema1: 64100, ema2: 63900, ema3: 63000 }, levels: { high20: 64500, low20: 63500 }, trend: { bias: "up", reasons: [] } },
+        "5m": {
+          candles: 300,
+          firstCandleMs: 1700000000000,
+          lastCandleMs: 1700086400000,
+          indicators: [{ id: "rsi", name: "Relative strength index", inputs: { length: 14 }, values: { RSI: 58 } }],
+          levels: { high20: 64500, low20: 63500, high50: 65000, low50: 63000, pivotHighs: [64500], pivotLows: [63500] },
+        },
       },
       levels: { high20: 64500, low20: 63500, high50: 65000, low50: 63000, pivotHighs: [64500], pivotLows: [63500] },
     },

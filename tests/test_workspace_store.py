@@ -54,7 +54,11 @@ class StoreTests(unittest.TestCase):
                      "symbol": "eth/usdt", "timeframe": "1h", "chartType": "hollow",
                      "priceScaleMode": "percentage", "referenceMode": "custom",
                      "referenceTime": 1700000000, "groupId": "g1",
-                     "indicators": {"rsi": {"enabled": True, "length": 9}},
+                     "indicators": [
+                         {"id": "rsi", "inputs": {"length": 9},
+                          "plots": {"plot0": {"color": "#ff0000", "lineWidth": 2}},
+                          "visible": True},
+                     ],
                      "drawings": [{"tool": "trend", "points": [
                          {"time": 1700000000, "price": 100},
                          {"time": 1700003600, "price": 110}]}]},
@@ -76,7 +80,10 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(chart["priceScaleMode"], "percentage")
         self.assertEqual(chart["referenceMode"], "custom")
         self.assertEqual(chart["referenceTime"], 1700000000)
-        self.assertEqual(chart["indicators"]["rsi"]["length"], 9)
+        self.assertEqual(chart["indicators"][0]["id"], "rsi")
+        self.assertEqual(chart["indicators"][0]["inputs"]["length"], 9)
+        self.assertEqual(chart["indicators"][0]["plots"]["plot0"]["color"], "#ff0000")
+        self.assertTrue(chart["showVolume"])
         self.assertEqual(len(chart["drawings"]), 1)
         self.assertFalse(loaded["workspaces"][0]["syncGroups"][0]["settings"]["crosshair"])
 
@@ -89,8 +96,12 @@ class StoreTests(unittest.TestCase):
                     {"id": "a", "exchange": "evil", "market": "perp",
                      "symbol": "  btc/usdt ", "timeframe": "7m",
                      "chartType": "candle", "groupId": "nope",
-                     "indicators": {"rsi": {"enabled": True, "length": 9999},
-                                    "macd": {"enabled": 1}}},
+                     "indicators": [
+                         {"id": "rsi", "inputs": {"length": 9999}, "visible": False},
+                         {"id": "rsi", "inputs": {"length": 3}},
+                         {"id": "../evil", "inputs": {}},
+                         {"id": "macd", "inputs": {"fastLength": "12", "slowLength": True}},
+                     ]},
                     {"id": "a", "exchange": "binance", "symbol": "ETH/USDT",
                      "timeframe": "1h"},
                     "junk",
@@ -111,8 +122,12 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(chart["timeframe"], "5m")
         self.assertEqual(chart["chartType"], "candlestick")
         self.assertIsNone(chart["groupId"])
-        self.assertEqual(chart["indicators"]["rsi"]["length"], 500)
-        self.assertFalse(chart["indicators"]["macd"]["enabled"])
+        self.assertEqual([item["id"] for item in chart["indicators"]], ["rsi", "rsi", "macd"])
+        self.assertEqual(chart["indicators"][0]["inputs"]["length"], 9999)
+        self.assertFalse(chart["indicators"][0]["visible"])
+        self.assertEqual(chart["indicators"][1]["inputs"]["length"], 3)
+        self.assertEqual(chart["indicators"][2]["inputs"]["fastLength"], "12")
+        self.assertTrue(chart["indicators"][2]["inputs"]["slowLength"])
         self.assertEqual(len(workspace["syncGroups"]), 1)
         for tracks in (workspace["columns"], workspace["rows"]):
             self.assertAlmostEqual(sum(tracks), 1.0, places=5)
@@ -216,15 +231,11 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(fib["visibility"]["ranges"][0]["to"], 5)
         self.assertEqual(len(drawings[1]["points"]), ws.MAX_DRAWING_POINTS)
 
-    def test_indicator_defaults_are_complete(self):
+    def test_new_charts_start_without_studies(self):
         store = ws.default_store()
-        indicators = store["workspaces"][0]["charts"][0]["indicators"]
-        self.assertEqual(set(indicators), set(ws.DEFAULT_INDICATORS))
-        for key, conf in indicators.items():
-            self.assertIn("enabled", conf)
-            for param in ws.DEFAULT_INDICATORS[key]:
-                if param != "enabled":
-                    self.assertIn(param, conf)
+        chart = store["workspaces"][0]["charts"][0]
+        self.assertEqual(chart["indicators"], [])
+        self.assertTrue(chart["showVolume"])
 
     def test_atomic_write_leaves_no_temp_file(self):
         ws.save_store(ws.default_store())

@@ -13,12 +13,11 @@ import * as shell from "../services/shell";
 import { ChartSnapshotHost, type SnapshotImage } from "../lib/chart-snapshot";
 import { markdownToHtml, messageText } from "../lib/markdown";
 import {
-  DEFAULT_EMA_CONFIG,
-  analyzeTimeframe,
-  indicatorAvailability,
-  type EmaConfig,
-  type TimeframeAnalysis,
-} from "../lib/technical";
+  computeIndicatorSelection,
+  type ComputedIndicator,
+  type IndicatorSelection,
+} from "../lib/indicator-kit";
+import { computeLevels } from "../lib/market-levels";
 import { toast } from "./toast";
 import type {
   AiAuthCredential,
@@ -35,7 +34,6 @@ import type {
   AiStatus,
   AiTradePlan,
   Candle,
-  IndicatorConfig,
   Position,
   UnknownRecord,
 } from "../types";
@@ -60,11 +58,12 @@ export interface AiTicket {
 export interface AiPanelHandlers {
   focus(): AiFocus | null;
   ticket(): AiTicket;
-  indicatorConfig(): IndicatorConfig | null;
   precision(coin: string): Promise<number | null>;
   applyPlan(plan: AiTradePlan): void;
   showPlanOnChart(plan: AiTradePlan, focus: AiFocus | null): void;
   openSettings(tab?: "ai"): void;
+  /** Studies enabled on the focused chart (the AI's indicator set). */
+  chartIndicators(): IndicatorSelection[];
   closeSettings(): void;
   log(message: string): void;
 }
@@ -351,7 +350,7 @@ export class AiPanel {
     } else {
       this.emptyTitle.textContent = "Start a read-only analysis";
       this.emptyText.textContent =
-        "TradePanel renders 1d, 4h and 5m charts with indicators and sends them to Pi with a compact snapshot. Only Start analysis begins a run.";
+        "TradePanel renders 1d, 4h and 5m charts with the focused chart's indicators and sends them to Pi with a compact snapshot. Only Start analysis begins a run.";
     }
     this.updateControls();
     this.renderComposeHint();
@@ -585,14 +584,7 @@ export class AiPanel {
     }
     const primaryTimeframe = candlesByTimeframe["5m"] ? "5m" : availableTimeframes[0];
     const primaryCandles = candlesByTimeframe[primaryTimeframe] as Candle[];
-    const ema = this.emaConfig();
-    const analyses: TimeframeAnalysis[] = availableTimeframes.map((timeframe) =>
-      analyzeTimeframe(timeframe, candlesByTimeframe[timeframe] as Candle[], ema),
-    );
-    const primary = analyses.find((analysis) => analysis.timeframe === primaryTimeframe) as TimeframeAnalysis;
-    const daily = analyses.find((analysis) => analysis.timeframe === "1d");
-    const fourHour = analyses.find((analysis) => analysis.timeframe === "4h");
-    const close = lastCandle(primaryCandles)?.close ?? primary.values.close;
+    const close = lastCandle(primaryCandles)?.close ?? 0;
     const dailyCandles = candlesByTimeframe["1d"];
     const change24h =
       dailyCandles && dailyCandles.length >= 2 && dailyCandles[dailyCandles.length - 2].close !== 0
@@ -600,7 +592,38 @@ export class AiPanel {
             dailyCandles[dailyCandles.length - 2].close) *
           100
         : null;
-    const availability = indicatorAvailability(analyses);
+
+    // The studies enabled on the focused chart are the AI's indicator set:
+    // one definition, no second picker to keep in sync.
+    const selection = this.handlers.chartIndicators();
+    const computations = await Promise.all(
+      availableTimeframes.map((timeframe) =>
+        computeIndicatorSelection(selection, candlesByTimeframe[timeframe] as Candle[]),
+      ),
+    );
+    const computationByTimeframe = new Map(
+      availableTimeframes.map((timeframe, index) => [timeframe, computations[index]] as const),
+    );
+    const nameById = new Map<string, string>();
+    const overlayById = new Map<string, boolean>();
+    for (const computation of computations) {
+      for (const indicator of computation.indicators) {
+        nameById.set(indicator.id, indicator.name);
+        overlayById.set(indicator.id, indicator.overlay);
+      }
+    }
+    const unavailable = computations.flatMap((computation, index) =>
+      computation.unavailable.map((message) => `${availableTimeframes[index]}: ${message}`),
+    );
+    const selected = selection.map((item) => ({
+      id: item.id,
+      name: nameById.get(item.id) ?? item.id,
+      overlay: overlayById.get(item.id) ?? null,
+      inputs: item.inputs,
+    }));
+    const selectedLabels = selected.map((item) => item.name).join(", ");
+    const oscillatorCount = selected.filter((item) => item.overlay === false).length;
+
     const ticket = this.handlers.ticket();
     const levels = {
       entry: numberValue(ticket.limit),
@@ -622,7 +645,7 @@ export class AiPanel {
         price: close,
         change24h,
         levels,
-        ema,
+        indicators: selection,
         capturedAtMs,
       }));
       const host = new ChartSnapshotHost();
@@ -637,20 +660,33 @@ export class AiPanel {
       }
     }
 
+    const summarise = (indicator: ComputedIndicator): UnknownRecord => {
+      const values: UnknownRecord = {};
+      for (const plot of Object.keys(indicator.values)) {
+        values[indicator.titles[plot] ?? plot] = indicator.values[plot];
+      }
+      return {
+        id: indicator.id,
+        name: indicator.name,
+        inputs: indicator.inputs,
+        values,
+      };
+    };
+
     const perTimeframe: UnknownRecord = {};
-    for (const analysis of analyses) {
-      const candles = candlesByTimeframe[
-        analysis.timeframe as (typeof ANALYSIS_TIMEFRAMES)[number]
-      ] as Candle[];
-      perTimeframe[analysis.timeframe] = {
-        candles: analysis.candles,
+    for (const timeframe of availableTimeframes) {
+      const candles = candlesByTimeframe[timeframe] as Candle[];
+      const computation = computationByTimeframe.get(timeframe);
+      perTimeframe[timeframe] = {
+        candles: candles.length,
         firstCandleMs: candles.length ? Math.floor(candles[0].time * 1000) : null,
         lastCandleMs: candles.length ? Math.floor(candles[candles.length - 1].time * 1000) : null,
-        values: analysis.values,
-        levels: analysis.levels,
-        trend: analysis.trend,
+        indicators: computation ? computation.indicators.map(summarise) : [],
+        levels: computeLevels(candles),
       };
     }
+    const primaryLevels = computeLevels(primaryCandles);
+    const primaryIndicators = computationByTimeframe.get(primaryTimeframe)?.indicators ?? [];
 
     const snapshot: UnknownRecord = {
       version: 1,
@@ -681,31 +717,21 @@ export class AiPanel {
           height: image.height,
         })),
         missing: failures,
-        note: "Screenshots include EMA ribbon, Bollinger 20/2, volume, RSI 14 and MACD 12/26/9.",
+        note: selected.length
+          ? `Screenshots include ${selectedLabels} and volume; ${Math.min(oscillatorCount, 3)} of ${oscillatorCount} oscillator panes are rendered.`
+          : "Screenshots include price and volume only; the focused chart has no indicators.",
       },
       indicators: {
-        available: availability.available,
-        unavailable: availability.unavailable,
+        selected,
+        available: Array.from(new Set(computations.flatMap((computation) =>
+          computation.indicators.map((indicator) => indicator.id)))),
+        unavailable,
         summary: {
-          primaryBias: primary.trend.bias,
-          dailyBias: daily?.trend.bias ?? "unknown",
-          fourHourBias: fourHour?.trend.bias ?? "unknown",
-          alignment:
-            daily && fourHour
-              ? daily.trend.bias === fourHour.trend.bias
-                ? "aligned"
-                : "conflicting"
-              : "unknown",
-          rsi14: primary.values.rsi14,
-          atrPct: primary.values.atrPct,
-          volumeRatio: primary.values.volumeRatio,
-          ema1: primary.values.ema1,
-          ema2: primary.values.ema2,
-          ema3: primary.values.ema3,
-          reasons: primary.trend.reasons,
+          timeframe: primaryTimeframe,
+          values: primaryIndicators.map(summarise),
         },
         perTimeframe,
-        levels: primary.levels,
+        levels: primaryLevels,
       },
       portfolio,
       ticket: {
@@ -719,18 +745,6 @@ export class AiPanel {
       },
     };
     return { snapshot, images, failures };
-  }
-
-  private emaConfig(): EmaConfig {
-    const ribbon = this.handlers.indicatorConfig()?.ema_ribbon;
-    if (!ribbon) return DEFAULT_EMA_CONFIG;
-    const type = String(ribbon.ma_type ?? "ema").toLowerCase() === "sma" ? "sma" : "ema";
-    return {
-      length1: Number(ribbon.length1) || DEFAULT_EMA_CONFIG.length1,
-      length2: Number(ribbon.length2) || DEFAULT_EMA_CONFIG.length2,
-      length3: Number(ribbon.length3) || DEFAULT_EMA_CONFIG.length3,
-      maType: type,
-    };
   }
 
   private async buildPortfolio(focus: AiFocus, enabled: boolean): Promise<UnknownRecord> {

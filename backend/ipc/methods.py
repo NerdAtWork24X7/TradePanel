@@ -1,8 +1,8 @@
 """JSON-RPC method registry for the TradePanel sidecar.
 
-Every method maps onto existing ``Core`` / ``Indicator`` / ``Exchange``
-functionality. No trading behaviour is re-implemented here; the handlers are
-thin, validating adapters (see ``Core/trading_service.py``).
+Every method maps onto existing ``Core`` / ``Exchange`` functionality. No
+trading behaviour is re-implemented here; the handlers are thin, validating
+adapters (see ``Core/trading_service.py``).
 """
 
 from __future__ import annotations
@@ -23,10 +23,8 @@ from backend.Core import (
     market_data,
     trading_service,
     window_state,
-    workspace_indicators,
     workspace_store,
 )
-from backend.Indicator import config as indicator_config
 
 from .credentials import CredentialStore
 from .protocol import (
@@ -222,25 +220,6 @@ def _search_symbols(params: dict, ctx: Context) -> dict:
     return {"ok": True, "symbols": market_data.search_symbols(exchange, market, query)}
 
 
-def _indicator_get(params: dict, ctx: Context) -> dict:
-    return {"ok": True, "config": indicator_config.load_indicator_config()}
-
-
-def _indicator_save(params: dict, ctx: Context) -> dict:
-    cfg = _object(params, "config")
-    indicator_config.save_indicator_config(cfg)
-    workspace_indicators.clear_cache()
-    return {"ok": True, "config": indicator_config.load_indicator_config()}
-
-
-def _indicator_compute(params: dict, ctx: Context) -> dict:
-    exchange, market, symbol, timeframe = _instrument(params)
-    flags = _object(params, "flags", required=False)
-    return workspace_indicators.compute_workspace_indicators(
-        exchange, market, symbol, timeframe, flags
-    )
-
-
 def _workspace_load(params: dict, ctx: Context) -> dict:
     with ctx.state_lock:
         store = workspace_store.load_store()
@@ -346,9 +325,6 @@ METHODS: dict[str, MethodSpec] = {
     "market.get_candles": MethodSpec(_get_candles),
     "market.get_tick": MethodSpec(_get_tick),
     "market.search_symbols": MethodSpec(_search_symbols),
-    "indicator.get_config": MethodSpec(_indicator_get),
-    "indicator.save_config": MethodSpec(_indicator_save),
-    "indicator.compute": MethodSpec(_indicator_compute),
     "workspace.load": MethodSpec(_workspace_load),
     "workspace.save": MethodSpec(_workspace_save),
     "account.position": MethodSpec(_account_position),

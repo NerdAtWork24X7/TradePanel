@@ -5,7 +5,6 @@ Override via environment variables where noted.
 """
 
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -39,20 +38,6 @@ _data_override = os.environ.get("TRADEPANEL_DATA_DIR")
 DATA_DIR = Path(_data_override).expanduser() if _data_override else ROOT_DIR / "data"
 COINS_FILE = DATA_DIR / "coins.json"
 
-
-_SAFE_TF_RE = re.compile(r"^[A-Za-z0-9]+$")
-
-
-def candles_db_path(timeframe: str) -> Path:
-    """Return the per-timeframe database path.
-
-    e.g. data/candles_5m.db, data/candles_1m.db
-
-    The timeframe is validated to prevent path traversal / injection.
-    """
-    if not isinstance(timeframe, str) or not _SAFE_TF_RE.fullmatch(timeframe):
-        raise ValueError(f"Invalid timeframe: {timeframe!r}")
-    return DATA_DIR / f"candles_{timeframe}.db"
 
 # ── Trading defaults ─────────────────────────────────────────────────────────
 TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"]

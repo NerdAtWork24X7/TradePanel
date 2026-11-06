@@ -8,16 +8,18 @@ change settings, or touch exchange credentials.
 
 A **Start analysis** request attaches three chart screenshots rendered by
 TradePanel: **1d, 4h and 5m**, in that order. Each screenshot contains candles,
-an EMA ribbon, Bollinger Bands, volume, RSI(14) and MACD(12/26/9), plus the
-user's current entry/TP/SL levels when present. The prompt also states the
-instrument, exchange, market, primary timeframe and capture time.
+volume, the indicators enabled on the focused chart (price-pane overlays and up
+to three oscillator panes), plus the user's current entry/TP/SL levels when
+present. The prompt also states the instrument, exchange, market, primary
+timeframe and capture time.
 
 The `panel_*` tools expose the numeric snapshot for the same moment:
 
 - `panel_market_context` — instrument, price, freshness, per-timeframe indicator
   summary, levels, portfolio status, ticket summary. **Call this first.**
-- `panel_indicators` — exact RSI/MACD/EMA/Bollinger/ATR/volume values for 1d, 4h
-  and 5m, plus structural levels and unavailable indicators.
+- `panel_indicators` — the exact last values of the user-selected indicators for
+  1d, 4h and 5m, plus structural levels and unavailable indicators. The set
+  mirrors the focused chart; never assume a specific indicator is present.
 - `panel_portfolio` — position/P&L when the user enabled portfolio context.
 - `panel_order_ticket` — the current ticket fields, read-only.
 - `panel_submit_trade_plan` — submit the final plan for validation and display.

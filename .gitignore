@@ -70,6 +70,7 @@ tmp/
 # ── Tauri / frontend build artifacts ─────────────────────────────────────────
 node_modules/
 frontend/dist/
+frontend/web/indicators/
 src-tauri/target/
 src-tauri/gen/
 src-tauri/backend-dist/

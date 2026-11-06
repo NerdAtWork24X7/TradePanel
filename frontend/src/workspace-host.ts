@@ -1,16 +1,21 @@
 import * as marketData from "./services/market-data";
-import * as indicators from "./services/indicators";
 import * as workspace from "./services/workspace";
 import * as credentials from "./services/credentials";
 import { RpcError } from "./services/backend";
-import type { IndicatorComputeResult, UnknownRecord } from "./types";
+import type { AiChartIndicator, UnknownRecord } from "./types";
 
 type Envelope =
   | { __ws: 1; type: "rpc"; id: number; method: string; args: unknown[] }
   | { __ws: 1; type: "event"; event: string; payload: unknown[] };
 
 export interface WorkspaceHandlers {
-  focusedChart(symbol: string, exchange: string, market: string, timeframe: string): void;
+  focusedChart(
+    symbol: string,
+    exchange: string,
+    market: string,
+    timeframe: string,
+    indicators: AiChartIndicator[],
+  ): void;
   positionDrawing(direction: string, entry: number, tp: number, sl: number): void;
   tradeOverlay(ok: boolean, message: string): void;
   configRequested(): void;
@@ -47,6 +52,31 @@ function asString(value: unknown): string {
 function asNumber(value: unknown): number {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
+}
+
+/** `[{id, inputs}]` from the workspace; malformed entries are dropped. */
+function asIndicatorList(value: unknown): AiChartIndicator[] {
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: AiChartIndicator[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as UnknownRecord;
+    const id = typeof record.id === "string" ? record.id : "";
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(id)) continue;
+    const inputs = record.inputs && typeof record.inputs === "object" && !Array.isArray(record.inputs)
+      ? (record.inputs as Record<string, unknown>)
+      : {};
+    out.push({ id, inputs });
+  }
+  return out;
 }
 
 /**
@@ -139,10 +169,6 @@ export class WorkspaceHost {
     this.send("overlayTrade", [trade]);
   }
 
-  setIndicatorConfig(config: UnknownRecord): void {
-    this.send("setIndicatorConfig", [config]);
-  }
-
   setActive(active: boolean): void {
     this.send("setActive", [active]);
   }
@@ -183,6 +209,7 @@ export class WorkspaceHost {
         this.handlers.focusedChart(
           asString(payload[0]), asString(payload[1]),
           asString(payload[2]), asString(payload[3]),
+          asIndicatorList(payload[4]),
         );
         break;
       case "positionDrawing":
@@ -252,8 +279,6 @@ export class WorkspaceHost {
         const raw = JSON.parse(asString(args[0]));
         return workspace.saveWorkspaceStore(raw as UnknownRecord);
       }
-      case "indicatorConfig":
-        return { ok: true, config: await indicators.getIndicatorConfig() };
       case "requestCandles":
         return marketData.getCandles(
           asString(args[0]), asString(args[1]), asString(args[2]),
@@ -264,12 +289,6 @@ export class WorkspaceHost {
         return marketData.getTick(
           asString(args[0]), asString(args[1]), asString(args[2]), asString(args[3]),
         );
-      case "requestIndicators": {
-        const flags = JSON.parse(asString(args[4]) || "{}") as UnknownRecord;
-        return indicators.computeIndicators(
-          asString(args[0]), asString(args[1]), asString(args[2]), asString(args[3]), flags,
-        ) as Promise<IndicatorComputeResult>;
-      }
       case "searchSymbols": {
         const symbols = await marketData.searchSymbols(
           asString(args[0]), asString(args[1]), asString(args[2]),

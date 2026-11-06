@@ -1,3 +1,85 @@
+## 2026-11-06 — Indicator engine: lightweight-charts-indicators + OpenTrader study UX
+
+- **Studies vanished after a restart — stale sidecar.** The staged PyInstaller
+  sidecar (`src-tauri/backend-dist/`, built 2026-11-05 19:07, still bundling
+  pandas/pandas_ta/numba) predated the list-based indicator schema. Its
+  `workspace_store._indicators()` rewrote every chart's study list into the
+  legacy `{"sma": {...}}` flag dict on save, and the workspace then dropped the
+  non-array payload on the next start — the user's
+  `~/.local/share/com.nerdatwork.tradepanel/data/workspaces.json` still shows the
+  old dict shape. `backend/scripts/dev.sh` reused any sidecar that merely
+  *existed*, so backend changes never reached the running app.
+  - `dev.sh` now rebuilds when any `backend/**/*.py|*.spec|*.txt` is newer than
+    the staged binary (build dirs excluded), instead of only when it is missing.
+  - `workspace.js saveNow()` compares the study count the backend echoes back
+    with what it sent: on a shortfall it keeps the user's studies in memory and
+    shows “the Python sidecar is out of date — rebuild it”, instead of letting
+    them disappear silently on the next launch.
+  - Sidecar rebuilt: no pandas/numba in `_internal`, 65 MB one-folder bundle;
+    `workspace.save` → `workspace.load` through the packaged binary now keeps
+    `[{id, inputs, plots, visible}]` including repeated ids and plot colours.
+- **Repeatable studies.** The same indicator can be added several times, each
+  with independent inputs and styles (two VWAPs: Session + Weekly; RSI 14 and
+  RSI 50). Instances are addressed by list position, not by id:
+  `chartIndicatorAt(entry, index)` / `runtime.index`; legend, settings, eye and
+  remove act on that instance. A new copy takes the first unused palette colour
+  so duplicates do not stack invisibly. `MAX_CHART_INDICATORS` (20) still caps
+  the total, and persisted stores round-trip repeated ids
+  (`backend/Core/workspace_store.py::_indicators` no longer dedupes).
+  The settings dialog title numbers the copy (“… settings · 2/3”) and the picker
+  shows `Add · N` with a click-to-add-another tooltip.
+- **Study dialog dismissal now rolls back.** The Inputs/Style tabs preview live
+  by mutating the chart config. Closing with the header **×**, Escape or the
+  backdrop used to leave that preview in memory without a save — the change
+  looked applied, then vanished on restart. `closeModal()` now runs an
+  `onClose` hook; the settings dialog restores the pre-dialog config (and
+  persists the rollback) unless Apply/Cancel already settled it.
+- **All hand-written indicators removed.** Deleted `backend/Indicator/` (FVG, VWAP,
+  sessions, EMA ribbon, high/low EMA, volume profile, ADX, config), the
+  `Core/workspace_indicators.py` bridge, the inline workspace math
+  (SMA/EMA/BB/VWAP/RSI/MACD/ATR) and the AI `lib/technical.ts` indicator math.
+  The Python sidecar no longer ships pandas/pandas_ta/numba; `indicator.*` RPC
+  methods and the global indicator config are gone.
+- **New engine**: `lightweight-charts-indicators@0.19.3` (Lightweight Charts 5.2.1,
+  `oakscriptjs` 0.15) — 117 standard studies, 1,707 community scripts and 45
+  candlestick patterns. `frontend/scripts/build-indicators.mjs` emits a lazy
+  ~10 MB IIFE (`web/indicators/engine.js`) plus a 120 kB browse catalog;
+  `npm run dev|build` rebuilds both automatically.
+- **OpenTrader-style study UX**:
+  - searchable picker (Technical / Community / Patterns, category headers,
+    `Enter` adds a unique match, 20 studies per chart);
+  - one legend row per pane with eye (hide keeps settings), title, live/crosshair
+    value, gear and a red **×** that removes the study from the chart;
+  - Inputs / Style / Visibility dialog with live preview and Cancel/Apply
+    (per-plot colour, width and visibility included);
+  - oscillator panes are native Lightweight Charts panes (3:1 stretch), with
+    resize-aware legends; live ticks reuse series; percentage/indexed modes
+    recompute on the transformed bars.
+- **AI analysis follows the focused chart**: the workspace mirrors its visible
+  studies (id + inputs) to the shell on focus/hide/remove/apply. Screenshots render
+  those studies (overlays + up to three oscillator panes) and
+  `panel_indicators` returns their per-timeframe values; there is no separate AI
+  indicator picker.
+- **Persistence**: chart config now stores
+  `indicators: [{id, inputs, plots, visible}]` and `showVolume`; legacy dict
+  payloads migrate to an empty list (volume flag carried over). New
+  `analysis_config`-style state was dropped in favour of the chart list.
+- **Chart-context fixes** (`workspace.js` → `indicatorChartContext`):
+  - the context timeframe now uses the engine's period grammar — `15m` → `15`,
+    `4h` → `240`, `1d` → `1D`, `1w` → `1W`, `1M` → `1M`. Passing the exchange
+    grammar made every `pe.info(timeframe)` lookup throw `Invalid timeframe`,
+    so market-anchored studies (standard **VWAP**, VWAP MTF, AVWAP, VWAP stdev
+    bands) failed on 12 of the 13 workspace intervals.
+  - `leftVisibleBarTime` / `rightVisibleBarTime` are sent in **ms**
+    (`range.from * 1000`), as the engine compares them against `bar.time * 1000`.
+    Seconds put the window in 1970, so visible-range studies (Gann box, S/R
+    classification, VAP, volume profiles) drew nothing or fell back to history.
+- **Native control theming** (`workspace.html`): `:root` declares
+  `color-scheme: dark` (the light block already overrode it) and the select
+  `option` rule now applies to every dropdown, not only `.ws-select`. UA-painted
+  popups in the indicator settings dialog follow the dark palette instead of the
+  platform light/GTK one.
+
 ## 2026-11-06 — OpenTrader chart chrome + shared icon set
 
 - **Neutral chart workspace**: the multi-chart iframe now uses the

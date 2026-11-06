@@ -1,15 +1,15 @@
 /**
  * Full-page settings, shaped like Pi Scope's settings surface: a section rail
- * on the left and one scrollable tab at a time. The AI tab reuses the Pi
- * connection view that lives beside the analysis panel; the other tabs are
- * built from the existing indicator/credential/update form.
+ * on the left and one scrollable tab at a time. The AI tab hosts the Pi
+ * connection view and the AI analysis indicator selection; the other tabs are
+ * built from the credential/update form.
  */
 import { toast } from "./toast";
 import { buildSettingsContent, type SettingsContext } from "./settings";
 import { iconSpan } from "../lib/icons";
 import type { AiPanel } from "./ai-panel";
 
-export type SettingsTab = "indicators" | "credentials" | "ai" | "updates";
+export type SettingsTab = "credentials" | "ai" | "updates";
 
 interface TabDef {
   id: SettingsTab;
@@ -19,9 +19,8 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
-  { id: "indicators", label: "Indicators", hint: "EMA ribbon, VWAP, FVG, sessions", icon: "header-indicators-metrics-and-strategies" },
-  { id: "credentials", label: "Credentials", hint: "Hyperliquid API keys", icon: "dt-cm-lock" },
   { id: "ai", label: "AI Analysis", hint: "Pi sign-in and model", icon: "ai-sparkle" },
+  { id: "credentials", label: "Credentials", hint: "Hyperliquid API keys", icon: "dt-cm-lock" },
   { id: "updates", label: "Updates", hint: "Signed release channel", icon: "update-app-download" },
 ];
 
@@ -30,7 +29,7 @@ let nav: HTMLElement | null = null;
 let aiPanelRef: AiPanel | null = null;
 let previousFocus: HTMLElement | null = null;
 let built = false;
-let activeTab: SettingsTab = "indicators";
+let activeTab: SettingsTab = "ai";
 let onKey: ((event: KeyboardEvent) => void) | null = null;
 
 function must<T extends HTMLElement>(id: string): T {
@@ -92,7 +91,7 @@ function setTab(tab: SettingsTab): void {
 export async function openSettingsPage(
   ctx: SettingsContext,
   aiPanel: AiPanel,
-  tab: SettingsTab = "indicators",
+  tab: SettingsTab = "ai",
 ): Promise<void> {
   ensureShell();
   aiPanelRef = aiPanel;
@@ -100,7 +99,6 @@ export async function openSettingsPage(
   if (!built) {
     try {
       const settings = await buildSettingsContent(ctx);
-      must<HTMLElement>("settings-tab-indicators").replaceChildren(settings.indicators);
       must<HTMLElement>("settings-tab-credentials").replaceChildren(settings.credentials);
       must<HTMLElement>("settings-tab-updates").replaceChildren(settings.updates);
       built = true;
@@ -121,8 +119,8 @@ export function closeSettingsPage(): void {
   if (!panel) return;
   panel.hidden = true;
   document.body.classList.remove("settings-open");
-  built = false; // rebuild credentials/indicator values next time
-  activeTab = "indicators";
+  built = false; // rebuild credentials and update state next time
+  activeTab = "ai";
   previousFocus?.focus?.();
   previousFocus = null;
 }

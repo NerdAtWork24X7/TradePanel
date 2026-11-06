@@ -6,7 +6,7 @@
  * raw base64 that the Rust host attaches to the Pi prompt as an image.
  */
 import type { Candle } from "../types";
-import type { EmaConfig } from "./technical";
+import type { IndicatorSelection } from "./indicator-kit";
 
 export interface SnapshotChartInput {
   symbol: string;
@@ -17,7 +17,7 @@ export interface SnapshotChartInput {
   price: number | null;
   change24h: number | null;
   levels: { entry?: number | null; takeProfit?: number | null; stopLoss?: number | null };
-  ema: EmaConfig;
+  indicators: IndicatorSelection[];
   capturedAtMs: number;
 }
 

@@ -98,7 +98,6 @@
         meta: function (cb) { call('meta', [], cb); },
         loadStore: function (cb) { call('loadStore', [], cb); },
         saveStore: function (payload, cb) { call('saveStore', [payload], cb); },
-        indicatorConfig: function (cb) { call('indicatorConfig', [], cb); },
         credentialStatus: function (cb) { call('credentialStatus', [], cb); },
         saveCredentials: function (payload, cb) { call('saveCredentials', [payload], cb); },
 
@@ -108,9 +107,6 @@
         },
         requestTick: function (reqId, exchange, market, symbol, timeframe) {
             call('requestTick', [exchange, market, symbol, timeframe], null, reqId);
-        },
-        requestIndicators: function (reqId, exchange, market, symbol, timeframe, flagsJson) {
-            call('requestIndicators', [exchange, market, symbol, timeframe, flagsJson], null, reqId);
         },
         searchSymbols: function (reqId, exchange, market, query) {
             call('searchSymbols', [exchange, market, query], null, reqId);
@@ -123,8 +119,8 @@
         onTradeOverlayResult: function (ok, message) {
             emit('tradeOverlay', [!!ok, String(message || '')]);
         },
-        onFocusedChartChanged: function (symbol, exchange, market, timeframe) {
-            emit('focusedChart', [symbol, exchange, market, timeframe]);
+        onFocusedChartChanged: function (symbol, exchange, market, timeframe, indicatorsJson) {
+            emit('focusedChart', [symbol, exchange, market, timeframe, String(indicatorsJson || '[]')]);
         },
         onConfigRequested: function () {
             emit('configRequested', []);

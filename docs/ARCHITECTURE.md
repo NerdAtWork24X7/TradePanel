@@ -36,9 +36,9 @@
 | Desktop shell | `src-tauri/src` | window lifecycle, process supervision, IPC validation, credential store, updates, OS integration |
 | Shell UI | `frontend/src` | typed services, toolbar/trade ticket, settings/credentials dialogs, connection state |
 | Workspace adapter | `frontend/web/tauri_bridge.js` | exposes the existing QWebChannel contract over `postMessage` |
-| Chart workspace | `frontend/web/*` | charts, layouts, sync, drawings, indicators, workspace persistence (unchanged logic) |
+| Chart workspace | `frontend/web/*` | charts, layouts, sync, drawings, indicator rendering (lightweight-charts-indicators), workspace persistence |
 | Sidecar | `backend/` | JSON-RPC server, method registry, credential mirror, shutdown drain |
-| Trading core | `backend/Core/`, `backend/Indicator/`, `backend/Exchange/` | market data, indicators, persistence, Hyperliquid execution |
+| Trading core | `backend/Core/`, `backend/Exchange/` | market data, persistence, Hyperliquid execution |
 
 ## 3. Startup sequence
 
@@ -49,12 +49,13 @@
 3. `system.hello` handshake (protocol 1). Mismatch ⇒ status `incompatible`, process killed,
    automatic restart disabled.
 4. Status events (`backend:status`) drive the shell UI:
-   running ⇒ load coins, market metadata, window state, indicator config, then load the
+   running ⇒ load coins, market metadata and window state, then load the
    workspace iframe. Non-running ⇒ trading controls disabled, banner shown, no order can
    be sent (`backend_rpc` rejects when the sidecar is not ready).
 5. The workspace boots exactly as it did under Qt: `Bridge.connect` → `meta` →
-   `loadStore` → `indicatorConfig` → render. `tauri_bridge.js` supplies the bridge.
-6. The workspace reports `ready`; the shell pushes the global indicator config.
+   `loadStore` → render. `tauri_bridge.js` supplies the bridge.
+6. The workspace reports `ready`; its active studies are mirrored to the shell
+   with each focus/visibility/input change and drive AI analysis.
 
 ## 4. Request flow examples
 
@@ -87,8 +88,8 @@ implements `window.__WS_STUB__`, the hook that already existed for tests:
 
 | QWebChannel method | Host mapping |
 |---|---|
-| `meta`, `loadStore`, `saveStore`, `indicatorConfig` | `market.meta`, `workspace.load/save`, `indicator.get_config` |
-| `requestCandles`, `requestTick`, `requestIndicators`, `searchSymbols` | `market.get_candles/get_tick`, `indicator.compute`, `market.search_symbols` |
+| `meta`, `loadStore`, `saveStore` | `market.meta`, `workspace.load/save` |
+| `requestCandles`, `requestTick`, `searchSymbols` | `market.get_candles/get_tick`, `market.search_symbols` |
 | `credentialStatus`, `saveCredentials` | Rust keyring commands (never Python, never a file) |
 | `onPositionDrawingChanged`, `onFocusedChartChanged`, `onConfigRequested`, `toggleTopBar` | shell events |
 | `WS.setFocusedCoin/Timeframe`, `centerFocused`, `setIndicatorConfig`, `setActive`, `shutdown` | host → iframe commands |
@@ -100,9 +101,9 @@ imports and no network requests.
 
 | Data | Location | Format |
 |---|---|---|
-| Coins, window state, indicator config | `<app-data>/data/` | existing JSON schemas |
+| Coins, window state | `<app-data>/data/` | existing JSON schemas |
 | Workspaces (layouts, charts, drawings) | `<app-data>/data/workspaces.json` | schema v1, validated and atomic |
-| Legacy candle cache | `<app-data>/data/candles_<tf>.db` | written by the pre-Tauri app, imported copy-only; the sidecar only reads it as an indicator fallback |
+| Legacy candle cache | `<app-data>/data/candles_<tf>.db` | written by the pre-Tauri app, imported copy-only and no longer read (indicator math runs in the WebView) |
 | Order-uncertain marker | `<app-data>/data/trading_state.json` | `{"uncertain": bool}` |
 | Secrets | OS credential store | service `TradePanel`, account = env key |
 | Logs | OS log dir (plus stderr) | `tradepanel.log` |

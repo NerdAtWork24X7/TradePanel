@@ -1,9 +1,11 @@
 # TradePanel — Crypto Trading Terminal
 
 A desktop trading panel for Hyperliquid with a synchronized, multi-exchange chart
-workspace. The desktop shell is **Tauri 2** (Rust); the trading engine, exchange
-integrations, indicators and chart workspace are the existing Python/JavaScript
-implementation, running unchanged behind a supervised Python sidecar.
+workspace. The desktop shell is **Tauri 2** (Rust); the trading engine and exchange
+integrations run in a supervised Python sidecar, the chart workspace is TypeScript/
+JavaScript, and every technical study comes from
+[`lightweight-charts-indicators`](https://github.com/deepentropy/lightweight-charts-indicators)
+(1,869 indicators on Lightweight Charts 5.2).
 
 Target platforms: **Windows 10/11** and **Linux** (Ubuntu / Linux Mint).
 
@@ -34,14 +36,16 @@ TradePanel/
 │   │   ├── app/               # controller, startup, reconnect handling
 │   │   ├── components/        # toasts, modals, settings, AI Analysis panel
 │   │   ├── services/          # backend, trading, market-data, account,
-│   │   │                      # indicators, workspace, credentials, settings, ai
+│   │   │                      # analysis, workspace, credentials, settings, ai
 │   │   ├── ai-snapshot/       # offscreen LWC chart renderer (iframe page)
-│   │   ├── lib/               # markdown, technical indicators, snapshot host
+│   │   ├── lib/               # markdown, indicator engine kit, candles,
+│   │   │                      # market levels, snapshot host
 │   │   └── styles/            # Pi Scope tokens, fonts, shell + AI CSS
 │   ├── web/                   # shared chart workspace (served by Vite/Tauri)
-│   │   │                      # workspace.html/js, chart_sync.js, LWC 4.2.2,
+│   │   │                      # workspace.html/js, chart_sync.js, LWC 5.2.1,
+│   │   │                      # indicators/ (generated engine + catalog),
 │   │   │                      # tauri_bridge.js (compatibility adapter), fonts/
-│   ├── tests/                 # bridge + AI markdown/indicator contract tests
+│   ├── tests/                 # bridge, drawing and AI markdown contract tests
 │   ├── index.html
 │   ├── snapshot.html          # hidden AI chart renderer page
 │   └── package.json
@@ -56,9 +60,7 @@ TradePanel/
 │   │   ├── trading_service.py #   calculations, shared trading operations)
 │   │   ├── config.py          # data-dir / keyring env overrides
 │   │   ├── market_data.py
-│   │   ├── workspace_store.py
-│   │   └── workspace_indicators.py
-│   ├── Indicator/             # technical studies
+│   │   └── workspace_store.py #   chart/indicator-list persistence
 │   ├── Exchange/              # exchange integrations (Hyperliquid)
 │   ├── strategies/            # strategy scripts/assets
 │   └── scripts/               # dev/build-backend/build-release/test entry points
@@ -111,9 +113,9 @@ backend/scripts/test.sh
 * Pi Scope theme: warm near-black surfaces, one amber accent, Clash Grotesk /
   Satoshi / Meslo type, light + dark toggle (persisted in `localStorage`).
 * Chart workspace: neutral OpenTrader/TradingView chrome (grey surfaces, blue
-  accent, flat 1 px pane seams), always-on OHLC/study legend, floating
-  zoom/reset/latest bar controls, 86 drawing-tool glyphs and the shell's filled
-  SVG icon set (`frontend/web/icons`, MIT).
+  accent, flat 1 px pane seams), OHLC readout plus one legend per indicator pane,
+  floating zoom/reset/latest bar controls, 86 drawing-tool glyphs and the shell's
+  filled SVG icon set (`frontend/web/icons`, MIT).
 * Resizable, collapsible trade sidebar: Coin/TF + refresh icon, Center /
   Hyperliquid / Open ↗ on one line, QTY/RISK, direction + LIM, TP/SL, Read order,
   Update Order, Set Order. Drag the inner edge (or focus it and use the arrow
@@ -123,14 +125,14 @@ backend/scripts/test.sh
   window.
 * Backend status pill and banner. Any non-running backend disables trading controls;
   reconnection never submits an order.
-* Settings (Ctrl+,): advanced indicator parameters, credential management, signed updates.
+* Settings (Ctrl+,): AI analysis indicators, credential management, signed updates.
 * Ctrl+Shift+T collapses the sidebar to the floating rail (the workspace's
   **Trade** button does the same).
 * Preferences persist in the existing window-state JSON (merged, never reset).
 
 ## Multi-chart workspace
 
-The workspace fills the chart area and is the only chart view: Lightweight Charts 4.2.2,
+The workspace fills the chart area and is the only chart view: Lightweight Charts 5.2.1,
 one WebView for all charts, timestamp-based synchronization, groups, layouts (`1`, `2h`,
 `2v`, `4`, `6`, `8`, custom), drawings, position projections, measure tool, price-axis
 modes (independent/absolute/percentage/indexed) and per-symbol drawing persistence.
@@ -141,8 +143,9 @@ It shares the shell's Pi Scope tokens (`frontend/web/workspace.html` mirrors
 `storage` event and repaints the charts from the `--chart-*` tokens.
 
 Live data comes from Binance, Bybit, OKX, Coinbase, Kraken, KuCoin, Gate.io, Bitget and
-Hyperliquid public endpoints. Python owns all exchange I/O; the WebView performs no network
-requests (enforced by CSP).
+Hyperliquid public endpoints. Python owns all exchange I/O; the WebView makes no external
+network requests (the CSP only allows same-origin assets, including the locally built
+indicator engine/catalog).
 
 ### Synchronization (`frontend/web/chart_sync.js`)
 
@@ -170,24 +173,33 @@ Monthly/weekly aggregation uses UTC calendar boundaries.
 
 ### Indicators
 
-Per-panel toggles plus global parameters (Settings dialog):
+Every study on every chart comes from
+[`lightweight-charts-indicators`](https://github.com/deepentropy/lightweight-charts-indicators)
+(`0.19.3`, `oakscriptjs` 0.15) — 117 standard studies, 1,707 community scripts and
+45 candlestick patterns, all computed in the WebView from the panel's own candles.
 
-| Indicator | Notes |
-|---|---|
-| SMA / EMA | per-chart length |
-| Bollinger Bands | length/multiplier |
-| VWAP | anchored (D/W) |
-| Volume | base histogram |
-| RSI / MACD / ATR | oscillator panes |
-| Session boxes | Asian / London / NY AM / NY PM (UTC) |
-| FVG | unmitigated 3-candle gaps above configured % |
-| MA Ribbon | 3 lines, EMA/SMA, configurable lengths |
-| Volume Profile / Daily VP / Session VP | horizontal profiles |
-| High/Low EMA | EMA of candle highs/lows |
-| ADX | ADX/±DI pane with reference levels |
+* **Add / remove**: the funnel button in a panel header opens a searchable picker
+  (Technical / Community / Patterns tabs, grouped by category, `Enter` adds a
+  unique match, up to 20 studies per chart).
+* **Settings**: each study has an `Inputs` / `Style` / `Visibility` dialog with live
+  preview — `Cancel` restores the previous inputs, `Apply` persists them. Inputs are
+  generated from the indicator's own `inputConfig` (lengths, sources, MA types,
+  colours, widths, per-plot visibility) and inactive inputs follow the library's
+  `active` conditions.
+* **Legend**: one row per study, anchored to the top-left of its pane — eye toggle
+  (hidden studies keep their settings), title (opens settings), last/crosshair value
+  and a settings button. Overlay studies stack under the OHLC readout.
+* **Panes**: overlays draw on the price pane, oscillators get their own panes in
+  add order (3:1 price-to-oscillator stretch, drag a separator to resize; the
+  legend follows the pane).
+* **Live updates** reuse series (`reuseSeries`) so a tick only pushes the newest
+  points; price mode changes (percentage/indexed) recompute on the transformed bars
+  so overlays stay aligned with the candles.
 
-Native overlays run in JavaScript on the panel's candles; session/FVG/VP/ADX are computed
-in Python from the same exchange data and cached briefly.
+The engine (~10 MB IIFE) and its browse catalog are built by
+`npm --prefix frontend run indicators` (also runs automatically before
+`dev`/`build`) from `frontend/node_modules`; nothing indicator-specific is
+hand-written in this repository.
 
 ### Drawing and trade tools
 
@@ -231,10 +243,14 @@ selection and the rest of the app's settings live on a separate, tabbed Settings
 page opened from the gear button to the right of **Trade** (or `Ctrl+,`).
 
 * **Start analysis is explicit.** The panel renders the current instrument's
-  **1d, 4h and 5m** charts offscreen with EMA ribbon, Bollinger Bands, volume,
-  RSI, MACD and ticket levels, then attaches the three PNGs to the prompt. This
+  **1d, 4h and 5m** charts offscreen with the same indicators that are visible on
+  the focused chart (overlays on the price pane, up to three oscillator panes),
+  volume and ticket levels, then attaches the three PNGs to the prompt. This
   replaces sending hundreds of candles as text and cuts token use by an order of
   magnitude.
+* The AI indicator set follows the focused chart: add, remove, hide or retune a
+  study there and the next analysis uses it — there is no second UI to keep in
+  sync.
 * Pi receives a compact snapshot (instrument, freshness, per-timeframe indicator
   values, structural levels, optional portfolio, read-only ticket) through five
   `panel_*` tools. It has no shell, file, network or trading tools.

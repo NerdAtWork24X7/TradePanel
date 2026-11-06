@@ -48,28 +48,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "referenceTime": None,
 }
 
-DEFAULT_INDICATORS: dict[str, Any] = {
-    "sma": {"enabled": False, "length": 20},
-    "ema": {"enabled": False, "length": 50},
-    "rsi": {"enabled": False, "length": 14},
-    "macd": {"enabled": False, "fast": 12, "slow": 26, "signal": 9},
-    "bb": {"enabled": False, "length": 20, "mult": 2},
-    "vwap": {"enabled": False},
-    "atr": {"enabled": False, "length": 14},
-    "volume": {"enabled": True},
-    # Legacy chart indicators (computed in Python from the panel's candles).
-    "session_asian": {"enabled": False},
-    "session_london": {"enabled": False},
-    "session_ny_am": {"enabled": False},
-    "session_ny_pm": {"enabled": False},
-    "fvg": {"enabled": False},
-    "ribbon": {"enabled": False},
-    "vp": {"enabled": False},
-    "daily_vp": {"enabled": False},
-    "session_vp": {"enabled": False},
-    "hl_ema": {"enabled": False},
-    "adx": {"enabled": False},
-}
+MAX_CHART_INDICATORS = 20
+MAX_INDICATOR_INPUTS = 64
+MAX_INDICATOR_PLOTS = 32
+INDICATOR_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+PLOT_COLOR = re.compile(r"^(#[0-9a-fA-F]{3,8}|transparent)$")
 
 DRAWING_TOOLS = ("hline", "vline", "trend", "rect", "fib", "text")
 
@@ -117,7 +100,8 @@ def _chart(chart_id: str, exchange: str, symbol: str, timeframe: str,
         "priceScaleMode": "independent",
         "referenceMode": "first_visible",
         "referenceTime": None,
-        "indicators": json.loads(json.dumps(DEFAULT_INDICATORS)),
+        "indicators": [],
+        "showVolume": True,
         "groupId": group_id,
         "drawings": [],
         "view": None,
@@ -212,20 +196,71 @@ def _fractions(value: Any, count: int, custom: bool = False) -> list[float]:
     return equal(count)
 
 
-def _indicators(value: Any) -> dict:
-    src = value if isinstance(value, dict) else {}
+def _indicator_inputs(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
     out: dict[str, Any] = {}
-    for key, defaults in DEFAULT_INDICATORS.items():
-        incoming = src.get(key) if isinstance(src.get(key), dict) else {}
-        item: dict[str, Any] = {"enabled": _bool(incoming.get("enabled"), defaults["enabled"])}
-        for field, default_value in defaults.items():
-            if field == "enabled":
-                continue
-            if isinstance(default_value, int):
-                item[field] = _int(incoming.get(field), default_value, 1, 500)
-            elif isinstance(default_value, float):
-                item[field] = _num(incoming.get(field), default_value, 0.1, 10)
-        out[key] = item
+    for key, raw in list(value.items())[:MAX_INDICATOR_INPUTS]:
+        if not isinstance(key, str) or not key or len(key) > 64:
+            continue
+        if isinstance(raw, bool):
+            out[key] = raw
+        elif isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            number = float(raw)
+            if number == number and abs(number) <= 1e9:
+                out[key] = raw
+        elif isinstance(raw, str):
+            out[key] = raw[:120]
+    return out
+
+
+def _indicator_plots(value: Any) -> dict[str, Any]:
+    """Per-plot style overrides (colour, width, visibility) keyed by plot id."""
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for plot_id, raw in list(value.items())[:MAX_INDICATOR_PLOTS]:
+        if not isinstance(plot_id, str) or not plot_id or len(plot_id) > 64:
+            continue
+        if not isinstance(raw, dict):
+            continue
+        item: dict[str, Any] = {}
+        color = raw.get("color")
+        if isinstance(color, str) and PLOT_COLOR.match(color):
+            item["color"] = color
+        if isinstance(raw.get("lineWidth"), int) and not isinstance(raw.get("lineWidth"), bool):
+            item["lineWidth"] = max(0, min(4, int(raw["lineWidth"])))
+        if isinstance(raw.get("visible"), bool):
+            item["visible"] = raw["visible"]
+        if item:
+            out[plot_id] = item
+    return out
+
+
+def _indicators(value: Any) -> list[dict[str, Any]]:
+    """Chart indicator list: one entry per on-chart instance.
+
+    Ids may repeat — the same study can be added several times with different
+    inputs/styles (two VWAPs, RSI 14 + RSI 50); only the total is capped.
+    """
+    if not isinstance(value, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict) or len(out) >= MAX_CHART_INDICATORS:
+            continue
+        indicator_id = item.get("id")
+        if not isinstance(indicator_id, str):
+            continue
+        indicator_id = indicator_id.strip()
+        if not INDICATOR_ID.match(indicator_id):
+            continue
+        out.append({
+            "id": indicator_id,
+            "inputs": _indicator_inputs(item.get("inputs")),
+            "plots": _indicator_plots(item.get("plots")),
+            "visible": _bool(item.get("visible"), True),
+        })
     return out
 
 
@@ -390,7 +425,16 @@ def _chart_config(raw: dict, index: int, group_ids: set[str]) -> dict:
     chart["referenceMode"] = ref if ref in REFERENCE_MODES else "first_visible"
     ref_time = _int(raw.get("referenceTime"), 0, 0, 4102444800)
     chart["referenceTime"] = ref_time or None
-    chart["indicators"] = _indicators(raw.get("indicators"))
+    # Pre-2026-11 stores kept a dict of built-in flags; only its volume flag
+    # carries over, every hand-written indicator is discarded.
+    legacy_indicators = raw.get("indicators")
+    legacy_volume = True
+    if isinstance(legacy_indicators, dict):
+        volume = legacy_indicators.get("volume")
+        if isinstance(volume, dict):
+            legacy_volume = _bool(volume.get("enabled"), True)
+    chart["indicators"] = _indicators(legacy_indicators)
+    chart["showVolume"] = _bool(raw.get("showVolume"), legacy_volume)
     group = _str(raw.get("groupId"), "", 32)
     chart["groupId"] = group if group in group_ids else None
     chart["drawings"] = _drawings(raw.get("drawings"))

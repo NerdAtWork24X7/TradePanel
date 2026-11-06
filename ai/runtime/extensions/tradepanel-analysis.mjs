@@ -222,10 +222,10 @@ export default function tradepanelAnalysis(pi) {
     name: "panel_market_context",
     label: "TradePanel market context",
     description:
-      "Return the user's current TradePanel view: instrument, exchange, market, timeframe, last price, 24h change/volume, data freshness, per-timeframe indicator values, computed levels, portfolio availability and a read-only order-ticket summary. Call this before making any market claim. The attached chart images are the visual source for structure.",
+      "Return the user's current TradePanel view: instrument, exchange, market, timeframe, last price, 24h change/volume, data freshness, per-timeframe values of the indicators enabled on the focused chart, computed levels, portfolio availability and a read-only order-ticket summary. Call this before making any market claim. The attached chart images are the visual source for structure.",
     promptSnippet: "Read the current TradePanel instrument snapshot (always call before analysis)",
     promptGuidelines: [
-      "Call panel_market_context before any statement about the instrument, price, trend, indicators, portfolio, or order ticket.",
+      "Call panel_market_context before any statement about the instrument, price, trend, indicators, portfolio, or order ticket. panel_indicators only covers the indicators enabled on the focused chart.",
     ],
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, signal) {
@@ -263,7 +263,7 @@ export default function tradepanelAnalysis(pi) {
     name: "panel_indicators",
     label: "TradePanel indicators",
     description:
-      "Return every indicator value TradePanel computed for the 1d/4h/5m screenshots: RSI, MACD, EMA ribbon, Bollinger Bands, ATR, volume statistics and structural levels, plus which indicators could not be computed. Values are factual tool output, not model estimates.",
+      "Return the values of the indicators enabled on the user's focused chart, computed for the 1d/4h/5m screenshots, plus structural levels and any indicator that could not be computed. The set mirrors the chart; do not assume a fixed indicator set. Values are factual tool output, not model estimates.",
     promptSnippet: "Read the indicator values computed by TradePanel for each timeframe",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, signal) {
@@ -276,6 +276,7 @@ export default function tradepanelAnalysis(pi) {
           capturedAtMs: snapshot.capturedAtMs,
           freshness: freshness(snapshot),
           timeframes: snapshot.analysis ? snapshot.analysis.timeframes : [],
+          selected: indicators.selected ?? [],
           available: indicators.available ?? [],
           unavailable: indicators.unavailable ?? [],
           summary: indicators.summary ?? null,

@@ -41,30 +41,6 @@
         ['bybit', 'SOL/USDT', '5m'], ['okx', 'BTC/USDT', '15m']
     ];
     var PREFS_KEY = 'trade_panel.workspace.prefs.v1';
-    var IND_DEFS = {
-        sma: { label: 'SMA', desc: 'Simple moving average', color: '#60A5FA', overlay: true, params: { length: 20 } },
-        ema: { label: 'EMA', desc: 'Exponential moving average', color: '#F59E0B', overlay: true, params: { length: 50 } },
-        bb: { label: 'Bollinger Bands', desc: 'SMA ± N standard deviations', color: '#A78BFA', overlay: true, params: { length: 20, mult: 2 } },
-        vwap: { label: 'VWAP', desc: 'Anchored VWAP (D/W configurable)', color: '#7B68EE', overlay: true, params: {} },
-        volume: { label: 'Volume', desc: 'Base volume histogram', color: '#10B981', overlay: false, params: {} },
-        rsi: { label: 'RSI', desc: 'Relative strength index', color: '#06B6D4', pane: true, params: { length: 14 } },
-        macd: { label: 'MACD', desc: '12 / 26 / 9 momentum', color: '#F472B6', pane: true, params: { fast: 12, slow: 26, signal: 9 } },
-        atr: { label: 'ATR', desc: 'Average true range', color: '#FB923C', pane: true, params: { length: 14 } }
-    };
-    var LEGACY_DEFS = {
-        session_asian: { label: 'Asian session', group: 'Sessions', color: '#FFD700' },
-        session_london: { label: 'London session', group: 'Sessions', color: '#7B68EE' },
-        session_ny_am: { label: 'NY AM session', group: 'Sessions', color: '#FF6347' },
-        session_ny_pm: { label: 'NY PM session', group: 'Sessions', color: '#00CED1' },
-        fvg: { label: 'Fair Value Gap', group: 'Advanced', color: '#ffd43b' },
-        ribbon: { label: 'MA Ribbon', group: 'Advanced', color: '#2196F3' },
-        vp: { label: 'Volume Profile', group: 'Advanced', color: '#60A5FA' },
-        daily_vp: { label: 'Daily VP', group: 'Advanced', color: '#38BDF8' },
-        session_vp: { label: 'Session VP', group: 'Advanced', color: '#22D3EE' },
-        hl_ema: { label: 'High/Low EMA', group: 'Advanced', color: '#66BB6A' },
-        adx: { label: 'ADX', group: 'Advanced', color: '#FB923C' }
-    };
-
     var WS = {
         meta: null,
         store: null,
@@ -78,10 +54,10 @@
         saveTimer: null,
         saving: false,
         saveQueued: false,
+        staleBackendWarned: false,
         shuttingDown: false,
         active: true,
         prefs: { recent: [] },
-        indicatorConfig: {},
         modal: null,
         menu: null,
         menuAnchor: null,
@@ -363,10 +339,16 @@
     }
 
     function closeModal() {
+        var modal = WS.modal;
+        WS.modal = null;
         $('#ws-modal-backdrop').classList.remove('open');
         $('#modal-body').innerHTML = '';
         $('#modal-foot').innerHTML = '';
-        WS.modal = null;
+        // A dialog may hold uncommitted state (the study settings preview):
+        // it gets the dismissal so it can roll back.
+        if (modal && typeof modal.onClose === 'function') {
+            try { modal.onClose(); } catch (err) { console.error('modal onClose failed', err); }
+        }
     }
 
     function openPrompt(title, value, onOk) {
@@ -576,19 +558,15 @@
         host.appendChild(hostInner);
         body.appendChild(host);
 
-        var pane = el('div', 'osc-pane');
-        var paneCanvas = el('canvas', 'osc-layer');
-        pane.appendChild(paneCanvas);
-        body.appendChild(pane);
-
-        // Always-on plot legend: values row tracks the crosshair, studies
-        // stack underneath (TradingView / OpenTrader legend layout).
+        // OHLC readout follows the crosshair; indicator legends are anchored
+        // to the top-left of their own pane (OpenTrader layout).
         var strip = el('div', 'ohlc-strip');
         var stripValues = el('div', 'lv-values');
-        var legend = el('div', 'ind-legend');
         strip.appendChild(stripValues);
-        strip.appendChild(legend);
         body.appendChild(strip);
+
+        var legend = el('div', 'ind-legend-layer');
+        body.appendChild(legend);
 
         var agg = el('div', 'agg-note');
         body.appendChild(agg);
@@ -606,9 +584,6 @@
 
         var overlay = el('div', 'panel-overlay');
         body.appendChild(overlay);
-
-        var indCanvas = el('canvas', 'ind-layer');
-        body.appendChild(indCanvas);
 
         var drawCanvas = el('canvas', 'draw-layer');
         body.appendChild(drawCanvas);
@@ -637,10 +612,7 @@
         entry.stripValues = stripValues;
         entry.aggNote = agg;
         entry.overlay = overlay;
-        entry.indCanvas = indCanvas;
         entry.drawCanvas = drawCanvas;
-        entry.pane = pane;
-        entry.paneCanvas = paneCanvas;
         entry.legend = legend;
         entry.chartControls = controls;
         entry.textEditor = textEditor;
@@ -1137,8 +1109,11 @@
             candles: [],
             display: [],
             rawByTime: new Map(),
-            ind: {},
-            overlays: {},
+            indicatorRuntimes: [],
+            indicatorSignature: null,
+            indicatorSeq: 0,
+            indicatorPaneCount: 0,
+            indicatorRangeTimer: null,
             precision: 2,
             minMove: 0.01,
             refPrice: null,
@@ -1178,10 +1153,6 @@
             measureDraft: null,
             measureDrag: null,
             selectedMeasure: false,
-            legacy: {},
-            legacySeq: 0,
-            legacyRaf: null,
-            legacyRequestedAt: 0,
             drawDrag: null,
             pendingText: null,
             tableEditRef: null,
@@ -1212,7 +1183,7 @@
             priceLineVisible: false,
             lastValueVisible: false,
             crosshairMarkerVisible: false,
-            visible: !!(entry.config.indicators.volume && entry.config.indicators.volume.enabled)
+            visible: entry.config.showVolume !== false
         });
         chart.priceScale('volume').applyOptions({
             visible: false,
@@ -1229,8 +1200,7 @@
             var w = entry.host.clientWidth, h = entry.host.clientHeight;
             if (w > 0 && h > 0) chart.applyOptions({ width: w, height: h });
             resizeDrawCanvas(entry);
-            drawOscillators(entry);
-            drawIndicatorOverlay(entry);
+            positionIndicatorLegends(entry);
             scheduleDraw(entry);
         });
         entry.resizeObserver.observe(entry.host);
@@ -1243,6 +1213,7 @@
                     (entry.config.priceScaleMode === 'percentage' || entry.config.priceScaleMode === 'indexed')) {
                     scheduleReferenceRefresh(entry);
                 }
+                scheduleVisibleRangeIndicators(entry);
             }
         };
         chart.timeScale().subscribeVisibleTimeRangeChange(entry.rangeHandler);
@@ -1477,6 +1448,7 @@
             if (entry.crosshairHandler) entry.chart.unsubscribeCrosshairMove(entry.crosshairHandler);
         } catch (err) { /* ignore */ }
         try { if (entry.resizeObserver) entry.resizeObserver.disconnect(); } catch (err) { /* ignore */ }
+        try { if (entry.paneObserver) entry.paneObserver.disconnect(); } catch (err) { /* ignore */ }
         try { if (entry._drawDocCleanup) entry._drawDocCleanup(); } catch (err) { /* ignore */ }
         detachDrawings(entry);
         try { entry.chart.remove(); } catch (err) { /* ignore */ }
@@ -1504,6 +1476,7 @@
             }
             if (candle) showStrip(entry, candle);
             else hideStrip(entry);
+            updateLegendValues(entry, param.time == null ? null : param.time);
         };
         entry.chart.subscribeCrosshairMove(entry.crosshairHandler);
 
@@ -1519,7 +1492,6 @@
             }
         };
         entry.chart.subscribeClick(entry.clickHandler);
-        drawOscillators(entry);
     }
 
     /* ── Data loading / rendering ────────────────────────────────────────── */
@@ -1574,7 +1546,6 @@
         updateHeader(entry);
         updateAggNote(entry);
         refreshIndicators(entry);
-        requestLegacy(entry);
         startPolling(entry);
         if (WS.sync) WS.sync.schedulePriceScaleRefresh();
         applyPendingTradeOverlay(entry);
@@ -1714,7 +1685,6 @@
         entry.barsEl.textContent = entry.candles.length + ' bars';
         if (WS.sync) WS.sync.schedulePriceScaleRefresh();
         scheduleDraw(entry);
-        drawOscillators(entry);
     }
 
     function scheduleReferenceRefresh(entry) {
@@ -1834,15 +1804,29 @@
         if (holder) holder.replaceChildren(panelIcon(TYPE_ICONS[entry.config.chartType] || 'header-candles', 15));
     }
 
+    /** Active studies of a chart: what AI analysis computes for that screen. */
+    function activeIndicators(entry) {
+        return chartIndicators(entry)
+            .filter(function (cfg) { return cfg.visible !== false; })
+            .map(function (cfg) {
+                return { id: cfg.id, inputs: sanitizeIndicatorInputs(cfg.inputs) };
+            });
+    }
+
     function notifyFocused(entry) {
         try {
             if (Bridge.obj && Bridge.obj.onFocusedChartChanged) {
                 Bridge.obj.onFocusedChartChanged(
                     entry.config.symbol, entry.config.exchange,
-                    entry.config.market, entry.config.timeframe
+                    entry.config.market, entry.config.timeframe,
+                    JSON.stringify(activeIndicators(entry))
                 );
             }
         } catch (err) { /* bridge not ready */ }
+    }
+
+    function notifyIndicatorsChanged(entry) {
+        if (WS.focused === entry.id) notifyFocused(entry);
     }
 
     function updateGroupVisual(entry) {
@@ -1926,11 +1910,8 @@
             mergeTicks(entry, payload.candles);
             entry.lastBarTime = last.time;
             refreshAfterTick(entry, newBar);
-            if (newBar) {
-                refreshIndicators(entry);
-                if (Date.now() - entry.legacyRequestedAt > 1500) requestLegacy(entry);
-                maybeFinalizePrevious(entry);
-            }
+            refreshIndicators(entry, { reuse: true });
+            if (newBar) maybeFinalizePrevious(entry);
         }).catch(function (err) {
             if (entry.destroyed) return;
             markLive(entry, false, err && err.message ? err.message : 'feed error');
@@ -1998,7 +1979,6 @@
         }
         entry.barsEl.textContent = entry.candles.length + ' bars';
         if (newBar) scheduleDraw(entry);
-        if (newBar) refreshOverlayValues(entry);
     }
 
     function maybeFinalizePrevious(entry) {
@@ -2094,657 +2074,1172 @@
 
     function hideOverlays(entry) { entry.overlay.className = 'panel-overlay'; }
 
-    /* ── Indicators ──────────────────────────────────────────────────────── */
+    /* ── Indicators (lightweight-charts-indicators) ──────────────────────── */
 
-    function sma(values, length) {
-        var out = [], sum = 0;
-        for (var i = 0; i < values.length; i++) {
-            sum += values[i];
-            if (i >= length) sum -= values[i - length];
-            if (i >= length - 1) out.push(sum / length);
-        }
-        return out;
-    }
+    // The engine is a ~10 MB IIFE that publishes the registry + renderer on
+    // `window.TradePanelIndicators`; the catalog is compact JSON for the
+    // pickers. Both are built by `npm run indicators` (frontend/scripts).
+    var INDICATOR_ENGINE_SRC = 'indicators/engine.js';
+    var INDICATOR_CATALOG_SRC = 'indicators/catalog.json';
+    var MAX_CHART_INDICATORS = 20;
+    var INDICATOR_SOURCES = ['close', 'open', 'high', 'low', 'hl2', 'hlc3', 'ohlc4', 'hlcc4', 'volume'];
+    var INDICATOR_GROUPS = [
+        { id: 'standard', label: 'Technical' },
+        { id: 'community', label: 'Community' },
+        { id: 'candlestick', label: 'Patterns' }
+    ];
 
-    function ema(values, length) {
-        var out = [], k = 2 / (length + 1), prev = null, sum = 0;
-        for (var i = 0; i < values.length; i++) {
-            if (i < length) {
-                sum += values[i];
-                if (i === length - 1) { prev = sum / length; out.push(prev); }
-                else out.push(null);
-            } else {
-                prev = values[i] * k + prev * (1 - k);
-                out.push(prev);
-            }
-        }
-        return out;
-    }
+    var INDICATORS = {
+        enginePromise: null,
+        catalogPromise: null,
+        catalog: null,
+        catalogById: null,
+        lookup: null
+    };
 
-    function stdev(values, length) {
-        var out = [];
-        for (var i = 0; i < values.length; i++) {
-            if (i < length - 1) { out.push(null); continue; }
-            var slice = values.slice(i - length + 1, i + 1);
-            var mean = slice.reduce(function (a, b) { return a + b; }, 0) / length;
-            var variance = slice.reduce(function (a, b) { return a + (b - mean) * (b - mean); }, 0) / length;
-            out.push(Math.sqrt(variance));
+    function loadIndicatorEngine() {
+        if (window.TradePanelIndicators) return Promise.resolve(window.TradePanelIndicators);
+        if (!window.LightweightCharts) {
+            return Promise.reject(new Error('Lightweight Charts is not loaded'));
         }
-        return out;
-    }
-
-    function rsiSeries(values, length) {
-        var out = new Array(values.length).fill(null);
-        if (values.length <= length) return out;
-        var gain = 0, loss = 0;
-        for (var i = 1; i <= length; i++) {
-            var diff = values[i] - values[i - 1];
-            if (diff >= 0) gain += diff; else loss -= diff;
-        }
-        var avgGain = gain / length, avgLoss = loss / length;
-        out[length] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
-        for (var j = length + 1; j < values.length; j++) {
-            var d = values[j] - values[j - 1];
-            avgGain = (avgGain * (length - 1) + Math.max(d, 0)) / length;
-            avgLoss = (avgLoss * (length - 1) + Math.max(-d, 0)) / length;
-            out[j] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
-        }
-        return out;
-    }
-
-    function macdSeries(values, fast, slow, signal) {
-        var emaFast = ema(values, fast);
-        var emaSlow = ema(values, slow);
-        var line = values.map(function (_, i) {
-            if (emaFast[i] == null || emaSlow[i] == null) return null;
-            return emaFast[i] - emaSlow[i];
+        if (INDICATORS.enginePromise) return INDICATORS.enginePromise;
+        INDICATORS.enginePromise = new Promise(function (resolve, reject) {
+            var script = document.createElement('script');
+            script.src = INDICATOR_ENGINE_SRC;
+            script.async = true;
+            script.onload = function () {
+                if (window.TradePanelIndicators) resolve(window.TradePanelIndicators);
+                else reject(new Error('the indicator engine loaded without a registry'));
+            };
+            script.onerror = function () {
+                INDICATORS.enginePromise = null;
+                script.remove();
+                reject(new Error('could not load ' + INDICATOR_ENGINE_SRC));
+            };
+            document.head.appendChild(script);
         });
-        var compact = line.filter(function (v) { return v != null; });
-        var sigCompact = ema(compact, signal);
-        var sig = new Array(values.length).fill(null);
-        var offset = values.length - sigCompact.length;
-        for (var i = 0; i < sigCompact.length; i++) sig[offset + i] = sigCompact[i];
-        var hist = line.map(function (v, i) {
-            if (v == null || sig[i] == null) return null;
-            return v - sig[i];
-        });
-        return { line: line, signal: sig, hist: hist };
+        return INDICATORS.enginePromise;
     }
 
-    function atrSeries(candles, length) {
-        var trs = candles.map(function (c, i) {
-            if (i === 0) return c.high - c.low;
-            var pc = candles[i - 1].close;
-            return Math.max(c.high - c.low, Math.abs(c.high - pc), Math.abs(c.low - pc));
-        });
-        var out = new Array(candles.length).fill(null);
-        if (candles.length < length) return out;
-        var sum = 0;
-        for (var i = 0; i < length; i++) sum += trs[i];
-        out[length - 1] = sum / length;
-        for (var j = length; j < candles.length; j++) {
-            out[j] = (out[j - 1] * (length - 1) + trs[j]) / length;
+    function loadIndicatorCatalog() {
+        if (INDICATORS.catalog) return Promise.resolve(INDICATORS.catalog);
+        if (INDICATORS.catalogPromise) return INDICATORS.catalogPromise;
+        INDICATORS.catalogPromise = fetch(INDICATOR_CATALOG_SRC, { cache: 'force-cache' })
+            .then(function (response) {
+                if (!response.ok) throw new Error('indicator catalog unavailable (HTTP ' + response.status + ')');
+                return response.json();
+            })
+            .then(function (list) {
+                if (!Array.isArray(list)) throw new Error('indicator catalog is malformed');
+                INDICATORS.catalog = list;
+                INDICATORS.catalogById = {};
+                list.forEach(function (item) { INDICATORS.catalogById[item.id] = item; });
+                return list;
+            })
+            .catch(function (err) {
+                INDICATORS.catalogPromise = null;
+                throw err;
+            });
+        return INDICATORS.catalogPromise;
+    }
+
+    function engineIndicator(id) {
+        var kit = window.TradePanelIndicators;
+        if (!kit) return null;
+        if (!INDICATORS.lookup) {
+            INDICATORS.lookup = {};
+            kit.indicatorRegistry.forEach(function (entry) { INDICATORS.lookup[entry.id] = entry; });
         }
-        return out;
+        return INDICATORS.lookup[id] || null;
     }
 
-    function vwapSeries(entry) {
-        var candles = entry.candles;
-        var cfg = (WS.indicatorConfig && WS.indicatorConfig.vwap) || {};
-        var intraday = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h'].indexOf(entry.config.timeframe) >= 0;
-        var anchor = intraday ? (cfg.anchor_intraday || 'D') : (cfg.anchor_daily || 'W');
-        var out = new Array(candles.length).fill(null);
-        var cumPV = 0, cumV = 0, bucket = null;
-        for (var i = 0; i < candles.length; i++) {
-            var c = candles[i];
-            var key = anchor === 'W'
-                ? Math.floor((c.time - 345600) / 604800)
-                : Math.floor(c.time / 86400);
-            if (bucket === null || key !== bucket) { bucket = key; cumPV = 0; cumV = 0; }
-            var typical = (c.high + c.low + c.close) / 3;
-            cumPV += typical * c.volume;
-            cumV += c.volume;
-            out[i] = cumV > 0 ? cumPV / cumV : null;
+    function catalogIndicator(id) {
+        return INDICATORS.catalogById ? INDICATORS.catalogById[id] || null : null;
+    }
+
+    function indicatorMeta(id) {
+        return engineIndicator(id) || catalogIndicator(id);
+    }
+
+    function indicatorPatch(id) {
+        var meta = indicatorMeta(id);
+        var plots = meta && meta.plotConfig ? meta.plotConfig : [];
+        return (plots[0] && plots[0].color) || '#a1a1aa';
+    }
+
+    /* ── Indicator chart config ──────────────────────────────────────────── */
+
+    function chartIndicators(entry) {
+        if (!entry.config || !Array.isArray(entry.config.indicators)) entry.config.indicators = [];
+        return entry.config.indicators;
+    }
+
+    /**
+     * Studies are addressed by position, not by id: the same indicator may be
+     * added several times (two VWAPs with different anchors, RSI 14 + RSI 50).
+     */
+    function chartIndicatorAt(entry, index) {
+        var list = chartIndicators(entry);
+        return typeof index === 'number' && index >= 0 && index < list.length ? list[index] : null;
+    }
+
+    /** Effective line colour of one instance (plot style > plot default). */
+    function indicatorColor(cfg, meta) {
+        var plot = (meta && meta.plotConfig ? meta.plotConfig : [])[0];
+        var style = cfg && cfg.plots && plot ? cfg.plots[plot.id] : null;
+        if (style && style.color) return style.color;
+        return (plot && plot.color) || '#a1a1aa';
+    }
+
+    // Duplicate instances must not stack invisibly on top of each other, so a
+    // new copy takes the first palette colour its siblings are not using.
+    var INDICATOR_PALETTE = ['#2962FF', '#F23645', '#089981', '#F5A623', '#A78BFA', '#06B6D4', '#EC4899', '#84CC16'];
+
+    function nextInstancePlots(entry, meta) {
+        var siblings = chartIndicators(entry).filter(function (cfg) { return cfg.id === meta.id; });
+        var plot = (meta.plotConfig || [])[0];
+        if (!siblings.length || !plot) return {};
+        var used = {};
+        var mark = function (color) { if (color) used[String(color).toLowerCase()] = true; };
+        mark(plot.color);
+        siblings.forEach(function (cfg) { mark(indicatorColor(cfg, meta)); });
+        var color = null;
+        for (var i = 0; i < INDICATOR_PALETTE.length && !color; i++) {
+            if (!used[INDICATOR_PALETTE[i].toLowerCase()]) color = INDICATOR_PALETTE[i];
         }
-        return out;
+        var plots = {};
+        plots[plot.id] = { color: color || INDICATOR_PALETTE[siblings.length % INDICATOR_PALETTE.length] };
+        return plots;
     }
 
-    function indicatorConfig(entry) {
-        return entry.config.indicators || {};
+    function sanitizeInputValue(value) {
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'number') return isFinite(value) && Math.abs(value) <= 1e9 ? value : undefined;
+        if (typeof value === 'string') return value.length > 120 ? value.slice(0, 120) : value;
+        return undefined;
     }
 
-    function computeIndicatorSets(entry) {
-        var cfg = indicatorConfig(entry);
-        var closes = entry.candles.map(function (c) { return c.close; });
-        var times = entry.candles.map(function (c) { return c.time; });
+    function sanitizeIndicatorInputs(raw) {
         var out = {};
-
-        function toSeries(values) {
-            var arr = [];
-            for (var i = 0; i < values.length; i++) {
-                if (values[i] == null) continue;
-                arr.push({ time: times[i], value: transformValue(entry, values[i]) });
-            }
-            return arr;
-        }
-
-        if (cfg.sma && cfg.sma.enabled) out.sma = toSeries(sma(closes, cfg.sma.length || 20));
-        if (cfg.ema && cfg.ema.enabled) out.ema = toSeries(ema(closes, cfg.ema.length || 50));
-        if (cfg.bb && cfg.bb.enabled) {
-            var len = cfg.bb.length || 20;
-            var mult = cfg.bb.mult || 2;
-            var mid = sma(closes, len);
-            var sd = stdev(closes, len);
-            var upper = [], lower = [];
-            for (var i = 0; i < closes.length; i++) {
-                upper.push(mid[i] == null || sd[i] == null ? null : mid[i] + sd[i] * mult);
-                lower.push(mid[i] == null || sd[i] == null ? null : mid[i] - sd[i] * mult);
-            }
-            out.bb = { mid: toSeries(mid), upper: toSeries(upper), lower: toSeries(lower) };
-        }
-        if (cfg.vwap && cfg.vwap.enabled) out.vwap = toSeries(vwapSeries(entry));
-        if (cfg.rsi && cfg.rsi.enabled) {
-            out.rsi = { values: rsiSeries(closes, cfg.rsi.length || 14), color: IND_DEFS.rsi.color };
-        }
-        if (cfg.macd && cfg.macd.enabled) {
-            out.macd = macdSeries(closes, cfg.macd.fast || 12, cfg.macd.slow || 26, cfg.macd.signal || 9);
-        }
-        if (cfg.atr && cfg.atr.enabled) {
-            out.atr = { values: atrSeries(entry.candles, cfg.atr.length || 14), color: IND_DEFS.atr.color };
-        }
-        entry.ind = out;
-        entry.rawSeries = { closes: closes, times: times };
-    }
-
-    function ensureOverlaySeries(entry, key, color, width, dashed) {
-        if (entry.overlays[key]) {
-            entry.overlays[key].applyOptions({ color: color, visible: true, lineWidth: width || 1, lineStyle: dashed ? 2 : 0 });
-            return entry.overlays[key];
-        }
-        var series = entry.chart.addSeries(window.LightweightCharts.LineSeries, {
-            color: color,
-            lineWidth: width || 1,
-            lineStyle: dashed ? window.LightweightCharts.LineStyle.Dashed : window.LightweightCharts.LineStyle.Solid,
-            priceLineVisible: false,
-            lastValueVisible: false,
-            crosshairMarkerVisible: false
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+        Object.keys(raw).slice(0, 64).forEach(function (key) {
+            var value = sanitizeInputValue(raw[key]);
+            if (value !== undefined) out[key] = value;
         });
-        attachPriceScaleProvider(entry, series);
-        entry.overlays[key] = series;
-        return series;
+        return out;
     }
 
-    function clearOverlay(entry, key) {
-        var series = entry.overlays[key];
-        if (series && series.applyOptions) series.applyOptions({ visible: false });
+    function sanitizeIndicatorPlots(raw) {
+        var out = {};
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+        Object.keys(raw).slice(0, 32).forEach(function (plotId) {
+            var item = raw[plotId];
+            if (!item || typeof item !== 'object') return;
+            var clean = {};
+            if (typeof item.color === 'string' && /^(#[0-9a-fA-F]{3,8}|transparent)$/.test(item.color)) {
+                clean.color = item.color;
+            }
+            if (typeof item.lineWidth === 'number' && isFinite(item.lineWidth)) {
+                clean.lineWidth = Math.max(0, Math.min(4, Math.round(item.lineWidth)));
+            }
+            if (typeof item.visible === 'boolean') clean.visible = item.visible;
+            if (Object.keys(clean).length) out[plotId] = clean;
+        });
+        return out;
     }
 
-    function refreshIndicators(entry) {
-        computeIndicatorSets(entry);
-        var ind = entry.ind;
-        var cfg = indicatorConfig(entry);
+    function mergeIndicatorInputs(meta, overrides) {
+        var merged = clone((meta && meta.defaultInputs) || {});
+        var known = {};
+        Object.keys(merged).forEach(function (key) { known[key] = true; });
+        ((meta && meta.inputConfig) || []).forEach(function (input) { known[input.id] = true; });
+        var clean = sanitizeIndicatorInputs(overrides);
+        Object.keys(clean).forEach(function (key) {
+            if (!meta || known[key]) merged[key] = clean[key];
+        });
+        return merged;
+    }
 
-        if (ind.sma) { ensureOverlaySeries(entry, 'sma', IND_DEFS.sma.color, 2).setData(ind.sma); } else clearOverlay(entry, 'sma');
-        if (ind.ema) { ensureOverlaySeries(entry, 'ema', IND_DEFS.ema.color, 2).setData(ind.ema); } else clearOverlay(entry, 'ema');
-        if (ind.vwap) { ensureOverlaySeries(entry, 'vwap', IND_DEFS.vwap.color, 2).setData(ind.vwap); } else clearOverlay(entry, 'vwap');
-        if (ind.bb) {
-            ensureOverlaySeries(entry, 'bb_up', 'rgba(167,139,250,0.85)', 1).setData(ind.bb.upper);
-            ensureOverlaySeries(entry, 'bb_mid', 'rgba(167,139,250,0.55)', 1, true).setData(ind.bb.mid);
-            ensureOverlaySeries(entry, 'bb_low', 'rgba(167,139,250,0.85)', 1).setData(ind.bb.lower);
-        } else {
-            clearOverlay(entry, 'bb_up'); clearOverlay(entry, 'bb_mid'); clearOverlay(entry, 'bb_low');
+    /** Normalise persisted/legacy chart config: list of {id, inputs, plots, visible}.
+     *  Ids may repeat — one entry per on-chart instance. */
+    function normalizeChartIndicators(raw) {
+        if (!Array.isArray(raw)) return [];
+        var out = [];
+        for (var i = 0; i < raw.length && out.length < MAX_CHART_INDICATORS; i++) {
+            var item = raw[i];
+            if (!item || typeof item !== 'object') continue;
+            var id = typeof item.id === 'string' ? item.id.trim() : '';
+            if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(id)) continue;
+            out.push({
+                id: id,
+                inputs: sanitizeIndicatorInputs(item.inputs),
+                plots: sanitizeIndicatorPlots(item.plots),
+                visible: item.visible !== false
+            });
         }
-        var volOn = !!(cfg.volume && cfg.volume.enabled);
-        entry.volumeSeries.applyOptions({ visible: volOn });
-        if (volOn) entry.volumeSeries.setData(volumeData(entry));
+        return out;
+    }
 
+    function ensureChartIndicatorConfig(config) {
+        config.indicators = normalizeChartIndicators(config.indicators);
+        if (typeof config.showVolume !== 'boolean') config.showVolume = true;
+    }
+
+    function indicatorSignature(entry) {
+        try { return JSON.stringify(chartIndicators(entry)); } catch (err) { return ''; }
+    }
+
+    function addChartIndicator(entry, meta) {
+        if (!meta || !meta.id) return false;
+        var list = chartIndicators(entry);
+        if (list.length >= MAX_CHART_INDICATORS) {
+            toast('A chart can show at most ' + MAX_CHART_INDICATORS + ' indicators');
+            return false;
+        }
+        // The picker hands us a catalog row (browse metadata only); the engine
+        // registry entry carries default inputs and plot styles.
+        var full = engineIndicator(meta.id) || meta;
+        list.push({
+            id: meta.id,
+            inputs: sanitizeIndicatorInputs(full.defaultInputs),
+            plots: nextInstancePlots(entry, full),
+            visible: true
+        });
+        refreshIndicators(entry, { rebuild: true });
+        notifyIndicatorsChanged(entry);
+        scheduleSave();
+        return true;
+    }
+
+    function removeChartIndicator(entry, index) {
+        var list = chartIndicators(entry);
+        if (!(typeof index === 'number' && index >= 0 && index < list.length)) return false;
+        list.splice(index, 1);
+        refreshIndicators(entry, { rebuild: true });
+        notifyIndicatorsChanged(entry);
+        scheduleSave();
+        return true;
+    }
+
+    function toggleIndicatorVisibility(entry, index) {
+        var cfg = chartIndicatorAt(entry, index);
+        if (!cfg) return;
+        cfg.visible = cfg.visible === false;
+        refreshIndicators(entry, { rebuild: true });
+        notifyIndicatorsChanged(entry);
+        scheduleSave();
+    }
+
+    /* ── Rendering ───────────────────────────────────────────────────────── */
+
+    function indicatorBars(entry) {
+        var source = entry.display && entry.display.length ? entry.display : entry.candles;
+        return source.map(function (candle) {
+            return {
+                time: candle.time,
+                open: candle.open,
+                high: candle.high,
+                low: candle.low,
+                close: candle.close,
+                volume: candle.volume
+            };
+        });
+    }
+
+    /* The indicator engine uses its own period grammar ("15", "60", "1D");
+       the workspace speaks the exchange grammar ("15m", "1h", "1d"). Passing
+       the raw workspace string makes every engine lookup of the chart
+       timeframe throw `Invalid timeframe` (e.g. market-anchored VWAP). */
+    var ENGINE_TIMEFRAME = /^(\d+)([mhdwM])$/;
+
+    function engineTimeframe(timeframe) {
+        var text = String(timeframe || '');
+        var match = ENGINE_TIMEFRAME.exec(text);
+        if (!match) return text;
+        var amount = Number(match[1]);
+        if (!amount) return text;
+        switch (match[2]) {
+            case 'm': return String(amount);
+            case 'h': return String(amount * 60);
+            case 'd': return amount + 'D';
+            case 'w': return amount + 'W';
+            default: return amount + 'M';
+        }
+    }
+
+    function indicatorChartContext(entry) {
+        var context = { timeframe: engineTimeframe(entry.config.timeframe), lastBarConfirmed: true };
+        try {
+            var range = entry.chart.timeScale().getVisibleRange();
+            if (range) {
+                // Bars carry UTC seconds; the engine compares visible-range
+                // bounds against `bar.time * 1000`.
+                context.leftVisibleBarTime = range.from * 1000;
+                context.rightVisibleBarTime = range.to * 1000;
+            }
+        } catch (err) { /* chart mid-teardown */ }
+        return context;
+    }
+
+    function updateVolumeVisibility(entry) {
+        if (!entry.volumeSeries) return;
+        entry.volumeSeries.applyOptions({ visible: entry.config.showVolume !== false });
+    }
+
+    function clearIndicatorRuntimes(entry) {
+        (entry.indicatorRuntimes || []).forEach(function (runtime) {
+            if (!runtime.renderer) return;
+            try { runtime.renderer.clear(); } catch (err) { /* pane already gone */ }
+            runtime.renderer = null;
+        });
+        entry.indicatorRuntimes = [];
+        entry.indicatorPaneCount = 0;
+    }
+
+    function refreshIndicators(entry, opts) {
+        opts = opts || {};
+        if (!entry || entry.destroyed || !entry.chart) return;
+        updateVolumeVisibility(entry);
+        var configs = chartIndicators(entry);
+        var signature = indicatorSignature(entry);
+        var rebuild = opts.rebuild === true || signature !== entry.indicatorSignature;
+        if (!configs.length) {
+            clearIndicatorRuntimes(entry);
+            entry.indicatorSignature = signature;
+            renderLegend(entry);
+            return;
+        }
+        var seq = (entry.indicatorSeq || 0) + 1;
+        entry.indicatorSeq = seq;
+        loadIndicatorEngine().then(function () {
+            if (entry.destroyed || !entry.chart || seq !== entry.indicatorSeq) return;
+            applyIndicatorSet(entry, rebuild, opts.reuse === true);
+            entry.indicatorSignature = indicatorSignature(entry);
+        }).catch(function (err) {
+            if (entry.destroyed || seq !== entry.indicatorSeq) return;
+            console.warn('Indicator engine unavailable', err);
+            toast('Indicators unavailable: ' + err.message, 'error');
+            renderLegend(entry);
+        });
+    }
+
+    function applyIndicatorSet(entry, rebuild, reuse) {
+        var configs = chartIndicators(entry);
+        var kit = window.TradePanelIndicators;
+        if (!kit) return;
+        if (rebuild) clearIndicatorRuntimes(entry);
+
+        var previous = entry.indicatorRuntimes || [];
+        var runtimes = [];
+        configs.forEach(function (cfg, index) {
+            var meta = engineIndicator(cfg.id);
+            if (!meta) {
+                console.warn('Unknown indicator id', cfg.id);
+                return;
+            }
+            // Instances live at fixed positions, so a live refresh reuses the
+            // runtime belonging to this entry — not the first one with this id.
+            var runtime = null;
+            if (!rebuild && previous[index] && previous[index].id === cfg.id) {
+                runtime = previous[index];
+            }
+            if (!runtime) {
+                runtime = { id: cfg.id, meta: meta, renderer: null, pane: 0, result: null, plots: [], error: null };
+            }
+            runtime.index = index;
+            runtime.meta = meta;
+            runtime.config = cfg;
+            runtime.inputs = mergeIndicatorInputs(meta, cfg.inputs);
+            runtime.hidden = cfg.visible === false;
+            runtimes.push(runtime);
+        });
+        previous.forEach(function (runtime) {
+            if (runtimes.indexOf(runtime) >= 0 || !runtime.renderer) return;
+            try { runtime.renderer.clear(); } catch (err) { /* ignore */ }
+        });
+        entry.indicatorRuntimes = runtimes;
+
+        var paneIndex = 0;
+        runtimes.forEach(function (runtime) {
+            if (runtime.hidden) { runtime.pane = 0; return; }
+            runtime.pane = runtime.meta.overlay ? 0 : ++paneIndex;
+        });
+
+        var bars = indicatorBars(entry);
+        var context = indicatorChartContext(entry);
+        var keepSeries = reuse && !rebuild;
+        runtimes.forEach(function (runtime) {
+            runtime.error = null;
+            if (runtime.hidden) {
+                if (runtime.renderer) {
+                    try { runtime.renderer.clear(); } catch (err) { /* ignore */ }
+                    runtime.renderer = null;
+                }
+                return;
+            }
+            try {
+                runtime.result = runtime.meta.calculate(bars, runtime.inputs, context);
+            } catch (err) {
+                runtime.result = null;
+                runtime.plots = [];
+                runtime.error = err && err.message ? err.message : String(err);
+            }
+            if (!runtime.result) {
+                if (runtime.renderer) {
+                    try { runtime.renderer.clear(); } catch (err) { /* ignore */ }
+                    runtime.renderer = null;
+                }
+                return;
+            }
+            try {
+                if (!runtime.renderer) {
+                    runtime.renderer = new kit.IndicatorRenderer(entry.chart, {
+                        paneIndex: runtime.pane,
+                        mainSeries: entry.mainSeries
+                    });
+                } else {
+                    runtime.renderer.setPaneIndex(runtime.pane);
+                }
+                runtime.renderer.render(runtime.meta, runtime.result, bars, {
+                    inputs: runtime.inputs,
+                    plots: runtime.config && runtime.config.plots,
+                    reuseSeries: keepSeries,
+                    lastValueVisible: !runtime.meta.overlay
+                });
+                indexIndicatorPlots(runtime);
+            } catch (err) {
+                runtime.error = err && err.message ? err.message : String(err);
+                runtime.plots = [];
+                if (runtime.renderer) {
+                    try { runtime.renderer.clear(); } catch (clearErr) { /* ignore */ }
+                    runtime.renderer = null;
+                }
+            }
+        });
+
+        sizeIndicatorPanes(entry, paneIndex, rebuild);
         renderLegend(entry);
-        refreshLegacyLines(entry);
-        drawIndicatorOverlay(entry);
-        drawOscillators(entry);
     }
 
-    function refreshOverlayValues(entry) {
-        var ind = entry.ind;
-        if (!ind) return;
-        if (ind.sma && entry.overlays.sma) entry.overlays.sma.setData(ind.sma);
-        if (ind.ema && entry.overlays.ema) entry.overlays.ema.setData(ind.ema);
-        if (ind.vwap && entry.overlays.vwap) entry.overlays.vwap.setData(ind.vwap);
-        if (ind.bb) {
-            if (entry.overlays.bb_up) entry.overlays.bb_up.setData(ind.bb.upper);
-            if (entry.overlays.bb_mid) entry.overlays.bb_mid.setData(ind.bb.mid);
-            if (entry.overlays.bb_low) entry.overlays.bb_low.setData(ind.bb.lower);
+    function indexIndicatorPlots(runtime) {
+        var plots = runtime.result && runtime.result.plots ? runtime.result.plots : {};
+        var out = [];
+        (runtime.meta.plotConfig || []).forEach(function (plot) {
+            var values = plots[plot.id];
+            if (!Array.isArray(values) || !values.length) return;
+            if (plot.display === 'none') return;
+            if (plot.visible === false) return;
+            if (typeof plot.visible === 'string' && runtime.inputs[plot.visible] === false) return;
+            out.push({ id: plot.id, title: plot.title || plot.id, color: plot.color || '', values: values });
+        });
+        runtime.plots = out;
+    }
+
+    function sizeIndicatorPanes(entry, paneCount, force) {
+        if (!paneCount || (!force && entry.indicatorPaneCount === paneCount)) return;
+        entry.indicatorPaneCount = paneCount;
+        var panes;
+        try { panes = entry.chart.panes(); } catch (err) { return; }
+        // Stretch factors distribute the available height without fighting
+        // LWC's own min-height rebalancing (setHeight is only exact when it is
+        // the sole pane-changing call). 3:1 keeps the price pane dominant.
+        panes.forEach(function (pane, index) {
+            if (typeof pane.setStretchFactor !== 'function') return;
+            try { pane.setStretchFactor(index === 0 ? 3 : 1); } catch (err) { /* ignore */ }
+        });
+    }
+
+    function plotValueAt(plot, time) {
+        var values = plot.values;
+        if (!values || !values.length) return null;
+        var lo = 0, hi = values.length - 1, best = null;
+        while (lo <= hi) {
+            var mid = (lo + hi) >> 1;
+            if (values[mid].time <= time) { best = values[mid]; lo = mid + 1; }
+            else hi = mid - 1;
         }
-        drawOscillators(entry);
+        return best ? best.value : null;
+    }
+
+    function plotLastValue(plot) {
+        var values = plot.values;
+        for (var i = values.length - 1; i >= 0; i--) {
+            var value = values[i].value;
+            if (value != null && isFinite(value)) return value;
+        }
+        return null;
+    }
+
+    function formatIndicatorValue(value) {
+        if (value == null || !isFinite(value)) return '—';
+        var abs = Math.abs(value);
+        if (abs >= 10000) return value.toFixed(0);
+        if (abs >= 100) return value.toFixed(1);
+        if (abs >= 1) return value.toFixed(2);
+        if (abs === 0) return '0';
+        return value.toPrecision(3);
+    }
+
+    function indicatorValueText(runtime, time) {
+        if (runtime.hidden) return 'hidden';
+        if (runtime.error) return 'error';
+        if (!runtime.plots || !runtime.plots.length) return '—';
+        var parts = [];
+        for (var i = 0; i < runtime.plots.length && parts.length < 2; i++) {
+            var plot = runtime.plots[i];
+            var style = runtime.config && runtime.config.plots && runtime.config.plots[plot.id];
+            if (style && style.visible === false) continue;
+            if (plot.color === '#00000000' || plot.color === 'transparent') continue;
+            var value = time == null ? plotLastValue(plot) : plotValueAt(plot, time);
+            if (value == null || !isFinite(value)) continue;
+            parts.push(formatIndicatorValue(value));
+        }
+        return parts.length ? parts.join(' · ') : '—';
+    }
+
+    function legendButton(iconName, title, onClick, modifier) {
+        var button = el('button', 'ind-legend-btn' + (modifier ? ' ' + modifier : ''));
+        button.type = 'button';
+        button.title = title;
+        button.setAttribute('aria-label', title);
+        button.appendChild(panelIcon(iconName, 13));
+        button.addEventListener('click', function (event) {
+            event.stopPropagation();
+            onClick();
+        });
+        return button;
+    }
+
+    function legendSignature(entry) {
+        return (entry.indicatorRuntimes || []).map(function (runtime) {
+            return runtime.index + ':' + runtime.id + ':' + (runtime.hidden ? 1 : 0) + ':' +
+                (runtime.error ? 1 : 0) + ':' + indicatorColor(runtime.config, runtime.meta);
+        }).join('|');
     }
 
     function renderLegend(entry) {
-        var cfg = indicatorConfig(entry);
-        entry.legend.innerHTML = '';
-        Object.keys(IND_DEFS).forEach(function (key) {
-            if (key === 'volume') return;
-            var conf = cfg[key];
-            if (!conf || !conf.enabled) return;
-            var span = el('span');
-            span.style.setProperty('--lite', IND_DEFS[key].color);
-            span.style.borderColor = 'var(--border)';
-            span.appendChild(document.createTextNode(IND_DEFS[key].label));
-            if (conf.length) span.appendChild(el('b', '', ' ' + conf.length));
-            else if (key === 'macd') span.appendChild(el('b', '', ' ' + (conf.fast || 12) + '/' + (conf.slow || 26)));
-            entry.legend.appendChild(span);
-        });
-        if (cfg.volume && cfg.volume.enabled) {
-            var vol = el('span');
-            vol.style.setProperty('--lite', IND_DEFS.volume.color);
-            vol.appendChild(document.createTextNode('Vol'));
-            entry.legend.appendChild(vol);
-        }
-        Object.keys(LEGACY_DEFS).forEach(function (key) {
-            if (!indicatorEnabled(entry, key)) return;
-            var chip = el('span');
-            chip.style.setProperty('--lite', LEGACY_DEFS[key].color);
-            chip.appendChild(document.createTextNode(LEGACY_DEFS[key].label));
-            entry.legend.appendChild(chip);
-        });
-    }
-
-    function paneKeys(entry) {
-        var cfg = indicatorConfig(entry);
-        var keys = ['rsi', 'macd', 'atr'].filter(function (k) { return cfg[k] && cfg[k].enabled && entry.ind[k]; });
-        if (cfg.adx && cfg.adx.enabled && entry.legacy && entry.legacy.adx) keys.push('adx');
-        return keys;
-    }
-
-    function drawOscillators(entry) {
-        var keys = paneKeys(entry);
-        var pane = entry.pane;
-        if (!keys.length) {
-            pane.classList.remove('show');
-            pane.style.height = '0px';
+        var layer = entry.legend;
+        if (!layer) return;
+        var runtimes = entry.indicatorRuntimes || [];
+        var signature = legendSignature(entry);
+        if (signature === entry.legendSignature && layer.childNodes.length === runtimes.length) {
+            positionIndicatorLegends(entry);
+            updateLegendValues(entry, null);
             return;
         }
-        var bodyH = entry.body.clientHeight || 400;
-        var heights = keys.map(function (key) {
-            if (key === 'adx') {
-                var configured = Number(entry.legacy && entry.legacy.adx && entry.legacy.adx.pane_height);
-                return clamp(isFinite(configured) ? configured : 140, 80, 280);
+        entry.legendSignature = signature;
+        layer.innerHTML = '';
+        if (!runtimes.length) return;
+        var overlayRow = 0;
+        runtimes.forEach(function (runtime) {
+            var row = el('div', 'ind-pane-legend');
+            row.dataset.indicator = runtime.id;
+            row.dataset.instance = String(runtime.index);
+            row.dataset.pane = String(runtime.pane);
+            var hidden = runtime.hidden;
+            if (runtime.error) row.classList.add('error');
+            if (hidden) row.classList.add('hidden');
+            row.style.setProperty('--lite', indicatorColor(runtime.config, runtime.meta));
+            var eyeTitle = hidden ? 'Show ' + (runtime.meta.shortName || runtime.id) : 'Hide ' + (runtime.meta.shortName || runtime.id);
+            row.appendChild(legendButton(
+                hidden ? 'draw-hide-indicators' : 'st-legend-eye-show',
+                eyeTitle,
+                function () { toggleIndicatorVisibility(entry, runtime.index); }
+            ));
+            var title = el('span', 'ind-legend-title', runtime.meta.shortName || runtime.meta.name || runtime.id);
+            title.title = (runtime.meta.name || runtime.id) + ' — click to configure';
+            title.addEventListener('click', function () { openIndicatorSettings(entry, runtime.index); });
+            row.appendChild(title);
+            var value = el('b', 'ind-legend-value', '—');
+            row.appendChild(value);
+            row.appendChild(legendButton('dt-settings', 'Settings for ' + (runtime.meta.name || runtime.id), function () {
+                openIndicatorSettings(entry, runtime.index);
+            }));
+            row.appendChild(legendButton('tab-close', 'Remove ' + (runtime.meta.name || runtime.id) + ' from chart', function () {
+                removeChartIndicator(entry, runtime.index);
+            }, 'danger'));
+            if (runtime.pane === 0) {
+                row.dataset.row = String(overlayRow);
+                overlayRow += 1;
             }
-            return 64;
+            layer.appendChild(row);
+            runtime.legendEl = row;
         });
-        var total = heights.reduce(function (a, b) { return a + b; }, 8);
-        var maxHeight = Math.max(90, Math.floor(bodyH * 0.5));
-        var scale = total > maxHeight ? maxHeight / total : 1;
-        var height = Math.round(total * scale);
-        pane.classList.add('show');
-        pane.style.height = height + 'px';
-        var canvas = entry.paneCanvas;
-        var dpr = window.devicePixelRatio || 1;
-        var w = pane.clientWidth, h = height;
-        if (!w || !h) return;
-        canvas.width = Math.round(w * dpr);
-        canvas.height = Math.round(h * dpr);
-        var ctx = canvas.getContext('2d');
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.clearRect(0, 0, w, h);
-        ctx.font = '9px "JetBrains Mono", monospace';
-        ctx.textBaseline = 'middle';
-        var plotW = entry.chart.timeScale().width();
-        var times = entry.rawSeries ? entry.rawSeries.times : [];
-        var top = 0;
-        keys.forEach(function (key, idx) {
-            var paneHeight = heights[idx] * scale;
-            drawPane(entry, key, ctx, top, paneHeight, plotW, times);
-            top += paneHeight;
-        });
+        positionIndicatorLegends(entry);
+        updateLegendValues(entry, null);
     }
 
-    function drawPane(entry, key, ctx, top, height, plotW, times) {
-        var ind = entry.ind[key];
-        var ts = entry.chart.timeScale();
-        var pad = 6;
-        ctx.strokeStyle = THEME.grid;
-        ctx.beginPath(); ctx.moveTo(0, top + 0.5); ctx.lineTo(plotW, top + 0.5); ctx.stroke();
-        ctx.fillStyle = THEME.crosshair;
-        ctx.fillText(key.toUpperCase(), 6, top + 9);
-
-        function xs(time) { var x = ts.timeToCoordinate(time); return x == null ? null : x; }
-
-        if (key === 'rsi') {
-            var vals = ind.values;
-            var yFor = function (v) { return top + pad + (1 - v / 100) * (height - pad * 2); };
-            ctx.strokeStyle = 'rgba(6,182,212,0.85)';
-            ctx.lineWidth = 1.4;
-            ctx.beginPath();
-            var started = false;
-            for (var i = 0; i < vals.length; i++) {
-                if (vals[i] == null) continue;
-                var x = xs(times[i]);
-                if (x == null) continue;
-                if (x < -20) continue;
-                if (x > plotW + 20) break;
-                if (!started) { ctx.moveTo(x, yFor(vals[i])); started = true; }
-                else ctx.lineTo(x, yFor(vals[i]));
-            }
-            ctx.stroke();
-            [30, 70].forEach(function (level) {
-                ctx.strokeStyle = THEME.grid;
-                ctx.setLineDash([3, 4]);
-                ctx.beginPath(); ctx.moveTo(0, yFor(level)); ctx.lineTo(plotW, yFor(level)); ctx.stroke();
-                ctx.setLineDash([]);
-                ctx.fillStyle = THEME.muted;
-                ctx.fillText(String(level), plotW + 4, yFor(level));
+    /** Keep a legend row glued to the top-left of its pane (drag, resize, zoom). */
+    function observeIndicatorPanes(entry) {
+        if (typeof ResizeObserver !== 'function' || !entry.chart) return;
+        var panes;
+        try { panes = entry.chart.panes(); } catch (err) { return; }
+        if (!entry.paneObserver) {
+            entry.paneObserver = new ResizeObserver(function () {
+                if (!entry.destroyed) positionIndicatorLegends(entry);
             });
-        } else if (key === 'macd') {
-            var data = ind;
-            var nums = [];
-            data.line.concat(data.signal, data.hist).forEach(function (v) { if (v != null) nums.push(v); });
-            var max = Math.max.apply(null, nums.concat([0.0001]));
-            var min = Math.min.apply(null, nums.concat([-0.0001]));
-            var y = function (v) { return top + pad + (1 - (v - min) / (max - min || 1)) * (height - pad * 2); };
-            var zero = y(0);
-            ctx.strokeStyle = THEME.grid;
-            ctx.beginPath(); ctx.moveTo(0, zero); ctx.lineTo(plotW, zero); ctx.stroke();
-            for (var j = 0; j < data.hist.length; j++) {
-                if (data.hist[j] == null) continue;
-                var hx = xs(times[j]);
-                if (hx == null || hx < -5 || hx > plotW + 5) continue;
-                ctx.fillStyle = data.hist[j] >= 0 ? rgbaOf('upRgb', 0.35) : rgbaOf('downRgb', 0.35);
-                var yTop = data.hist[j] >= 0 ? y(data.hist[j]) : zero;
-                ctx.fillRect(hx - 1.5, yTop, 3, Math.abs(y(data.hist[j]) - zero));
-            }
-            [['line', '#F472B6'], ['signal', '#FBBF24']].forEach(function (pair) {
-                var values = data[pair[0]];
-                ctx.strokeStyle = pair[1];
-                ctx.lineWidth = 1.3;
-                ctx.beginPath();
-                var started = false;
-                for (var k = 0; k < values.length; k++) {
-                    if (values[k] == null) continue;
-                    var x = xs(times[k]);
-                    if (x == null || x < -20) continue;
-                    if (x > plotW + 20) break;
-                    if (!started) { ctx.moveTo(x, y(values[k])); started = true; }
-                    else ctx.lineTo(x, y(values[k]));
-                }
-                ctx.stroke();
-            });
-        } else if (key === 'adx') {
-            var adxData = entry.legacy.adx;
-            var levels = adxData.levels || [25];
-            var val = function (v) { return top + pad + (1 - Math.max(0, Math.min(100, v)) / 100) * (height - pad * 2); };
-            levels.forEach(function (level) {
-                ctx.strokeStyle = THEME.grid;
-                ctx.setLineDash([3, 4]);
-                ctx.beginPath(); ctx.moveTo(0, val(level)); ctx.lineTo(plotW, val(level)); ctx.stroke();
-                ctx.setLineDash([]);
-                ctx.fillStyle = THEME.muted;
-                ctx.fillText(String(level), plotW + 4, val(level));
-            });
-            function drawAdxLine(points, color, width) {
-                ctx.strokeStyle = color;
-                ctx.lineWidth = width || 1.4;
-                ctx.beginPath();
-                var started = false;
-                for (var ai = 0; ai < points.length; ai++) {
-                    var ax = xs(points[ai].time);
-                    if (ax == null || ax < -20) continue;
-                    if (ax > plotW + 20) break;
-                    if (!started) { ctx.moveTo(ax, val(points[ai].value)); started = true; }
-                    else ctx.lineTo(ax, val(points[ai].value));
-                }
-                ctx.stroke();
-            }
-            if (adxData.show_di_lines) {
-                drawAdxLine(adxData.plus_di || [], 'rgba(34,197,94,0.8)', 1.1);
-                drawAdxLine(adxData.minus_di || [], 'rgba(239,68,68,0.8)', 1.1);
-            }
-            drawAdxLine(adxData.adx || [], '#FB923C', 1.5);
-        } else if (key === 'atr') {
-            var values = ind.values;
-            var maxA = 0;
-            values.forEach(function (v) { if (v != null && v > maxA) maxA = v; });
-            var yA = function (v) { return top + pad + (1 - v / (maxA || 1)) * (height - pad * 2); };
-            ctx.strokeStyle = ind.color;
-            ctx.lineWidth = 1.4;
-            ctx.beginPath();
-            var startedA = false;
-            for (var k = 0; k < values.length; k++) {
-                if (values[k] == null) continue;
-                var xa = xs(times[k]);
-                if (xa == null || xa < -20) continue;
-                if (xa > plotW + 20) break;
-                if (!startedA) { ctx.moveTo(xa, yA(values[k])); startedA = true; }
-                else ctx.lineTo(xa, yA(values[k]));
-            }
-            ctx.stroke();
-            if (maxA) {
-                ctx.fillStyle = THEME.muted;
-                ctx.fillText(maxA.toFixed(2), plotW + 4, top + 10);
-            }
         }
-    }
-
-
-    /* ── Legacy chart indicators (computed in Python) ────────────────────── */
-
-    function indicatorEnabled(entry, key) {
-        var conf = entry.config.indicators && entry.config.indicators[key];
-        return !!(conf && conf.enabled);
-    }
-
-    function legacyFlags(entry) {
-        var flags = {};
-        Object.keys(LEGACY_DEFS).forEach(function (key) {
-            if (indicatorEnabled(entry, key)) flags[key] = true;
-        });
-        return flags;
-    }
-
-    function requestLegacy(entry) {
-        if (!Bridge.ready || entry.destroyed) return;
-        var flags = legacyFlags(entry);
-        if (!Object.keys(flags).length) {
-            entry.legacy = {};
-            refreshLegacyLines(entry);
-            drawIndicatorOverlay(entry);
-            drawOscillators(entry);
-            return;
-        }
-        entry.legacyRequestedAt = Date.now();
-        var seq = ++entry.legacySeq;
-        Bridge.request('requestIndicators', [
-            entry.config.exchange, entry.config.market, entry.config.symbol,
-            entry.config.timeframe, JSON.stringify(flags)
-        ]).then(function (payload) {
-            if (entry.destroyed || seq !== entry.legacySeq) return;
-            entry.legacy = payload || {};
-            refreshLegacyLines(entry);
-            drawIndicatorOverlay(entry);
-            drawOscillators(entry);
-        }).catch(function (err) {
-            console.warn('Legacy indicators unavailable for', entry.config.symbol, err);
+        var watched = entry.paneObserverPanes || (entry.paneObserverPanes = []);
+        panes.forEach(function (pane) {
+            if (typeof pane.getHTMLElement !== 'function') return;
+            var el = pane.getHTMLElement();
+            if (!el || watched.indexOf(el) >= 0) return;
+            watched.push(el);
+            entry.paneObserver.observe(el);
         });
     }
 
-    function transformPoints(entry, points) {
-        return (points || []).map(function (p) {
-            return { time: p.time, value: transformValue(entry, p.value) };
-        });
-    }
-
-    function refreshLegacyLines(entry) {
-        var data = entry.legacy || {};
-        var ribbon = [
-            ['ribbon1', '#2196F3'], ['ribbon2', '#FF9800'], ['ribbon3', '#E91E63']
-        ];
-        ribbon.forEach(function (pair, index) {
-            var points = data.ribbon && data.ribbon['line' + (index + 1)];
-            if (indicatorEnabled(entry, 'ribbon') && points && points.length) {
-                ensureOverlaySeries(entry, pair[0], pair[1], 1.4).setData(transformPoints(entry, points));
-            } else {
-                clearOverlay(entry, pair[0]);
+    function positionIndicatorLegends(entry) {
+        if (!entry.legend || !entry.chart || !entry.body) return;
+        var panes;
+        try { panes = entry.chart.panes(); } catch (err) { return; }
+        observeIndicatorPanes(entry);
+        var bodyRect = entry.body.getBoundingClientRect();
+        var priceRows = 0;
+        (entry.indicatorRuntimes || []).forEach(function (runtime) {
+            var row = runtime.legendEl;
+            if (!row) return;
+            var pane = panes[runtime.pane] || panes[0];
+            if (!pane || typeof pane.getHTMLElement !== 'function') return;
+            var paneEl = pane.getHTMLElement();
+            if (!paneEl) return;
+            var rect = paneEl.getBoundingClientRect();
+            var top = rect.top - bodyRect.top + 4;
+            if (runtime.pane === 0) {
+                // Clear the OHLC readout that sits at the price pane's top-left.
+                top += 24 + priceRows * 17;
+                priceRows += 1;
             }
+            row.style.top = Math.round(top) + 'px';
+            row.style.left = Math.round(rect.left - bodyRect.left + 8) + 'px';
         });
-        var hlHigh = data.hl_ema && data.hl_ema.ema_high;
-        var hlLow = data.hl_ema && data.hl_ema.ema_low;
-        if (indicatorEnabled(entry, 'hl_ema') && hlHigh) {
-            ensureOverlaySeries(entry, 'hl_high', '#26A69A', 1.4).setData(transformPoints(entry, hlHigh));
-            ensureOverlaySeries(entry, 'hl_low', '#EF5350', 1.4).setData(transformPoints(entry, hlLow || []));
+    }
+
+    function updateLegendValues(entry, time) {
+        if (!entry.indicatorRuntimes || !entry.indicatorRuntimes.length) return;
+        entry.indicatorRuntimes.forEach(function (runtime) {
+            var row = runtime.legendEl;
+            if (!row) return;
+            var valueNode = row.querySelector('.ind-legend-value');
+            if (!valueNode) return;
+            var text = indicatorValueText(runtime, time);
+            if (valueNode.textContent !== text) valueNode.textContent = text;
+        });
+    }
+
+    function scheduleVisibleRangeIndicators(entry) {
+        var runtimes = entry.indicatorRuntimes || [];
+        var needed = false;
+        for (var i = 0; i < runtimes.length; i++) {
+            if (runtimes[i].meta && runtimes[i].meta.usesVisibleRange) { needed = true; break; }
+        }
+        if (!needed || entry.indicatorRangeTimer) return;
+        entry.indicatorRangeTimer = setTimeout(function () {
+            entry.indicatorRangeTimer = null;
+            if (!entry.destroyed) refreshIndicators(entry, { reuse: true });
+        }, 160);
+    }
+
+    /* ── Settings inputs ─────────────────────────────────────────────────── */
+
+    function inputConditionHolds(condition, inputs, configs) {
+        function value(id) {
+            if (inputs && inputs[id] !== undefined) return inputs[id];
+            for (var i = 0; i < configs.length; i++) if (configs[i].id === id) return configs[i].defval;
+            return undefined;
+        }
+        if (typeof condition === 'string') return value(condition) === true;
+        if (condition && typeof condition === 'object') {
+            if ('not' in condition) return !inputConditionHolds(condition.not, inputs, configs);
+            if ('any' in condition) return condition.any.some(function (c) { return inputConditionHolds(c, inputs, configs); });
+            if ('all' in condition) return condition.all.every(function (c) { return inputConditionHolds(c, inputs, configs); });
+            var current = value(condition.input);
+            if (!('eq' in condition) && !('ne' in condition)) return current === true;
+            return (!('eq' in condition) || current === condition.eq) &&
+                (!('ne' in condition) || current !== condition.ne);
+        }
+        return true;
+    }
+
+    function indicatorInputActive(input, inputs, configs) {
+        if (input.active === undefined) return true;
+        if (typeof input.active === 'boolean') return input.active;
+        return inputConditionHolds(input.active, inputs, configs);
+    }
+
+    function indicatorInputControl(input, value, onCommit) {
+        var type = input.type || 'text';
+        var node;
+        if (type === 'bool') {
+            node = el('input');
+            node.type = 'checkbox';
+            node.checked = value === undefined ? !!input.defval : !!value;
+            node.addEventListener('change', function () { onCommit(node.checked); });
+        } else if (type === 'int' || type === 'float') {
+            node = el('input');
+            node.type = 'number';
+            node.value = value === undefined ? input.defval : value;
+            if (input.min != null) node.min = String(input.min);
+            if (input.max != null) node.max = String(input.max);
+            node.step = type === 'int' ? '1' : (input.step != null ? String(input.step) : 'any');
+            node.addEventListener('change', function () {
+                var next = Number(node.value);
+                if (!isFinite(next)) next = Number(input.defval) || 0;
+                if (input.min != null) next = Math.max(Number(input.min), next);
+                if (input.max != null) next = Math.min(Number(input.max), next);
+                if (type === 'int') next = Math.round(next);
+                node.value = String(next);
+                onCommit(next);
+            });
+        } else if (Array.isArray(input.options)) {
+            node = el('select');
+            input.options.forEach(function (option) {
+                var item = el('option', null, String(option));
+                item.value = String(option);
+                node.appendChild(item);
+            });
+            node.value = value === undefined ? String(input.defval) : String(value);
+            node.addEventListener('change', function () { onCommit(node.value); });
+        } else if (type === 'source') {
+            node = el('select');
+            INDICATOR_SOURCES.forEach(function (source) {
+                var item = el('option', null, source);
+                item.value = source;
+                node.appendChild(item);
+            });
+            if (INDICATOR_SOURCES.indexOf(String(value)) < 0) node.appendChild(el('option', null, String(value || input.defval)));
+            node.value = value === undefined ? String(input.defval) : String(value);
+            node.addEventListener('change', function () { onCommit(node.value); });
         } else {
-            clearOverlay(entry, 'hl_high');
-            clearOverlay(entry, 'hl_low');
+            node = el('input');
+            node.type = 'text';
+            node.value = value === undefined || value === null ? (input.defval == null ? '' : String(input.defval)) : String(value);
+            node.addEventListener('change', function () { onCommit(node.value.trim()); });
         }
+        node.title = input.tooltip || input.title || input.id;
+        node.setAttribute('aria-label', input.title || input.id);
+        return node;
     }
 
-    function withAlpha(hex, alpha) {
-        if (typeof hex !== 'string' || hex.charAt(0) !== '#' || (hex.length !== 7 && hex.length !== 4)) {
-            return 'rgba(161,161,170,' + alpha + ')';
+    function buildIndicatorInputs(meta, inputs, inputConfig, onChange) {
+        var box = el('div', 'ind-settings');
+        var configs = inputConfig || (meta && meta.inputConfig) || [];
+        var visible = configs.filter(function (input) { return input.display !== 'none'; });
+        if (!visible.length) {
+            box.appendChild(el('div', 'ind-desc', 'This indicator has no configurable inputs.'));
+            return box;
         }
-        var value = hex;
-        if (hex.length === 4) {
-            value = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
-        }
-        var num = parseInt(value.slice(1), 16);
-        return 'rgba(' + ((num >> 16) & 255) + ',' + ((num >> 8) & 255) + ',' + (num & 255) + ',' + alpha + ')';
-    }
-
-    function resizeIndCanvas(entry) {
-        var canvas = entry.indCanvas;
-        if (!canvas) return;
-        var dpr = window.devicePixelRatio || 1;
-        var w = entry.host.clientWidth, h = entry.host.clientHeight;
-        if (!w || !h) return;
-        if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
-            canvas.width = Math.round(w * dpr);
-            canvas.height = Math.round(h * dpr);
-        }
-    }
-
-    function drawIndicatorOverlay(entry) {
-        if (!entry || !entry.chart || entry.destroyed || !entry.indCanvas) return;
-        resizeIndCanvas(entry);
-        var canvas = entry.indCanvas;
-        var ctx = canvas.getContext('2d');
-        var dpr = window.devicePixelRatio || 1;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        var w = canvas.width / dpr, h = canvas.height / dpr;
-        ctx.clearRect(0, 0, w, h);
-        var data = entry.legacy || {};
-        var box = plotBox(entry);
-        var priceSpan = Math.abs(entry.display.length ? entry.display[entry.display.length - 1].close : 1);
-
-        function rectFor(t0, t1, high, low, fill, stroke, label) {
-            var x0 = xForTime(entry, t0);
-            var x1 = xForTime(entry, t1);
-            var yHigh = yForPrice(entry, high);
-            var yLow = yForPrice(entry, low);
-            if (x0 == null || yHigh == null || yLow == null) return;
-            if (x1 == null) x1 = box.w;
-            if (x1 < -20 || x0 > box.w + 20) return;
-            ctx.fillStyle = fill;
-            ctx.strokeStyle = stroke;
-            ctx.lineWidth = 1;
-            ctx.fillRect(x0, Math.min(yHigh, yLow), Math.max(1, x1 - x0), Math.max(1, Math.abs(yLow - yHigh)));
-            ctx.strokeRect(x0 + 0.5, Math.min(yHigh, yLow) + 0.5, Math.max(1, x1 - x0 - 1), Math.max(1, Math.abs(yLow - yHigh) - 1));
-            if (label) {
-                ctx.fillStyle = stroke;
-                ctx.font = '8.5px "JetBrains Mono", monospace';
-                ctx.fillText(label, x0 + 4, Math.min(yHigh, yLow) + 10);
+        var group = null;
+        var groupBox = null;
+        visible.forEach(function (input) {
+            var active = indicatorInputActive(input, inputs, configs);
+            if (input.group !== group) {
+                group = input.group || '';
+                groupBox = el('div', 'ind-group');
+                if (group) groupBox.appendChild(el('div', 'ind-group-title', group));
+                box.appendChild(groupBox);
             }
+            var row = el('label', 'ind-field');
+            row.appendChild(el('span', 'ind-field-label', input.title || input.id));
+            var control = indicatorInputControl(input, inputs[input.id], function (value) {
+                inputs[input.id] = value;
+                onChange(inputs);
+            });
+            control.disabled = !active;
+            row.appendChild(control);
+            (groupBox || box).appendChild(row);
+        });
+        return box;
+    }
+
+    /* ── Study settings dialog (Inputs / Style / Visibility) ─────────────── */
+
+    function openIndicatorSettings(entry, index) {
+        var list = chartIndicators(entry);
+        var cfg = chartIndicatorAt(entry, index);
+        if (!cfg) return;
+        var id = cfg.id;
+        var original = clone(cfg);
+        var draft = clone(cfg);
+        var meta = indicatorMeta(id) || { id: id, name: id, plotConfig: [], inputConfig: [], defaultInputs: {} };
+        var activeTab = 'inputs';
+        var previewTimer = null;
+
+        var body = el('div', 'ind-settings-dialog');
+        var tabs = el('div', 'ind-settings-tabs');
+        var pane = el('div', 'ind-settings-pane');
+        body.appendChild(tabs);
+        body.appendChild(pane);
+
+        function preview() {
+            writeback(clone(draft));
+            refreshIndicators(entry, { rebuild: true });
         }
 
-        if (data.sessions) {
-            Object.keys(LEGACY_DEFS).forEach(function (key) {
-                if (key.indexOf('session_') !== 0 || !indicatorEnabled(entry, key)) return;
-                var sessionKey = key.slice('session_'.length);
-                (data.sessions[sessionKey] || []).forEach(function (boxData) {
-                    var color = boxData.color || LEGACY_DEFS[key].color;
-                    rectFor(boxData.time, boxData.end_time, boxData.high, boxData.low,
-                        withAlpha(color, 0.09), withAlpha(color, 0.65), boxData.name);
-                });
-            });
+        function schedulePreview() {
+            clearTimeout(previewTimer);
+            previewTimer = setTimeout(function () {
+                previewTimer = null;
+                if (!entry.destroyed) preview();
+            }, 220);
         }
 
-        if (indicatorEnabled(entry, 'fvg') && data.fvg) {
-            (data.fvg.bullish || []).forEach(function (gap) {
-                rectFor(gap.time, gap.end_time >= 2147483647 ? box.w : gap.end_time,
-                    gap.high, gap.low, 'rgba(34,197,94,0.10)', 'rgba(34,197,94,0.45)');
-            });
-            (data.fvg.bearish || []).forEach(function (gap) {
-                rectFor(gap.time, gap.end_time >= 2147483647 ? box.w : gap.end_time,
-                    gap.high, gap.low, 'rgba(239,68,68,0.10)', 'rgba(239,68,68,0.45)');
-            });
+        function commitInputs(inputs) {
+            draft.inputs = sanitizeIndicatorInputs(inputs);
+            schedulePreview();
         }
 
-        function drawProfile(profile, startTime, endTime) {
-            if (!profile || !profile.rows || !profile.rows.length) return;
-            var x0 = xForTime(entry, startTime);
-            var x1 = xForTime(entry, endTime);
-            if (x0 == null) return;
-            if (x1 == null) x1 = box.w;
-            var span = Math.max(14, x1 - x0);
-            var max = profile.max_volume || 1;
-            profile.rows.forEach(function (row) {
-                var yTop = yForPrice(entry, row.price_high);
-                var yBot = yForPrice(entry, row.price_low);
-                if (yTop == null || yBot == null) return;
-                var height = Math.max(1, Math.abs(yBot - yTop));
-                var width = Math.max(1, span * (row.volume / max));
-                var isPoc = profile.poc_price != null &&
-                    profile.poc_price >= row.price_low && profile.poc_price <= row.price_high;
-                ctx.fillStyle = isPoc ? 'rgba(244,67,54,0.28)' : 'rgba(33,150,243,0.18)';
-                ctx.fillRect(x0, Math.min(yTop, yBot), width, height);
-            });
-            var pocY = yForPrice(entry, profile.poc_price);
-            if (pocY != null) {
-                ctx.strokeStyle = 'rgba(244,67,54,0.65)';
-                ctx.setLineDash([3, 3]);
-                ctx.beginPath();
-                ctx.moveTo(x0, pocY);
-                ctx.lineTo(x1, pocY);
-                ctx.stroke();
-                ctx.setLineDash([]);
+        function renderInputs() {
+            var box = buildIndicatorInputs(meta, mergeIndicatorInputs(meta, draft.inputs), meta.inputConfig, commitInputs);
+            pane.appendChild(box);
+        }
+
+        function plotStyle(plotId, create) {
+            if (!draft.plots || !draft.plots[plotId]) {
+                if (!create) return {};
+                if (!draft.plots) draft.plots = {};
+                draft.plots[plotId] = {};
             }
-            // 70% value area (VAH / VAL) from the same bins.
-            var totalVolume = profile.rows.reduce(function (sum, row) { return sum + (row.volume || 0); }, 0);
-            if (totalVolume > 0) {
-                var sorted = profile.rows.slice().sort(function (a, b) { return (b.volume || 0) - (a.volume || 0); });
-                var accumulated = 0, vah = -Infinity, val = Infinity;
-                for (var si = 0; si < sorted.length; si++) {
-                    accumulated += sorted[si].volume || 0;
-                    vah = Math.max(vah, sorted[si].price_high);
-                    val = Math.min(val, sorted[si].price_low);
-                    if (accumulated >= totalVolume * 0.7) break;
+            return draft.plots[plotId];
+        }
+
+        function renderStyle() {
+            var plots = (meta.plotConfig || []).filter(function (plot) { return plot.display !== 'none'; });
+            var box = el('div', 'ind-settings');
+            if (!plots.length) {
+                box.appendChild(el('div', 'ind-desc', 'This indicator exposes no editable plots.'));
+                pane.appendChild(box);
+                return;
+            }
+            plots.forEach(function (plot) {
+                var style = (draft.plots && draft.plots[plot.id]) || {};
+                var row = el('div', 'ind-field style-row');
+                row.appendChild(el('span', 'ind-field-label', plot.title || plot.id));
+                var controls = el('div', 'ind-style-controls');
+                var color = el('input');
+                var current = typeof style.color === 'string' ? style.color : (plot.color || '#2962FF');
+                if (/^#[0-9a-fA-F]{6}$/.test(current)) {
+                    color.type = 'color';
+                } else {
+                    color.type = 'text';
                 }
-                [[vah, 'rgba(33,150,243,0.65)'], [val, 'rgba(33,150,243,0.65)']].forEach(function (pair) {
-                    var y = yForPrice(entry, pair[0]);
-                    if (y == null) return;
-                    ctx.strokeStyle = pair[1];
-                    ctx.setLineDash([2, 4]);
-                    ctx.beginPath();
-                    ctx.moveTo(x0, y);
-                    ctx.lineTo(x1, y);
-                    ctx.stroke();
-                    ctx.setLineDash([]);
+                color.value = current;
+                color.title = 'Line colour';
+                color.setAttribute('aria-label', (plot.title || plot.id) + ' colour');
+                color.addEventListener('input', function () {
+                    if (/^(#[0-9a-fA-F]{3,8}|transparent)$/.test(color.value)) {
+                        plotStyle(plot.id, true).color = color.value;
+                        schedulePreview();
+                    }
                 });
-            }
+                var width = el('select');
+                [0, 1, 2, 3, 4].forEach(function (value) {
+                    var option = el('option', null, value === 0 ? '0 px' : value + ' px');
+                    option.value = String(value);
+                    width.appendChild(option);
+                });
+                width.value = String(style.lineWidth != null ? style.lineWidth : (plot.lineWidth != null ? plot.lineWidth : 1));
+                width.title = 'Line width';
+                width.setAttribute('aria-label', (plot.title || plot.id) + ' width');
+                width.addEventListener('change', function () {
+                    plotStyle(plot.id, true).lineWidth = Number(width.value);
+                    schedulePreview();
+                });
+                var show = el('input');
+                show.type = 'checkbox';
+                show.checked = style.visible !== false && plot.visible !== 'none';
+                show.title = 'Draw this plot';
+                show.setAttribute('aria-label', 'Draw ' + (plot.title || plot.id));
+                show.addEventListener('change', function () {
+                    plotStyle(plot.id, true).visible = show.checked;
+                    schedulePreview();
+                });
+                var reset = el('button', 'ind-icon-btn', '↺');
+                reset.type = 'button';
+                reset.title = 'Reset this plot';
+                reset.setAttribute('aria-label', reset.title);
+                reset.addEventListener('click', function () {
+                    if (draft.plots) {
+                        delete draft.plots[plot.id];
+                        if (!Object.keys(draft.plots).length) draft.plots = {};
+                    }
+                    schedulePreview();
+                    renderPane();
+                });
+                controls.append(color, width, show, reset);
+                row.appendChild(controls);
+                box.appendChild(row);
+            });
+            pane.appendChild(box);
         }
 
-        if (indicatorEnabled(entry, 'vp') && data.vp) {
-            var length = (WS.indicatorConfig.volume_profile && WS.indicatorConfig.volume_profile.length) || 100;
-            var first = entry.candles[Math.max(0, entry.candles.length - length)];
-            if (first) drawProfile(data.vp, first.time, entry.candles[entry.candles.length - 1].time);
+        function renderVisibility() {
+            var box = el('div', 'ind-settings');
+            var row = el('label', 'ind-field');
+            row.appendChild(el('span', 'ind-field-label', 'Show on chart'));
+            var toggle = el('input');
+            toggle.type = 'checkbox';
+            toggle.checked = draft.visible !== false;
+            toggle.addEventListener('change', function () {
+                draft.visible = toggle.checked;
+                preview();
+            });
+            row.appendChild(toggle);
+            box.appendChild(row);
+            box.appendChild(el('div', 'ind-desc',
+                'Hidden studies keep their inputs and styles, and can be shown again from the chart legend.'));
+            pane.appendChild(box);
         }
-        if (indicatorEnabled(entry, 'daily_vp') && data.daily_vp) {
-            data.daily_vp.forEach(function (profile) {
-                drawProfile(profile, profile.start_time, profile.end_time);
+
+        function renderPane() {
+            pane.innerHTML = '';
+            if (activeTab === 'inputs') renderInputs();
+            else if (activeTab === 'style') renderStyle();
+            else renderVisibility();
+            tabs.querySelectorAll('button').forEach(function (button) {
+                button.setAttribute('aria-pressed', String(button.dataset.tab === activeTab));
             });
         }
-        if (indicatorEnabled(entry, 'session_vp') && data.session_vp) {
-            drawProfile(data.session_vp, data.session_vp.start_time, data.session_vp.end_time);
+
+        [
+            ['inputs', 'Inputs'],
+            ['style', 'Style'],
+            ['visibility', 'Visibility']
+        ].forEach(function (pair) {
+            var button = el('button', 'ind-settings-tab', pair[1]);
+            button.type = 'button';
+            button.dataset.tab = pair[0];
+            button.addEventListener('click', function () {
+                activeTab = pair[0];
+                renderPane();
+            });
+            tabs.appendChild(button);
+        });
+
+        // The list is the live chart config; never write past a removal that
+        // happened while the dialog was open.
+        function writeback(value) {
+            if (!chartIndicatorAt(entry, index) || chartIndicators(entry)[index].id !== id) return false;
+            chartIndicators(entry)[index] = value;
+            return true;
         }
 
-        void priceSpan;
+        // Live preview mutates the chart config, so a dismissal (X, Escape,
+        // backdrop) must roll the study back — otherwise the change looks
+        // applied but is never saved and disappears on the next start.
+        var settled = false;
+
+        var cancel = el('button', 'btn-ghost', 'Cancel');
+        cancel.addEventListener('click', function () {
+            settled = true;
+            clearTimeout(previewTimer);
+            writeback(original);
+            refreshIndicators(entry, { rebuild: true });
+            // A save may have raced the live preview: persist the rollback so
+            // the dismissed values cannot come back on the next start.
+            scheduleSave();
+            closeModal();
+        });
+        var apply = el('button', 'btn-ghost primary', 'Apply');
+        apply.addEventListener('click', function () {
+            settled = true;
+            clearTimeout(previewTimer);
+            writeback(clone(draft));
+            refreshIndicators(entry, { rebuild: true });
+            notifyIndicatorsChanged(entry);
+            scheduleSave();
+            closeModal();
+        });
+        var foot = el('div');
+        foot.style.display = 'flex';
+        foot.style.gap = '8px';
+        foot.style.marginLeft = 'auto';
+        foot.append(cancel, apply);
+
+        var ordinal = 0;
+        var total = 0;
+        list.forEach(function (item, i) {
+            if (item.id !== id) return;
+            total += 1;
+            if (i <= index) ordinal += 1;
+        });
+
+        openModal({
+            title: (meta.name || id) + ' settings' + (total > 1 ? ' · ' + ordinal + '/' + total : ''),
+            sub: entry.config.symbol + ' · ' + entry.config.timeframe,
+            body: body,
+            foot: foot,
+            onClose: function () {
+                clearTimeout(previewTimer);
+                if (settled) return;
+                settled = true;
+                writeback(original);
+                refreshIndicators(entry, { rebuild: true });
+                scheduleSave();
+            }
+        });
+        renderPane();
+    }
+
+    /* ── Indicator picker dialog ─────────────────────────────────────────── */
+
+    function openIndicatorModal(entry) {
+        var wrap = el('div', 'ind-picker');
+        var top = el('div', 'ind-picker-top');
+        var search = el('input', 'ind-search');
+        search.type = 'search';
+        search.placeholder = 'Search indicators — name, id or category';
+        search.setAttribute('aria-label', 'Search indicators');
+        top.appendChild(search);
+        wrap.appendChild(top);
+
+        var tabs = el('div', 'ind-cats');
+        wrap.appendChild(tabs);
+        var list = el('div', 'ind-list');
+        wrap.appendChild(list);
+        var status = el('div', 'ind-status', 'Loading indicator catalog…');
+        wrap.appendChild(status);
+
+        var state = { query: '', group: 'standard' };
+
+        /** How many instances of each study are on the chart right now. */
+        function appliedCounts() {
+            var out = {};
+            chartIndicators(entry).forEach(function (cfg) { out[cfg.id] = (out[cfg.id] || 0) + 1; });
+            return out;
+        }
+
+        function groupItems() {
+            var catalog = INDICATORS.catalog || [];
+            var query = state.query.trim().toLowerCase();
+            if (query) {
+                return catalog.filter(function (item) {
+                    return (item.name + ' ' + item.shortName + ' ' + item.id + ' ' + item.category).toLowerCase().indexOf(query) >= 0;
+                });
+            }
+            return catalog.filter(function (item) { return item.group === state.group; });
+        }
+
+        function addRow(item, count) {
+            var button = el('button', 'ind-pick');
+            button.type = 'button';
+            button.setAttribute('aria-pressed', String(count > 0));
+            var dot = el('span', 'dot');
+            dot.style.setProperty('--c', indicatorPatch(item.id));
+            button.appendChild(dot);
+            var nameWrap = el('span', 'ind-pick-name');
+            nameWrap.appendChild(document.createTextNode(item.name));
+            nameWrap.appendChild(el('em', '', item.shortName || item.id));
+            button.appendChild(nameWrap);
+            button.appendChild(el('span', 'ind-pick-cat', item.category || ''));
+            button.appendChild(el('span', 'ind-pick-state', count > 0 ? 'Add · ' + count : 'Add'));
+            button.title = (item.description || item.name) + ' · ' + (item.category || '') +
+                (count > 0 ? ' · ' + count + ' on chart — click to add another instance' : '');
+            // A study can be added repeatedly: each click is a new, independent
+            // instance with its own inputs and style.
+            button.addEventListener('click', function () {
+                if (addChartIndicator(entry, item)) {
+                    render();
+                    search.focus();
+                }
+            });
+            list.appendChild(button);
+        }
+
+        function render() {
+            tabs.innerHTML = '';
+            var catalog = INDICATORS.catalog || [];
+            if (catalog.length) {
+                INDICATOR_GROUPS.forEach(function (group) {
+                    var count = catalog.filter(function (item) { return item.group === group.id; }).length;
+                    if (!count) return;
+                    var button = el('button', 'ind-cat', group.label + ' ' + count);
+                    button.type = 'button';
+                    button.setAttribute('aria-pressed', String(!state.query && state.group === group.id));
+                    button.addEventListener('click', function () {
+                        state.group = group.id;
+                        state.query = '';
+                        search.value = '';
+                        render();
+                    });
+                    tabs.appendChild(button);
+                });
+            }
+            var scrollTop = list.scrollTop;
+            list.innerHTML = '';
+            list.classList.toggle('searching', !!state.query);
+            if (!INDICATORS.catalog) return;
+            var items = groupItems();
+            if (!items.length) {
+                list.appendChild(el('div', 'ind-empty', state.query ? 'No indicator matches “' + state.query + '”.' : 'No indicators in this group.'));
+                return;
+            }
+            var applied = appliedCounts();
+            var limit = state.query ? 200 : 150;
+            var category = null;
+            items.slice(0, limit).forEach(function (item) {
+                if (!state.query && item.category !== category) {
+                    category = item.category;
+                    list.appendChild(el('div', 'ind-group-title ind-list-group', category || 'Other'));
+                }
+                addRow(item, applied[item.id] || 0);
+            });
+            if (items.length > limit) {
+                list.appendChild(el('div', 'ind-status',
+                    'Showing ' + limit + ' of ' + items.length + ' matches — refine the search.'));
+            }
+            list.scrollTop = scrollTop;
+        }
+
+        search.addEventListener('input', function () {
+            state.query = search.value;
+            render();
+        });
+        search.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter') return;
+            var items = groupItems();
+            if (items.length === 1) {
+                addChartIndicator(entry, items[0]);
+                render();
+                search.select();
+            }
+        });
+
+        var done = el('button', 'btn-ghost primary', 'Done');
+        done.addEventListener('click', closeModal);
+        var appliedCount = el('span', 'ind-status');
+        appliedCount.id = 'ind-applied-count';
+        var foot = el('div');
+        foot.style.display = 'flex';
+        foot.style.alignItems = 'center';
+        foot.style.gap = '10px';
+        foot.style.marginLeft = 'auto';
+        foot.append(appliedCount, done);
+
+        openModal({
+            title: 'Indicators',
+            sub: entry.config.symbol + ' · ' + entry.config.timeframe,
+            body: wrap,
+            foot: foot,
+            onOpen: function () { search.focus(); }
+        });
+
+        function updateCount() {
+            appliedCount.textContent = chartIndicators(entry).length + ' / ' + MAX_CHART_INDICATORS + ' applied';
+        }
+        var baseRender = render;
+        render = function () { baseRender(); updateCount(); };
+        updateCount();
+        loadIndicatorCatalog().then(function () {
+            status.remove();
+            render();
+            // Warm the engine so added studies render (and show their real
+            // plot colours) without a visible delay.
+            loadIndicatorEngine().then(function () { render(); }).catch(function () { /* reported on add */ });
+        }).catch(function (err) {
+            status.className = 'ind-status error';
+            status.textContent = err.message;
+        });
     }
 
     /* ── Price scale modes / reference ──────────────────────────────────── */
@@ -2786,8 +3281,7 @@
         entry.absRange = null;
         resetPricePan(entry);
         rebuildDisplay(entry, { preserve: true });
-        refreshIndicators(entry);
-        drawIndicatorOverlay(entry);
+        refreshIndicators(entry, { rebuild: true });
         entry.mainSeries.applyOptions({ priceFormat: priceFormatFor(entry) });
         entry.refBtn.style.display = (mode === 'percentage' || mode === 'indexed') ? '' : 'none';
         if (WS.sync) WS.sync.schedulePriceScaleRefresh();
@@ -2827,7 +3321,7 @@
         entry.config.referenceTime = time || null;
         resetPricePan(entry);
         rebuildDisplay(entry, { preserve: true });
-        refreshIndicators(entry);
+        refreshIndicators(entry, { rebuild: true });
         scheduleSave();
     }
 
@@ -2863,6 +3357,8 @@
         attachDrawings(entry);
         updateTypeLabel(entry);
         if (WS.sync) WS.sync.updateRegistration(entry.id, { mainSeries: entry.mainSeries });
+        // Renderers hold the replaced price series (markers, bar colours).
+        refreshIndicators(entry, { rebuild: true });
         scheduleSave();
     }
 
@@ -2920,7 +3416,6 @@
         entry.config.market = market;
         entry.config.symbol = symbol;
         entry.config.view = null;
-        entry.legacy = {};
         resetPricePan(entry);
         entry.selectedPosition = null;
         entry.selectedMeasure = false;
@@ -3149,110 +3644,6 @@
         renderAll();
     }
 
-    /* ── Indicators modal ────────────────────────────────────────────────── */
-
-    function openIndicatorModal(entry) {
-        var wrap = el('div');
-        Object.keys(IND_DEFS).forEach(function (key) {
-            var def = IND_DEFS[key];
-            var conf = entry.config.indicators[key];
-            var row = el('div', 'ind-row');
-            var dot = el('span', 'dot');
-            dot.style.setProperty('--c', def.color);
-            row.appendChild(dot);
-            var nameWrap = el('div');
-            nameWrap.appendChild(el('div', 'ind-name', def.label));
-            nameWrap.appendChild(el('div', 'ind-desc', def.desc));
-            row.appendChild(nameWrap);
-
-            var right = el('div', 'ind-params');
-            Object.keys(def.params).forEach(function (param) {
-                var input = el('input');
-                input.type = 'number';
-                input.value = conf[param] != null ? conf[param] : def.params[param];
-                input.min = param === 'mult' ? '0.5' : '1';
-                input.max = '500';
-                input.step = param === 'mult' ? '0.1' : '1';
-                input.title = param;
-                input.disabled = !conf.enabled;
-                input.addEventListener('change', function () {
-                    conf[param] = Number(input.value) || def.params[param];
-                    refreshIndicators(entry);
-                    scheduleSave();
-                });
-                right.appendChild(input);
-            });
-            var sw = el('button', 'switch');
-            sw.type = 'button';
-            sw.setAttribute('role', 'switch');
-            sw.setAttribute('aria-checked', String(!!conf.enabled));
-            sw.title = 'Toggle ' + def.label;
-            sw.addEventListener('click', function () {
-                conf.enabled = !conf.enabled;
-                sw.setAttribute('aria-checked', String(conf.enabled));
-                right.querySelectorAll('input').forEach(function (i) { i.disabled = !conf.enabled; });
-                refreshIndicators(entry);
-                scheduleSave();
-            });
-            right.appendChild(sw);
-            row.appendChild(right);
-            wrap.appendChild(row);
-        });
-
-        wrap.appendChild(el('div', 'ind-section', 'Chart studies'));
-        Object.keys(LEGACY_DEFS).forEach(function (key) {
-            var def = LEGACY_DEFS[key];
-            var conf = entry.config.indicators[key] || { enabled: false };
-            var row = el('div', 'ind-row');
-            var dot = el('span', 'dot');
-            dot.style.setProperty('--c', def.color);
-            row.appendChild(dot);
-            var nameWrap = el('div');
-            nameWrap.appendChild(el('div', 'ind-name', def.label));
-            nameWrap.appendChild(el('div', 'ind-desc',
-                def.group === 'Sessions' ? 'Session range box' : 'Computed from this panel\'s candles'));
-            row.appendChild(nameWrap);
-            var right = el('div', 'ind-params');
-            var sw = el('button', 'switch');
-            sw.type = 'button';
-            sw.setAttribute('role', 'switch');
-            sw.setAttribute('aria-checked', String(!!conf.enabled));
-            sw.title = 'Toggle ' + def.label;
-            sw.addEventListener('click', function () {
-                conf.enabled = !conf.enabled;
-                sw.setAttribute('aria-checked', String(conf.enabled));
-                refreshIndicators(entry);
-                requestLegacy(entry);
-                scheduleSave();
-            });
-            right.appendChild(sw);
-            row.appendChild(right);
-            wrap.appendChild(row);
-        });
-        openModal({
-            title: 'Indicators',
-            sub: entry.config.symbol + ' · ' + entry.config.timeframe,
-            body: wrap,
-            foot: (function () {
-                var foot = el('div');
-                foot.style.marginLeft = 'auto';
-                foot.style.display = 'flex';
-                foot.style.gap = '8px';
-                var configure = el('button', 'btn-ghost', '⚙ Configure…');
-                configure.addEventListener('click', function () {
-                    if (Bridge.obj && Bridge.obj.onConfigRequested) {
-                        Bridge.obj.onConfigRequested();
-                    }
-                });
-                var done = el('button', 'btn-ghost primary', 'Done');
-                done.addEventListener('click', closeModal);
-                foot.appendChild(configure);
-                foot.appendChild(done);
-                return foot;
-            })()
-        });
-    }
-
     /* ── Credentials modal (API keys) ────────────────────────────────────── */
 
     var CRED_GROUP_ORDER = ['Hyperliquid'];
@@ -3476,17 +3867,6 @@
         resetPricePan(entry);
         entry.chart.priceScale('right').applyOptions({ autoScale: true });
         entry.chart.timeScale().fitContent();
-    };
-
-    WS.setIndicatorConfig = function (cfg) {
-        WS.indicatorConfig = cfg || {};
-        Object.keys(WS.charts).forEach(function (id) {
-            var entry = WS.charts[id];
-            if (!entry || entry.destroyed) return;
-            refreshIndicators(entry);
-            requestLegacy(entry);
-        });
-        toast('Indicator settings updated');
     };
 
     /* ── Groups ──────────────────────────────────────────────────────────── */
@@ -3790,40 +4170,16 @@
             priceScaleMode: (ws && ws.globalSettings.priceScale) || 'independent',
             referenceMode: 'first_visible',
             referenceTime: null,
-            indicators: cloneIndicatorDefaults(),
+            indicators: [],
+            showVolume: true,
             groupId: group ? group.id : null,
             drawings: [],
             view: null
         };
     }
 
-    function cloneIndicatorDefaults() {
-        var out = {};
-        Object.keys(IND_DEFS).forEach(function (key) {
-            out[key] = { enabled: key === 'volume' };
-            Object.keys(IND_DEFS[key].params).forEach(function (param) {
-                out[key][param] = IND_DEFS[key].params[param];
-            });
-        });
-        Object.keys(LEGACY_DEFS).forEach(function (key) {
-            out[key] = { enabled: false };
-        });
-        return out;
-    }
-
     function ensureIndicators(config) {
-        if (!config.indicators || typeof config.indicators !== 'object') {
-            config.indicators = cloneIndicatorDefaults();
-            return;
-        }
-        var defaults = cloneIndicatorDefaults();
-        Object.keys(defaults).forEach(function (key) {
-            if (!config.indicators[key] || typeof config.indicators[key] !== 'object') {
-                config.indicators[key] = defaults[key];
-            } else if (typeof config.indicators[key].enabled !== 'boolean') {
-                config.indicators[key].enabled = defaults[key].enabled;
-            }
-        });
+        ensureChartIndicatorConfig(config);
     }
 
     function nextChartId() {
@@ -3989,7 +4345,6 @@
                 var w = e.host.clientWidth, h = e.host.clientHeight;
                 if (w > 0 && h > 0) e.chart.applyOptions({ width: w, height: h });
                 resizeDrawCanvas(e);
-                drawOscillators(e);
                 scheduleDraw(e);
             });
         }, 30);
@@ -4392,7 +4747,6 @@
         entry.rafId = requestAnimationFrame(function () {
             entry.rafId = null;
             renderDrawings(entry);
-            drawIndicatorOverlay(entry);
         });
     }
     var scheduleDraw = scheduledDraw;
@@ -6743,6 +7097,18 @@
         WS.saveTimer = setTimeout(saveNow, 650);
     }
 
+    /** Total study count in a store payload (0 when the field is unusable). */
+    function storedIndicatorCount(store) {
+        var total = 0;
+        if (!store || !Array.isArray(store.workspaces)) return total;
+        store.workspaces.forEach(function (ws) {
+            (ws.charts || []).forEach(function (cfg) {
+                if (Array.isArray(cfg.indicators)) total += cfg.indicators.length;
+            });
+        });
+        return total;
+    }
+
     function saveNow() {
         if (!WS.store || WS.shuttingDown) return;
         var payload = serialize();
@@ -6754,6 +7120,21 @@
             // Keep the in-memory store as the source of truth: chart entries hold
             // references to its config objects, so replacing it would orphan them.
             if (res && res.ok !== false) {
+                // A sidecar built before the current store schema accepts the
+                // save but rewrites the study list: say so instead of losing
+                // studies quietly on the next start.
+                var stored = storedIndicatorCount(res.store);
+                var sent = storedIndicatorCount(payload);
+                if (res.store && stored < sent) {
+                    setStatus('Saved', 'error');
+                    if (!WS.staleBackendWarned) {
+                        WS.staleBackendWarned = true;
+                        toast('Saved, but the backend dropped ' + (sent - stored) +
+                            ' chart indicator(s): the Python sidecar is out of date. ' +
+                            'Rebuild it (./start.sh --rebuild-backend).', true);
+                    }
+                    return;
+                }
                 setStatus('Saved ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
             } else {
                 setStatus('Save failed', 'error');
@@ -6856,7 +7237,6 @@
         template.id = 'ws-' + Math.random().toString(36).slice(2, 10);
         template.name = name;
         template.charts = [];
-        var defaults = cloneIndicatorDefaults();
         for (var i = 0; i < 4; i++) {
             var slot = DEFAULT_SLOTS[i];
             template.charts.push({
@@ -6866,7 +7246,8 @@
                 priceScaleMode: 'independent',
                 referenceMode: 'first_visible',
                 referenceTime: null,
-                indicators: clone(defaults),
+                indicators: [],
+                showVolume: true,
                 groupId: template.syncGroups[i % template.syncGroups.length].id,
                 drawings: [],
                 view: null
@@ -7069,10 +7450,7 @@
                     setStatus('No workspace store', 'error');
                     return null;
                 }
-                return Bridge.call('indicatorConfig').then(function (res) {
-                    WS.indicatorConfig = (res && res.config) || {};
-                    return true;
-                }).catch(function () { return true; });
+                return true;
             }).then(function (ready) {
                 if (!ready) return;
                 WS.activeId = WS.store.active || WS.store.workspaces[0].id;
@@ -7119,8 +7497,7 @@
 
     // Test/harness hooks (not used by production code paths).
     WS._internal = {
-        sma: sma, ema: ema, rsi: rsiSeries, macd: macdSeries, atr: atrSeries,
-        vwap: vwapSeries, nearestCandle: nearestCandle, detectPrecision: detectPrecision,
+        nearestCandle: nearestCandle, detectPrecision: detectPrecision,
         applyGridTemplate: applyGridTemplate, customGridFor: customGridFor,
         layouts: LAYOUTS, timeframes: TIMEFRAMES
     };

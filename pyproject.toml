@@ -7,8 +7,6 @@ dependencies = [
     "python-dotenv",
     "hyperliquid-python-sdk",
     "requests",
-    "pandas",
-    "pandas_ta",
 ]
 
 [tool.uv]

@@ -59,6 +59,19 @@ fi
 SIDECAR="src-tauri/backend-dist/tradepanel-backend/tradepanel-backend"
 [[ -f "$SIDECAR.exe" ]] && SIDECAR="$SIDECAR.exe"
 
+# A staged sidecar is a compiled snapshot: reusing one built before the current
+# backend sources silently runs stale Python (the workspace store schema is one
+# example) while the UI hot-reloads. Treat any newer backend source as dirty.
+sidecar_stale() {
+  [[ -f "$SIDECAR" ]] || return 0
+  local newer
+  newer="$(find backend -type f \( -name '*.py' -o -name '*.spec' -o -name '*.txt' \) \
+    -newer "$SIDECAR" \
+    -not -path 'backend/build/work/*' -not -path 'backend/build/dist/*' \
+    -print -quit 2>/dev/null || true)"
+  [[ -n "$newer" ]]
+}
+
 if [[ $REBUILD -eq 1 || ! -f "$SIDECAR" ]]; then
   if [[ $IS_WINDOWS -eq 1 ]]; then
     echo "Sidecar missing. Build it from PowerShell first:" >&2
@@ -66,6 +79,9 @@ if [[ $REBUILD -eq 1 || ! -f "$SIDECAR" ]]; then
     exit 1
   fi
   echo "Building the Python sidecar"
+  backend/scripts/build-backend.sh
+elif [[ $IS_WINDOWS -eq 0 ]] && sidecar_stale; then
+  echo "Backend sources are newer than the staged sidecar — rebuilding it"
   backend/scripts/build-backend.sh
 fi
 

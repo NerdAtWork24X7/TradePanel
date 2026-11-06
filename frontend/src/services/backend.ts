@@ -48,7 +48,6 @@ const METHOD_TIMEOUTS: Record<string, number> = {
   "market.get_candles": 40_000,
   "market.get_tick": 25_000,
   "market.search_symbols": 30_000,
-  "indicator.compute": 45_000,
   "workspace.save": 20_000,
   "trading.coins": 40_000,
   "account.position": 40_000,

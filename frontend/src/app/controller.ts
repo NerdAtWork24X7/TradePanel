@@ -1,7 +1,6 @@
 import * as account from "../services/account";
 import * as backend from "../services/backend";
 import * as credentials from "../services/credentials";
-import * as indicators from "../services/indicators";
 import * as marketData from "../services/market-data";
 import * as settingsStore from "../services/settings";
 import * as shell from "../services/shell";
@@ -17,12 +16,11 @@ import { WorkspaceHost } from "../workspace-host";
 import type {
   AiTradePlan,
   BackendStatus,
+  AiChartIndicator,
   Direction,
-  IndicatorConfig,
   MarketMeta,
   OpenOrder,
   Position,
-  UnknownRecord,
   WindowState,
 } from "../types";
 
@@ -105,6 +103,7 @@ class AppController {
   private readonly aiPanel: AiPanel;
   private readonly sidebarTabs: SidebarTabs;
   private aiFocus: AiFocus | null = null;
+  private aiChartIndicators: AiChartIndicator[] = [];
   private status: BackendStatus = {
     state: "starting",
     message: null,
@@ -117,7 +116,6 @@ class AppController {
   private direction: Direction = "long";
   private coinList: string[] = [];
   private meta: MarketMeta | null = null;
-  private indicatorConfig: IndicatorConfig | null = null;
   private bootstrapped = false;
   private sidebarCollapsed = false;
   private sidebarWidth = SIDEBAR_DEFAULT_WIDTH;
@@ -134,15 +132,15 @@ class AppController {
 
   constructor() {
     this.host = new WorkspaceHost(this.frame, {
-      focusedChart: (symbol, exchange, market, timeframe) =>
-        this.onFocusedChart(symbol, exchange, market, timeframe),
+      focusedChart: (symbol, exchange, market, timeframe, indicators) =>
+        this.onFocusedChart(symbol, exchange, market, timeframe, indicators),
       positionDrawing: (direction, entry, tp, sl) =>
         this.applyLevels(direction, entry, tp, sl),
       tradeOverlay: (ok, message) => {
         if (message) toast(message, ok ? "success" : "error");
       },
-      configRequested: () => void this.openSettingsDialog("indicators"),
-      openSettings: () => void this.openSettingsDialog("indicators"),
+      configRequested: () => void this.openSettingsDialog("ai"),
+      openSettings: () => void this.openSettingsDialog("ai"),
       toggleTheme: () => this.toggleTheme(),
       toggleTopBar: () => this.toggleSidebar(),
       toggleFullscreen: () => void this.toggleFullscreen(),
@@ -168,14 +166,15 @@ class AppController {
         tp: this.tp.value,
         sl: this.sl.value,
       }),
-      indicatorConfig: () => this.indicatorConfig,
       precision: (coin) =>
         this.loadPricePrecision(coin)
           .then((precision) => precision?.sz_decimals ?? null)
           .catch(() => null),
       applyPlan: (plan) => this.applyAiPlan(plan),
       showPlanOnChart: (plan, focus) => this.overlayAiTrade(plan, focus),
-      openSettings: (tab) => void this.openSettingsDialog(tab === "ai" ? "ai" : "indicators"),
+      chartIndicators: () =>
+        this.aiChartIndicators.map((item) => ({ id: item.id, inputs: item.inputs })),
+      openSettings: () => void this.openSettingsDialog("ai"),
       closeSettings: () => closeSettingsPage(),
       log: (message) => shell.logFrontend("info", `ai: ${message}`),
     });
@@ -315,11 +314,10 @@ class AppController {
   }
 
   private async bootstrap(): Promise<void> {
-    const [metaResult, coinsResult, stateResult, configResult] = await Promise.allSettled([
+    const [metaResult, coinsResult, stateResult] = await Promise.allSettled([
       marketData.getMeta(),
       trading.getCoins(false),
       settingsStore.loadWindowState(),
-      indicators.getIndicatorConfig(),
     ]);
 
     if (metaResult.status === "fulfilled") {
@@ -339,10 +337,6 @@ class AppController {
       this.applyWindowState(stateResult.value);
     } else {
       toast(`Window state unavailable: ${(stateResult.reason as Error).message}`, "error");
-    }
-
-    if (configResult.status === "fulfilled") {
-      this.indicatorConfig = configResult.value;
     }
 
     // Never block startup on exchange metadata: format immediately with the
@@ -374,9 +368,6 @@ class AppController {
     shell.logFrontend("info", "workspace ready: chart bridge connected");
     this.workspaceError.hidden = true;
     this.workspaceLoading.hidden = true;
-    if (this.indicatorConfig) {
-      this.host.setIndicatorConfig(this.indicatorConfig as unknown as UnknownRecord);
-    }
     // Chart focus is reported by the workspace itself; no automatic order is
     // ever submitted here.
     if (this.coin.value) this.scheduleSave();
@@ -758,7 +749,9 @@ class AppController {
     exchange: string,
     market: string,
     timeframe: string,
+    indicators: AiChartIndicator[],
   ): void {
+    this.aiChartIndicators = indicators;
     if (symbol) {
       this.aiFocus = { symbol, exchange, market, timeframe };
       this.aiPanel.setFocus(this.aiFocus);
@@ -1214,7 +1207,7 @@ class AppController {
     }
   }
 
-  private async openSettingsDialog(tab: "indicators" | "ai" = "indicators"): Promise<void> {
+  private async openSettingsDialog(tab: "ai" = "ai"): Promise<void> {
     if (this.status.state !== "running") {
       toast("Backend unavailable — settings cannot be saved", "error");
       return;
@@ -1222,12 +1215,6 @@ class AppController {
     try {
       await openSettingsPage(
         {
-          loadIndicatorConfig: () => indicators.getIndicatorConfig(),
-          saveIndicatorConfig: async (config) => {
-            const saved = await indicators.saveIndicatorConfig(config);
-            this.indicatorConfig = saved;
-            this.host.setIndicatorConfig(saved as unknown as UnknownRecord);
-          },
           loadCredentials: () => credentials.credentialStatus(),
           saveCredentials: async (values, clear) => {
             const saved = await credentials.saveCredentials(values, clear);

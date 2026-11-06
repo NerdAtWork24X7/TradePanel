@@ -38,7 +38,6 @@ function createHarness() {
     setFocusedCoin(...args) { wsCalls.push(["setFocusedCoin", args]); },
     setFocusedTimeframe(...args) { wsCalls.push(["setFocusedTimeframe", args]); },
     centerFocused(...args) { wsCalls.push(["centerFocused", args]); },
-    setIndicatorConfig(...args) { wsCalls.push(["setIndicatorConfig", args]); },
     setActive(...args) { wsCalls.push(["setActive", args]); },
     setFullscreenState(...args) { wsCalls.push(["setFullscreenState", args]); },
     shutdown(...args) { wsCalls.push(["shutdown", args]); }
@@ -96,7 +95,7 @@ test("boot announces readiness and exposes the QWebChannel-shaped stub", async (
   await harness.boot();
   const stub = harness.windowObject.__WS_STUB__;
   assert.ok(stub, "stub must be installed");
-  for (const method of ["meta", "loadStore", "saveStore", "indicatorConfig", "requestCandles", "requestTick", "requestIndicators", "searchSymbols", "credentialStatus", "saveCredentials", "onTradeOverlayResult"]) {
+  for (const method of ["meta", "loadStore", "saveStore", "requestCandles", "requestTick", "searchSymbols", "credentialStatus", "saveCredentials", "onTradeOverlayResult"]) {
     assert.equal(typeof stub[method], "function", `${method} missing`);
   }
   assert.equal(harness.posted[0].message.type, "event");
@@ -152,7 +151,7 @@ test("workspace signals become typed host events", async () => {
   await harness.boot();
   const stub = harness.windowObject.__WS_STUB__;
 
-  stub.onFocusedChartChanged("BTC/USDT", "binance", "spot", "5m");
+  stub.onFocusedChartChanged("BTC/USDT", "binance", "spot", "5m", JSON.stringify([{ id: "rsi", inputs: { length: 14 } }]));
   stub.onPositionDrawingChanged("short", 100, 90, 105);
   stub.onTradeOverlayResult(true, "Short BTC/USDT drawn on the chart.");
   stub.onConfigRequested();
@@ -163,7 +162,7 @@ test("workspace signals become typed host events", async () => {
   const plain = (message) => JSON.parse(JSON.stringify(message));
   assert.deepEqual(plain(events.at(-6).message), {
     __ws: 1, type: "event", event: "focusedChart",
-    payload: ["BTC/USDT", "binance", "spot", "5m"]
+    payload: ["BTC/USDT", "binance", "spot", "5m", JSON.stringify([{ id: "rsi", inputs: { length: 14 } }])]
   });
   assert.deepEqual(plain(events.at(-5).message.payload), ["short", 100, 90, 105]);
   assert.deepEqual(plain(events.at(-4).message), {

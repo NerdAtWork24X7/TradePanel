@@ -65,19 +65,6 @@
         adx: { label: 'ADX', group: 'Advanced', color: '#FB923C' }
     };
 
-    var DRAW_TOOLS = [
-        { id: 'select', label: 'Select / move drawings' },
-        { id: 'long', label: 'Long position' },
-        { id: 'short', label: 'Short position' },
-        { id: 'measure', label: 'Measure' },
-        { id: 'hline', label: 'Horizontal line' },
-        { id: 'vline', label: 'Vertical line' },
-        { id: 'trend', label: 'Trend line' },
-        { id: 'rect', label: 'Rectangle' },
-        { id: 'fib', label: 'Fibonacci retracement' },
-        { id: 'text', label: 'Text annotation' }
-    ];
-
     var WS = {
         meta: null,
         store: null,
@@ -284,6 +271,19 @@
             if (raw) {
                 var parsed = JSON.parse(raw);
                 if (parsed && Array.isArray(parsed.recent)) WS.prefs.recent = parsed.recent.slice(0, 12);
+                if (parsed && (parsed.drawMagnet === 'off' || parsed.drawMagnet === 'weak')) {
+                    WS.prefs.drawMagnet = parsed.drawMagnet;
+                }
+                if (parsed && Array.isArray(parsed.drawRecent)) {
+                    WS.prefs.drawRecent = parsed.drawRecent.filter(function (kind) {
+                        return ChartDrawings.isKnownKind(kind);
+                    }).slice(0, 8);
+                }
+                if (parsed && Array.isArray(parsed.drawFavorites)) {
+                    WS.prefs.drawFavorites = parsed.drawFavorites.filter(function (kind) {
+                        return ChartDrawings.isKnownKind(kind);
+                    }).slice(0, ChartDrawings.MAX_FAVORITES);
+                }
             }
         } catch (err) { /* storage may be unavailable */ }
     }
@@ -646,66 +646,191 @@
         renderDrawings(entry);
     }
 
+    function railButton(entry, spec, onActivate) {
+        var btn = el('button');
+        btn.type = 'button';
+        btn.dataset.tool = spec.id;
+        btn.title = spec.label;
+        btn.setAttribute('aria-label', spec.label);
+        btn.setAttribute('aria-pressed', 'false');
+        btn.appendChild(panelIcon(spec.icon));
+        btn.addEventListener('click', onActivate);
+        return btn;
+    }
+
     function buildDrawRail(entry) {
         var rail = el('div', 'draw-rail');
-        var icons = {
-            select: ['M6 3l12 9-6.2 1.3L9.4 20 6 3z'],
-            long: ['M12 20V5', 'M6.5 10.5L12 5l5.5 5.5'],
-            short: ['M12 4v15', 'M6.5 13.5L12 19l5.5-5.5'],
-            measure: ['M4 17L20 7', 'M7 14l2 3', 'M11 12l2 3', 'M15 10l2 3'],
-            hline: ['M3 12h18'],
-            vline: ['M12 3v18'],
-            trend: ['M4 19L20 5', 'M4 19h.01', 'M20 5h.01'],
-            rect: ['M4 5h16v14H4z'],
-            fib: ['M3 6h18M3 10h18M3 14h18M3 18h18'],
-            text: ['M5 6h14', 'M12 6v13', 'M9 19h6']
-        };
-        DRAW_TOOLS.forEach(function (tool, index) {
-            if (index === 1 || index === 4) rail.appendChild(el('div', 'sep'));
-            var btn = el('button');
-            btn.type = 'button';
-            btn.dataset.tool = tool.id;
-            btn.title = tool.label;
-            btn.setAttribute('aria-label', tool.label);
-            btn.setAttribute('aria-pressed', 'false');
-            btn.appendChild(panelIcon(icons[tool.id] || ['M4 12h16']));
-            btn.addEventListener('click', function () { setDrawTool(entry, tool.id); });
-            rail.appendChild(btn);
+        entry.rail = rail;
+        renderDrawRail(entry);
+        return rail;
+    }
+
+    /** Toolbar = cursor + the user's pinned tools + app utilities. */
+    function renderDrawRail(entry) {
+        var rail = entry.rail;
+        if (!rail) return;
+        rail.innerHTML = '';
+
+        var cursor = ChartDrawings.PRIMARY[0];
+        rail.appendChild(railButton(entry, cursor, function () { chooseDrawTool(entry, 'select'); }));
+
+        var favorites = drawFavorites();
+        if (favorites.length) {
+            rail.appendChild(el('div', 'sep'));
+            favorites.forEach(function (kind) {
+                var tool = ChartDrawings.TOOL_BY_KIND[kind];
+                if (!tool) return;
+                var btn = railButton(entry, {
+                    id: kind,
+                    label: tool.label + ' — pinned · right-click to unpin',
+                    icon: ChartDrawings.iconFor(kind)
+                }, function () { chooseDrawTool(entry, kind); });
+                btn.title = tool.label + ' — pinned · right-click to unpin';
+                btn.addEventListener('contextmenu', function (ev) {
+                    ev.preventDefault();
+                    toggleDrawFavorite(kind);
+                });
+                rail.appendChild(btn);
+            });
+        }
+
+        rail.appendChild(el('div', 'sep'));
+        var allBtn = el('button');
+        allBtn.type = 'button';
+        allBtn.dataset.action = 'all-tools';
+        allBtn.title = 'All drawing tools';
+        allBtn.setAttribute('aria-label', 'All drawing tools');
+        allBtn.setAttribute('aria-haspopup', 'dialog');
+        allBtn.appendChild(panelIcon(['M4 4h7v7H4z', 'M13 4h7v7h-7z', 'M4 13h7v7H4z', 'M13 13h7v7h-7z']));
+        allBtn.addEventListener('click', function () { openToolPalette(entry); });
+        rail.appendChild(allBtn);
+
+        var magnetBtn = el('button');
+        magnetBtn.type = 'button';
+        magnetBtn.title = 'Magnet — snap anchors to OHLC';
+        magnetBtn.setAttribute('aria-label', 'Toggle magnet');
+        magnetBtn.appendChild(panelIcon(['M6 4h4v8a2 2 0 0 0 4 0V4h4v8a6 6 0 0 1-12 0z', 'M6 4h4M14 4h4']));
+        magnetBtn.addEventListener('click', function () { toggleDrawMagnet(entry); });
+        entry.drawMagnetBtn = magnetBtn;
+        rail.appendChild(magnetBtn);
+
+        var eyeBtn = el('button');
+        eyeBtn.type = 'button';
+        eyeBtn.title = 'Hide all drawings';
+        eyeBtn.setAttribute('aria-label', 'Hide or show all drawings');
+        eyeBtn.appendChild(panelIcon(['M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z']));
+        eyeBtn.addEventListener('click', function () { toggleDrawVisibility(entry); });
+        entry.drawEyeBtn = eyeBtn;
+        rail.appendChild(eyeBtn);
+
+        rail.appendChild(el('div', 'sep'));
+        ChartDrawings.PRIMARY.slice(-3).forEach(function (tool) {
+            rail.appendChild(railButton(entry, {
+                id: tool.id,
+                label: tool.label,
+                icon: tool.icon
+            }, function () { chooseDrawTool(entry, tool.id); }));
         });
+
         rail.appendChild(el('div', 'sep'));
         var gear = el('button');
         gear.type = 'button';
-        gear.title = 'Position settings — account, risk, leverage';
+        gear.title = 'Trade position tool — account, risk, display';
         gear.setAttribute('aria-label', 'Position settings');
         gear.appendChild(panelIcon(['M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z',
             'M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.9 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.54 15a1.7 1.7 0 0 0-1.56-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.7 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.54a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.46 9v.09a1.7 1.7 0 0 0 1.56 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z']));
         gear.addEventListener('click', function () { openPositionSettings(entry); });
         rail.appendChild(gear);
+
         var railStatsBtn = el('button');
         railStatsBtn.type = 'button';
         railStatsBtn.dataset.statsToggle = '1';
         railStatsBtn.addEventListener('click', function () { togglePositionStats(entry); });
-        entry.statsButtons = entry.statsButtons || [];
+        entry.statsButtons = (entry.statsButtons || []).filter(function (btn) {
+            return btn.isConnected && !btn.closest('.draw-rail');
+        });
         entry.statsButtons.push(railStatsBtn);
         syncStatsButtons(entry);
         rail.appendChild(railStatsBtn);
+
         var clear = el('button');
         clear.type = 'button';
-        clear.title = 'Clear all drawings on this chart';
+        clear.title = 'Clear all drawings, position boxes and the measurement';
         clear.setAttribute('aria-label', 'Clear all drawings');
         clear.appendChild(panelIcon(['M4 7h16', 'M9 7V5h6v2', 'M6.5 7l.8 12h9.4l.8-12']));
         clear.addEventListener('click', function () {
-            entry.config.drawings.length = 0;
+            if (entry.drawMgr) entry.drawMgr.clear();
+            entry.config.drawings = [];
             entry.positions.length = 0;
             entry.measure = null;
-            entry.selectedDrawing = null;
+            entry.measureDraft = null;
+            entry.measureDrag = null;
+            entry.selectedMeasure = false;
             entry.selectedPosition = null;
             savePositions(entry);
+            updateDrawStyleBar(entry);
             renderDrawings(entry);
             scheduleSave();
         });
         rail.appendChild(clear);
-        return rail;
+        syncDrawToolButtons(entry);
+    }
+
+    /* ── Favourite tools (pinned on the rail) ───────────────────────────── */
+
+    function drawFavorites() {
+        var stored = WS.prefs.drawFavorites;
+        if (!Array.isArray(stored)) return ChartDrawings.DEFAULT_FAVORITES.slice();
+        var seen = {};
+        return stored.filter(function (kind) {
+            if (!ChartDrawings.isKnownKind(kind) || seen[kind]) return false;
+            seen[kind] = true;
+            return true;
+        }).slice(0, ChartDrawings.MAX_FAVORITES);
+    }
+
+    function toggleDrawFavorite(kind) {
+        if (!ChartDrawings.isKnownKind(kind)) return;
+        var list = drawFavorites().slice();
+        var index = list.indexOf(kind);
+        if (index >= 0) {
+            list.splice(index, 1);
+        } else {
+            if (list.length >= ChartDrawings.MAX_FAVORITES) {
+                toast('Up to ' + ChartDrawings.MAX_FAVORITES + ' pinned tools — unpin one first', true);
+                return;
+            }
+            list.push(kind);
+        }
+        WS.prefs.drawFavorites = list;
+        savePrefs();
+        Object.keys(WS.charts).forEach(function (id) { renderDrawRail(WS.charts[id]); });
+        syncFavoriteButtons();
+        toast(index >= 0
+            ? ChartDrawings.kindLabel(kind) + ' unpinned'
+            : ChartDrawings.kindLabel(kind) + ' pinned to the drawing toolbar');
+    }
+
+    function starIcon() {
+        return ['M12 3.6l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.8l5.9-.9z'];
+    }
+
+    function syncFavoriteButtons() {
+        var favorites = drawFavorites();
+        document.querySelectorAll('.draw-palette .dp-fav').forEach(function (btn) {
+            var on = favorites.indexOf(btn.dataset.favorite) >= 0;
+            btn.setAttribute('aria-pressed', String(on));
+            btn.title = on ? 'Remove from the drawing toolbar' : 'Pin to the drawing toolbar';
+            btn.setAttribute('aria-label', btn.title);
+            btn.replaceChildren(panelIcon(starIcon()));
+        });
+    }
+
+    /** Single entry point for picking a tool from the rail or the catalog. */
+    function chooseDrawTool(entry, kind) {
+        if (kind === 'image') { pickDrawImage(entry); return; }
+        if (kind === 'font-icon') { pickDrawGlyph(entry); return; }
+        setDrawTool(entry, kind);
     }
 
     function wirePanel(entry) {
@@ -770,11 +895,19 @@
         });
 
         entry.textInput.addEventListener('keydown', function (ev) {
-            if (ev.key === 'Enter') commitTextDrawing(entry);
-            else if (ev.key === 'Escape') cancelTextDrawing(entry);
+            if (ev.key === 'Enter') {
+                if (entry.tableEditRef) commitDrawTableCell(entry);
+                else commitDrawText(entry);
+            } else if (ev.key === 'Escape') {
+                if (entry.tableEditRef) cancelDrawTableCell(entry);
+                else cancelDrawText(entry);
+            }
         });
         entry.textInput.addEventListener('blur', function () {
-            setTimeout(function () { if (entry.pendingText) cancelTextDrawing(entry); }, 120);
+            setTimeout(function () {
+                if (entry.tableEditRef) cancelDrawTableCell(entry);
+                else if (entry.pendingText) cancelDrawText(entry);
+            }, 120);
         });
 
         wireDrawingCanvas(entry);
@@ -919,8 +1052,14 @@
             tickTimer: null,
             tickSeq: 0,
             drawTool: null,
-            selectedDrawing: null,
-            drawingDrag: null,
+            drawMgr: null,
+            drawSpace: null,
+            drawSyncing: false,
+            drawDirty: false,
+            drawStyleBar: null,
+            drawPalette: null,
+            drawMagnetBtn: null,
+            drawEyeBtn: null,
             directPointerId: null,
             positions: [],
             selectedPosition: null,
@@ -934,12 +1073,16 @@
             pendingOverlay: null,
             focusRange: null,
             measure: null,
+            measureDraft: null,
+            measureDrag: null,
+            selectedMeasure: false,
             legacy: {},
             legacySeq: 0,
             legacyRaf: null,
             legacyRequestedAt: 0,
             drawDrag: null,
             pendingText: null,
+            tableEditRef: null,
             pickRef: false,
             rafId: null,
             allowBackfill: false,
@@ -958,7 +1101,7 @@
         var chart = window.LightweightCharts.createChart(entry.host, chartOptions());
         entry.chart = chart;
         entry.mainSeries = createMainSeries(entry, entry.config.chartType);
-        entry.volumeSeries = chart.addHistogramSeries({
+        entry.volumeSeries = chart.addSeries(window.LightweightCharts.HistogramSeries, {
             priceScaleId: 'volume',
             priceFormat: { type: 'volume' }
         });
@@ -975,6 +1118,7 @@
             scaleMargins: { top: 0.84, bottom: 0 }
         });
         installAutoscaleProvider(entry);
+        attachDrawings(entry);
 
         wireChartUI(entry);
 
@@ -1048,11 +1192,12 @@
         };
         var series;
         var seriesOpts = Object.assign({}, opts, seriesTheme(type));
-        if (type === 'bar') series = chart.addBarSeries(seriesOpts);
-        else if (type === 'line') series = chart.addLineSeries(seriesOpts);
-        else if (type === 'area') series = chart.addAreaSeries(seriesOpts);
-        else if (type === 'baseline') series = chart.addBaselineSeries(seriesOpts);
-        else series = chart.addCandlestickSeries(seriesOpts);
+        var defs = window.LightweightCharts;
+        if (type === 'bar') series = chart.addSeries(defs.BarSeries, seriesOpts);
+        else if (type === 'line') series = chart.addSeries(defs.LineSeries, seriesOpts);
+        else if (type === 'area') series = chart.addSeries(defs.AreaSeries, seriesOpts);
+        else if (type === 'baseline') series = chart.addSeries(defs.BaselineSeries, seriesOpts);
+        else series = chart.addSeries(defs.CandlestickSeries, seriesOpts);
         series.applyOptions({ priceFormat: priceFormatFor(entry) });
         return series;
     }
@@ -1231,6 +1376,7 @@
         } catch (err) { /* ignore */ }
         try { if (entry.resizeObserver) entry.resizeObserver.disconnect(); } catch (err) { /* ignore */ }
         try { if (entry._drawDocCleanup) entry._drawDocCleanup(); } catch (err) { /* ignore */ }
+        detachDrawings(entry);
         try { entry.chart.remove(); } catch (err) { /* ignore */ }
         if (entry.panel && entry.panel.parentNode) entry.panel.parentNode.removeChild(entry.panel);
         delete WS.charts[id];
@@ -1417,6 +1563,7 @@
             entry.display = entry.candles;
         }
         applyDisplayData(entry, opts);
+        reprojectDrawings(entry);
     }
 
     function seriesData(entry) {
@@ -1981,7 +2128,7 @@
             entry.overlays[key].applyOptions({ color: color, visible: true, lineWidth: width || 1, lineStyle: dashed ? 2 : 0 });
             return entry.overlays[key];
         }
-        var series = entry.chart.addLineSeries({
+        var series = entry.chart.addSeries(window.LightweightCharts.LineSeries, {
             color: color,
             lineWidth: width || 1,
             lineStyle: dashed ? window.LightweightCharts.LineStyle.Dashed : window.LightweightCharts.LineStyle.Solid,
@@ -2566,6 +2713,8 @@
     function setChartType(entry, type) {
         if (entry.config.chartType === type) return;
         var range = entry.chart.timeScale().getVisibleLogicalRange();
+        // The primitive is bound to the old series: detach before it is removed.
+        detachDrawings(entry);
         entry.config.chartType = type;
         try { entry.chart.removeSeries(entry.mainSeries); } catch (err) { /* ignore */ }
         entry.mainSeries = createMainSeries(entry, type);
@@ -2577,6 +2726,7 @@
             });
         }
         if (range) entry.chart.timeScale().setVisibleLogicalRange(range);
+        attachDrawings(entry);
         updateTypeLabel(entry);
         if (WS.sync) WS.sync.updateRegistration(entry.id, { mainSeries: entry.mainSeries });
         scheduleSave();
@@ -2617,6 +2767,7 @@
         try { view = entry.chart.timeScale().getVisibleRange(); } catch (err) { view = null; }
         entry.config.timeframe = tf;
         entry.tfBtn.textContent = tfLabel(tf);
+        if (entry.drawMgr) entry.drawMgr.setInterval(ChartDrawings.intervalForTimeframe(tf));
         resetPricePan(entry);
         entry.loadSeq++;
         loadData(entry, { resetView: true, view: view });
@@ -2637,7 +2788,10 @@
         entry.legacy = {};
         resetPricePan(entry);
         entry.selectedPosition = null;
+        entry.selectedMeasure = false;
         entry.measure = null;
+        entry.measureDraft = null;
+        entry.measureDrag = null;
         entry.positions = loadPositions(entry);
         updateTypicalHeading(entry);
         forceRefetch(entry);
@@ -3802,38 +3956,229 @@
         document.addEventListener('pointerup', onUp);
     }
 
-    /* ── Drawing tools ───────────────────────────────────────────────────── */
+    /* ── Drawing tools (lightweight-charts-drawing) ─────────────────────────
+       One DrawingManager per chart renders the TradingView tool set as a v5
+       series primitive.  Drawings live in the chart's workspace config, always
+       in raw price units; the manager works in the chart's display units
+       (percentage / indexed modes remap prices), so the integration projects
+       at the boundary and reprojects when the reference price moves. */
+    var ChartDrawings = window.ChartDrawings;
 
-    function setDrawTool(entry, tool) {
+    function drawPriceSpace(entry) {
+        return {
+            mode: entry.config.priceScaleMode,
+            refPrice: entry.refPrice
+        };
+    }
+
+    function drawingToDisplay(entry, price) {
+        var space = drawPriceSpace(entry);
+        return ChartDrawings.rawToDisplay(price, space.mode, space.refPrice);
+    }
+
+    function drawingToRaw(entry, price) {
+        var space = drawPriceSpace(entry);
+        return ChartDrawings.displayToRaw(price, space.mode, space.refPrice);
+    }
+
+    /** Display-space OHLCV for the manager (magnet, VWAP, volume profiles). */
+    function displayBars(entry) {
+        var out = [];
+        var rows = entry.display || [];
+        var raw = entry.candles || [];
+        for (var i = 0; i < rows.length; i++) {
+            var bar = rows[i];
+            var source = raw[i];
+            out.push({
+                time: bar.time,
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close,
+                volume: source && isFinite(source.volume) ? source.volume : 0
+            });
+        }
+        return out;
+    }
+
+    function drawMigrationContext(entry) {
+        var last = entry.candles && entry.candles.length ? entry.candles[entry.candles.length - 1] : null;
+        return {
+            time: last ? last.time : Math.floor(Date.now() / 1000),
+            price: last && last.close ? last.close : 1
+        };
+    }
+
+    function drawMagnet() {
+        return WS.prefs.drawMagnet === 'off' ? 'off' : 'weak';
+    }
+
+    function attachDrawings(entry) {
+        var DW = window.LightweightChartsDrawing;
+        if (!DW || !entry.chart || !entry.mainSeries) return;
+        detachDrawings(entry);
+        var needsSave = ChartDrawings.needsMigration(entry.config.drawings);
+        var stored = ChartDrawings.normalize(entry.config.drawings, drawMigrationContext(entry));
+        entry.config.drawings = stored;
+        if (needsSave) scheduleSave();
+
+        var manager = new DW.DrawingManager(entry.chart, entry.mainSeries, {
+            bars: function () { return displayBars(entry); },
+            fontFamily: "'MesloLGS NFM', 'JetBrains Mono', ui-monospace, monospace",
+            magnet: drawMagnet(),
+            interval: ChartDrawings.intervalForTimeframe(entry.config.timeframe),
+            timeInfo: function () {
+                return {
+                    timeZone: 'UTC',
+                    intraday: ChartDrawings.isIntraday(entry.config.timeframe)
+                };
+            },
+            stayInDrawingMode: false
+        });
+        entry.drawMgr = manager;
+        entry.drawSyncing = true;
+        restoreDrawImages(entry);
+        manager.importJSON(ChartDrawings.project(stored, function (price) {
+            return drawingToDisplay(entry, price);
+        }));
+        entry.drawSyncing = false;
+        entry.drawSpace = ChartDrawings.spaceSignature(entry.config.priceScaleMode, entry.refPrice);
+
+        manager.on('change', function () {
+            if (entry.drawSyncing || entry.destroyed) return;
+            // The library holds the chart during a drag / placement; serialising
+            // every intermediate frame is wasted work. Commit once at the end.
+            if (manager.savedScroll || manager.gesture) {
+                entry.drawDirty = true;
+                return;
+            }
+            commitDrawings(entry);
+        });
+        manager.on('gestureEnd', function () {
+            if (!entry.drawDirty) return;
+            entry.drawDirty = false;
+            commitDrawings(entry);
+        });
+        manager.on('selection', function () {
+            updateDrawStyleBar(entry);
+        });
+        manager.on('tool', function (kind) {
+            // Placement ends the armed tool (one-shot, TV default); mirror it
+            // on the host state unless the host is mid-switch.
+            if (!kind && !entry.drawArming && entry.drawTool &&
+                entry.drawTool !== 'select' && !isCustomDrawTool(entry.drawTool)) {
+                entry.drawTool = null;
+            }
+            syncDrawToolButtons(entry);
+        });
+        manager.on('textEdit', function (drawing, point) {
+            openDrawTextEditor(entry, drawing, point);
+        });
+        manager.on('tableEdit', function (drawing, cell, box) {
+            openDrawTableCellEditor(entry, drawing, cell, box);
+        });
+        // Safety net for presses without a prior hover (touch / fast drags):
+        // as soon as the manager mutates a drawing, undo any price pan the
+        // chart gesture already applied.
+        manager.on('update', function () {
+            if (entry.pricePan && entry.pricePan.active && entry.pricePan.cancel) {
+                entry.pricePan.cancel();
+            }
+        });
+        updateDrawStyleBar(entry);
+        syncDrawToolButtons(entry);
+    }
+
+    function detachDrawings(entry) {
+        var manager = entry.drawMgr;
+        entry.drawMgr = null;
+        entry.drawSpace = null;
+        if (!manager) return;
+        try { manager.select([]); } catch (err) { /* ignore */ }
+        try { manager.destroy(); } catch (err) { /* ignore */ }
+    }
+
+    /** Persist the manager's display-space points back into raw config space. */
+    function commitDrawings(entry) {
+        if (!entry.drawMgr) return;
+        var raw = ChartDrawings.project(entry.drawMgr.drawings(), function (price) {
+            return drawingToRaw(entry, price);
+        });
+        entry.config.drawings = ChartDrawings.normalize(raw, drawMigrationContext(entry));
+        entry.drawSpace = ChartDrawings.spaceSignature(entry.config.priceScaleMode, entry.refPrice);
+        scheduleSave();
+    }
+
+    /**
+     * A new reference price re-bases percentage / indexed units; shift every
+     * stored anchor into the new display space without dropping selection.
+     */
+    function reprojectDrawings(entry) {
+        if (!entry.drawMgr || !entry.config.drawings || !entry.config.drawings.length) return;
+        var signature = ChartDrawings.spaceSignature(entry.config.priceScaleMode, entry.refPrice);
+        if (signature === entry.drawSpace) return;
+        entry.drawSpace = signature;
+        var byId = {};
+        entry.config.drawings.forEach(function (drawing) { byId[drawing.id] = drawing; });
+        entry.drawSyncing = true;
+        entry.drawMgr.drawings().forEach(function (current) {
+            var stored = byId[current.id];
+            if (!stored || !current.points) return;
+            var points = current.points.map(function (point, index) {
+                var source = stored.points[index];
+                var rawPrice = source && isFinite(source.price) ? source.price : drawingToRaw(entry, point.price);
+                return { time: point.time, price: drawingToDisplay(entry, rawPrice) };
+            });
+            entry.drawMgr.update(Object.assign({}, current, { points: points }));
+        });
+        entry.drawSyncing = false;
+    }
+
+    function isCustomDrawTool(tool) {
+        return tool === 'long' || tool === 'short' || tool === 'measure';
+    }
+
+    function setDrawTool(entry, tool, options) {
         if (entry.drawTool === tool) tool = null;
         entry.drawTool = tool;
-        entry.rail.querySelectorAll('button[data-tool]').forEach(function (btn) {
-            btn.setAttribute('aria-pressed', String(btn.dataset.tool === tool));
-        });
-        // Select behaves like TradingView's cursor: it must not disable chart
-        // panning.  Only shape tools capture the overlay and pause the chart.
-        var interactive = !!tool && tool !== 'select';
-        entry.drawCanvas.classList.toggle('active', interactive);
-        entry.panel.classList.toggle('drawing', interactive);
+        var custom = isCustomDrawTool(tool);
+        var library = !!tool && !custom && tool !== 'select';
+        entry.drawCanvas.classList.toggle('active', custom);
+        entry.panel.classList.toggle('drawing', custom);
         try {
-            entry.chart.applyOptions(interactive
-                ? { handleScroll: false, handleScale: false }
-                : { handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false }, handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true } });
+            if (custom) {
+                entry.chart.applyOptions({ handleScroll: false, handleScale: false });
+            } else {
+                entry.chart.applyOptions({
+                    handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+                    handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true }
+                });
+            }
         } catch (err) { /* ignore */ }
-        if (interactive) {
-            resizeDrawCanvas(entry);
+        if (entry.drawMgr) {
+            if (library) entry.drawMgr.setDrawingsVisible(true);
+            entry.drawArming = true;
+            entry.drawMgr.setTool(library ? tool : null, library && options && options.glyph ? { glyph: options.glyph } : undefined);
+            entry.drawArming = false;
+        }
+        if (custom) resizeDrawCanvas(entry);
+        entry.selectedPosition = null;
+        entry.selectedMeasure = false;
+        if (tool !== 'long' && tool !== 'short') entry.posDraft = null;
+        if (tool !== 'measure') entry.measureDraft = null;
+        entry.measureDrag = null;
+        syncDrawToolButtons(entry);
+        updateDrawStyleBar(entry);
+        if (custom) {
             renderDrawings(entry);
             entry.drawCanvas.focus && entry.drawCanvas.focus();
         }
-        entry.selectedDrawing = null;
-        entry.selectedPosition = null;
-        if (tool === 'measure') entry.measure = null;
-        renderDrawings(entry);
     }
 
     function toggleRail(entry) {
         if (entry.rail.classList.contains('open')) {
             entry.rail.classList.remove('open');
+            closeToolPalette(entry);
             setDrawTool(entry, null);
         } else {
             entry.rail.classList.add('open');
@@ -3841,14 +4186,42 @@
         }
     }
 
+    function syncDrawToolButtons(entry) {
+        if (!entry.rail) return;
+        var active = entry.drawTool;
+        entry.rail.querySelectorAll('button[data-tool]').forEach(function (btn) {
+            btn.setAttribute('aria-pressed', String(btn.dataset.tool === active));
+        });
+        var allTools = entry.rail.querySelector('[data-action="all-tools"]');
+        if (allTools) allTools.setAttribute('aria-expanded', String(!!entry.drawPalette));
+        if (entry.drawPalette) {
+            entry.drawPalette.querySelectorAll('button[data-kind]').forEach(function (btn) {
+                btn.setAttribute('aria-pressed', String(btn.dataset.kind === active));
+            });
+        }
+        if (entry.drawMagnetBtn) {
+            var on = drawMagnet() !== 'off';
+            entry.drawMagnetBtn.setAttribute('aria-pressed', String(on));
+            entry.drawMagnetBtn.title = on ? 'Magnet on — snapping to OHLC' : 'Magnet off';
+        }
+        if (entry.drawEyeBtn && entry.drawMgr) {
+            var visible = entry.drawMgr.drawingsVisible();
+            entry.drawEyeBtn.setAttribute('aria-pressed', String(!visible));
+            entry.drawEyeBtn.title = visible ? 'Hide all drawings' : 'Show all drawings';
+        }
+    }
+
     function resizeDrawCanvas(entry) {
         var canvas = entry.drawCanvas;
         var dpr = window.devicePixelRatio || 1;
-        var w = entry.host.clientWidth, h = entry.host.clientHeight;
+        var w = entry.body.clientWidth;
+        var h = entry.host.clientHeight;
         if (!w || !h) return;
         if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
             canvas.width = Math.round(w * dpr);
             canvas.height = Math.round(h * dpr);
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
         }
     }
 
@@ -3869,6 +4242,7 @@
                 if (entry.stripCandle && entry.ohlcStrip.classList.contains('show')) {
                     showStrip(entry, entry.stripCandle);
                 }
+                if (entry.drawMgr) entry.drawMgr.redraw();
                 scheduleDraw(entry);
             } catch (err) { /* a chart mid-teardown must not break the switch */ }
         });
@@ -3942,8 +4316,8 @@
 
     function plotBox(entry) {
         var ts = entry.chart.timeScale();
-        // v4 timeScale.height() is the time-axis strip, not the plot.  The
-        // overlay canvas spans the whole host, so subtract the axis.
+        // The time-axis strip is separate from the plot; the overlay canvas
+        // spans the host, so subtract the axis height.
         var axisHeight = ts.height ? ts.height() : 28;
         return {
             w: ts.width ? ts.width() : entry.host.clientWidth - 72,
@@ -3961,105 +4335,505 @@
         var w = canvas.width / dpr, h = canvas.height / dpr;
         ctx.clearRect(0, 0, w, h);
         var box = plotBox(entry);
-        var drawings = entry.config.drawings || [];
-        drawings.forEach(function (d) {
-            drawShape(entry, ctx, d, box, d.id === entry.selectedDrawing);
-        });
-        if (entry.drawPreview) drawShape(entry, ctx, entry.drawPreview, box, true);
         drawPositions(entry, ctx, box);
+        drawPositionGuide(entry, ctx, box);
         drawPositionDraft(entry, ctx, box);
         drawMeasure(entry, ctx, box);
     }
 
-    function drawShape(entry, ctx, d, box, selected) {
-        var color = selected ? THEME.accent : (d.color || THEME.muted);
-        ctx.strokeStyle = color;
-        ctx.fillStyle = color;
-        ctx.lineWidth = selected ? 1.6 : 1.1;
-        ctx.setLineDash([]);
-        var p0 = d.points && d.points[0];
-        if (!p0) return;
-        var x0 = d.tool === 'hline' ? null : xForTime(entry, p0.time);
-        var y0 = d.tool === 'vline' ? null : yForPrice(entry, p0.price);
-        if (d.tool === 'hline') {
-            if (y0 == null) return;
-            ctx.beginPath(); ctx.moveTo(0, y0); ctx.lineTo(box.w, y0); ctx.stroke();
-            ctx.font = '9.5px "JetBrains Mono", monospace';
-            ctx.fillText(formatPrice(p0.price, entry.precision), 6, y0 - 4);
-            if (selected) handleDot(ctx, box.w - 4, y0);
+    /* ── Selected-drawing style bar ─────────────────────────────────────── */
+
+    function ensureDrawStyleBar(entry) {
+        if (entry.drawStyleBar) return entry.drawStyleBar;
+        var bar = el('div', 'draw-stylebar');
+        bar.hidden = true;
+        bar.addEventListener('pointerdown', function (ev) { ev.stopPropagation(); });
+        entry.body.appendChild(bar);
+        entry.drawStyleBar = bar;
+        return bar;
+    }
+
+    function selectedDrawings(entry) {
+        if (!entry.drawMgr) return [];
+        return entry.drawMgr.selection().map(function (id) {
+            return entry.drawMgr.get(id);
+        }).filter(Boolean);
+    }
+
+    function styleButton(parent, label, title, onClick) {
+        var btn = el('button', 'dsb-btn', label);
+        btn.type = 'button';
+        btn.title = title;
+        btn.setAttribute('aria-label', title);
+        btn.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            onClick(btn);
+        });
+        parent.appendChild(btn);
+        return btn;
+    }
+
+    function applyDrawStyle(entry, patch) {
+        var selected = selectedDrawings(entry);
+        if (!selected.length || !entry.drawMgr) return;
+        selected.forEach(function (drawing) {
+            entry.drawMgr.update(Object.assign({}, drawing, {
+                style: Object.assign({}, drawing.style, patch)
+            }));
+        });
+        updateDrawStyleBar(entry);
+    }
+
+    function updateDrawStyleBar(entry) {
+        var bar = ensureDrawStyleBar(entry);
+        var selected = selectedDrawings(entry);
+        if (!selected.length) {
+            bar.hidden = true;
             return;
         }
-        if (d.tool === 'vline') {
-            if (x0 == null) return;
-            ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0, box.h); ctx.stroke();
-            if (selected) handleDot(ctx, x0, 6);
-            return;
-        }
-        if (d.tool === 'text') {
-            if (x0 == null || y0 == null) return;
-            ctx.font = '11px "JetBrains Mono", monospace';
-            ctx.fillStyle = selected ? THEME.accent : THEME.ink;
-            ctx.fillText(d.text || 'Text', x0 + 4, y0 - 4);
-            if (selected) {
-                var m = ctx.measureText(d.text || 'Text');
-                ctx.strokeStyle = THEME.accent;
-                ctx.strokeRect(x0 + 1, y0 - 15, m.width + 6, 16);
-                handleDot(ctx, x0, y0);
+        var primary = selected[0];
+        var style = primary.style || {};
+        bar.hidden = false;
+        bar.innerHTML = '';
+
+        var title = el('span', 'dsb-kind',
+            selected.length > 1
+                ? selected.length + ' drawings'
+                : ChartDrawings.kindLabel(primary.kind));
+        bar.appendChild(title);
+
+        var colors = el('span', 'dsb-colors');
+        ChartDrawings.COLORS.forEach(function (color) {
+            var swatch = el('button', 'dsb-swatch');
+            swatch.type = 'button';
+            swatch.style.background = color;
+            swatch.title = 'Colour ' + color;
+            swatch.setAttribute('aria-label', 'Colour ' + color);
+            if ((style.color || '').toLowerCase() === color.toLowerCase()) {
+                swatch.setAttribute('aria-pressed', 'true');
             }
-            return;
-        }
-        var p1 = d.points[1];
-        if (!p1) return;
-        var x1 = xForTime(entry, p1.time);
-        var y1 = yForPrice(entry, p1.price);
-        if (x0 == null || y0 == null || x1 == null || y1 == null) return;
-        if (d.tool === 'trend') {
-            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-            handleDot(ctx, x0, y0); handleDot(ctx, x1, y1);
-            ctx.font = '9.5px "JetBrains Mono", monospace';
-            var pct = p0.price ? ((p1.price / p0.price - 1) * 100).toFixed(2) : '0.00';
-            ctx.fillText((pct > 0 ? '+' : '') + pct + '%', x1 + 5, y1 - 5);
-        } else if (d.tool === 'rect') {
-            var left = Math.min(x0, x1), top = Math.min(y0, y1);
-            var rw = Math.abs(x1 - x0), rh = Math.abs(y1 - y0);
-            ctx.globalAlpha = 0.10;
-            ctx.fillRect(left, top, rw, rh);
-            ctx.globalAlpha = 1;
-            ctx.strokeRect(left, top, rw, rh);
-            if (selected) { handleDot(ctx, x0, y0); handleDot(ctx, x1, y1); }
-        } else if (d.tool === 'fib') {
-            var levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-            ctx.font = '9px "JetBrains Mono", monospace';
-            var lastLabelY = null;
-            levels.forEach(function (level) {
-                var y = y0 + (y1 - y0) * level;
-                ctx.strokeStyle = level === 0 || level === 1 ? color : THEME.muted;
-                ctx.setLineDash(level === 0 || level === 1 ? [] : [3, 3]);
-                ctx.beginPath(); ctx.moveTo(Math.min(x0, x1), y); ctx.lineTo(Math.max(x0, x1), y); ctx.stroke();
-                ctx.setLineDash([]);
-                var price = p0.price + (p1.price - p0.price) * level;
-                // Avoid label pile-up on shallow ranges.
-                if (lastLabelY == null || Math.abs(y - lastLabelY) >= 11) {
-                    lastLabelY = y;
-                    ctx.fillStyle = selected ? THEME.accent : THEME.muted;
-                    ctx.fillText(level + ' (' + formatPrice(price, entry.precision) + ')', Math.min(x0, x1) + 3, y - 3);
-                }
+            swatch.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                applyDrawStyle(entry, { color: color });
             });
-            if (selected) { handleDot(ctx, x0, y0); handleDot(ctx, x1, y1); }
+            colors.appendChild(swatch);
+        });
+        bar.appendChild(colors);
+
+        bar.appendChild(el('span', 'dsb-sep'));
+        var widths = el('span', 'dsb-group');
+        ChartDrawings.WIDTHS.forEach(function (width) {
+            var btn = styleButton(widths, String(width), width + 'px line', function () {
+                applyDrawStyle(entry, { width: width, lineWidth: width });
+            });
+            if (Number(style.width) === width) btn.setAttribute('aria-pressed', 'true');
+        });
+        bar.appendChild(widths);
+
+        var dashes = el('span', 'dsb-group');
+        ChartDrawings.DASHES.forEach(function (dash) {
+            var btn = styleButton(dashes, '', dash + ' line', function () {
+                applyDrawStyle(entry, { lineStyle: dash, lineStyleName: dash });
+            });
+            btn.classList.add('dsb-dash', 'dsb-dash-' + dash);
+            if ((style.lineStyle || 'solid') === dash) btn.setAttribute('aria-pressed', 'true');
+        });
+        bar.appendChild(dashes);
+
+        bar.appendChild(el('span', 'dsb-sep'));
+        var locked = !!primary.locked;
+        var lock = styleButton(bar, '', locked ? 'Unlock drawing' : 'Lock drawing', function () {
+            selected.forEach(function (drawing) {
+                entry.drawMgr.update(Object.assign({}, drawing, { locked: !drawing.locked }));
+            });
+            updateDrawStyleBar(entry);
+        });
+        lock.classList.add('dsb-icon', 'dsb-lock');
+        lock.appendChild(panelIcon(locked
+            ? ['M6 11h12v9H6z', 'M9 11V8a3 3 0 0 1 6 0v3']
+            : ['M6 11h12v9H6z', 'M9 11V8a3 3 0 0 1 5.5-1.7']));
+        if (locked) lock.setAttribute('aria-pressed', 'true');
+
+        var remove = styleButton(bar, '', 'Delete selected drawings', function () {
+            var ids = entry.drawMgr.selection().slice();
+            ids.forEach(function (id) { entry.drawMgr.remove(id); });
+            updateDrawStyleBar(entry);
+        });
+        remove.classList.add('dsb-icon', 'dsb-danger');
+        remove.appendChild(panelIcon(['M4 7h16', 'M9 7V5h6v2', 'M6.5 7l.8 12h9.4l.8-12']));
+
+        var close = styleButton(bar, '', 'Deselect', function () {
+            entry.drawMgr.select([]);
+            updateDrawStyleBar(entry);
+        });
+        close.classList.add('dsb-icon');
+        close.appendChild(panelIcon(['M6 6l12 12M18 6L6 18']));
+    }
+
+    /* ── Tool palette ───────────────────────────────────────────────────── */
+
+    function drawRecent() {
+        return Array.isArray(WS.prefs.drawRecent) ? WS.prefs.drawRecent.slice(0, 8) : [];
+    }
+
+    function touchDrawRecent(kind) {
+        var list = drawRecent().filter(function (item) { return item !== kind; });
+        list.unshift(kind);
+        WS.prefs.drawRecent = list.slice(0, 8);
+        savePrefs();
+    }
+
+    function closeToolPalette(entry) {
+        if (!entry.drawPalette) return;
+        entry.drawPalette.remove();
+        entry.drawPalette = null;
+        syncDrawToolButtons(entry);
+    }
+
+    function openToolPalette(entry) {
+        if (entry.drawPalette) { closeToolPalette(entry); return; }
+        var panel = el('div', 'draw-palette');
+        panel.setAttribute('role', 'dialog');
+        panel.setAttribute('aria-label', 'Drawing tools');
+        panel.addEventListener('pointerdown', function (ev) { ev.stopPropagation(); });
+
+        var head = el('div', 'dp-head');
+        var search = el('input', 'dp-search');
+        search.type = 'search';
+        search.placeholder = 'Search ' + ChartDrawings.TOOLS.length + ' tools…';
+        search.setAttribute('aria-label', 'Search drawing tools');
+        head.appendChild(search);
+        var close = el('button', 'dp-close');
+        close.type = 'button';
+        close.title = 'Close tool palette';
+        close.setAttribute('aria-label', 'Close tool palette');
+        close.appendChild(panelIcon(['M6 6l12 12M18 6L6 18']));
+        close.addEventListener('click', function () { closeToolPalette(entry); });
+        head.appendChild(close);
+        panel.appendChild(head);
+
+        var body = el('div', 'dp-body');
+        panel.appendChild(body);
+
+        var foot = el('div', 'dp-foot');
+        var magnet = el('button', 'dp-toggle', 'Magnet');
+        magnet.type = 'button';
+        magnet.setAttribute('aria-pressed', String(drawMagnet() !== 'off'));
+        magnet.addEventListener('click', function () { toggleDrawMagnet(entry); });
+        foot.appendChild(magnet);
+
+        var eye = el('button', 'dp-toggle', 'Hide all');
+        eye.type = 'button';
+        eye.addEventListener('click', function () { toggleDrawVisibility(entry); });
+        foot.appendChild(eye);
+        foot.appendChild(el('span', 'dp-hint', 'Enter picks · Esc closes'));
+        panel.appendChild(foot);
+
+        entry.drawPalette = panel;
+        entry.body.appendChild(panel);
+        syncDrawToolButtons(entry);
+
+        function renderPalette(filter) {
+            body.innerHTML = '';
+            var query = (filter || '').trim().toLowerCase();
+            var matches = ChartDrawings.TOOLS.filter(function (tool) {
+                if (!query) return true;
+                return tool.label.toLowerCase().indexOf(query) >= 0 ||
+                    tool.kind.indexOf(query) >= 0 ||
+                    tool.familyLabel.toLowerCase().indexOf(query) >= 0;
+            });
+            if (!query) {
+                var recent = drawRecent().map(function (kind) {
+                    return ChartDrawings.TOOL_BY_KIND[kind];
+                }).filter(Boolean);
+                if (recent.length) body.appendChild(renderGroup('Recent', recent));
+            }
+            if (!matches.length) {
+                body.appendChild(el('p', 'dp-empty', 'No tool matches “' + (filter || '') + '”.'));
+                return;
+            }
+            ChartDrawings.FAMILIES.forEach(function (family) {
+                var items = matches.filter(function (tool) { return tool.family === family.id; });
+                if (items.length) body.appendChild(renderGroup(family.label, items));
+            });
+            syncFavoriteButtons();
+        }
+
+        function renderGroup(label, items) {
+            var group = el('div', 'dp-group');
+            var heading = el('div', 'dp-group-title');
+            heading.appendChild(el('span', '', label));
+            heading.appendChild(el('span', 'dp-count', String(items.length)));
+            group.appendChild(heading);
+            var grid = el('div', 'dp-grid');
+            items.forEach(function (tool) {
+                var item = el('div', 'dp-item');
+                var btn = el('button', 'dp-tool');
+                btn.type = 'button';
+                btn.dataset.kind = tool.kind;
+                btn.title = ChartDrawings.isTextKind(tool.kind)
+                    ? tool.label + ' — place, then type'
+                    : tool.label;
+                btn.setAttribute('aria-pressed', String(entry.drawTool === tool.kind));
+                btn.appendChild(el('span', 'dp-tool-label', tool.label));
+                btn.addEventListener('click', function () {
+                    touchDrawRecent(tool.kind);
+                    closeToolPalette(entry);
+                    chooseDrawTool(entry, tool.kind);
+                });
+                var favorite = el('button', 'dp-fav');
+                favorite.type = 'button';
+                favorite.dataset.favorite = tool.kind;
+                favorite.appendChild(panelIcon(starIcon()));
+                favorite.addEventListener('click', function (ev) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    toggleDrawFavorite(tool.kind);
+                });
+                item.appendChild(btn);
+                item.appendChild(favorite);
+                grid.appendChild(item);
+            });
+            group.appendChild(grid);
+            return group;
+        }
+
+        search.addEventListener('input', function () { renderPalette(search.value); });
+        search.addEventListener('keydown', function (ev) {
+            var tools = body.querySelectorAll('button.dp-tool');
+            if (ev.key === 'Escape') { ev.stopPropagation(); closeToolPalette(entry); return; }
+            if (ev.key === 'Enter' && tools.length) {
+                ev.preventDefault();
+                tools[0].click();
+                return;
+            }
+            if (ev.key === 'ArrowDown' && tools.length) {
+                ev.preventDefault();
+                tools[0].focus();
+            }
+        });
+        body.addEventListener('keydown', function (ev) {
+            var tools = Array.prototype.slice.call(body.querySelectorAll('button.dp-tool'));
+            var index = tools.indexOf(document.activeElement);
+            if (ev.key === 'Escape') { ev.stopPropagation(); closeToolPalette(entry); return; }
+            if (ev.key === 'ArrowDown' || ev.key === 'ArrowRight') {
+                ev.preventDefault();
+                (tools[index + 1] || tools[0]).focus();
+            } else if (ev.key === 'ArrowUp' || ev.key === 'ArrowLeft') {
+                ev.preventDefault();
+                (tools[index <= 0 ? tools.length - 1 : index - 1]).focus();
+            }
+        });
+
+        renderPalette('');
+        search.focus();
+    }
+
+    function toggleDrawMagnet(entry) {
+        WS.prefs.drawMagnet = drawMagnet() === 'off' ? 'weak' : 'off';
+        savePrefs();
+        Object.keys(WS.charts).forEach(function (id) {
+            var chart = WS.charts[id];
+            if (chart.drawMgr) chart.drawMgr.setMagnet(drawMagnet());
+            syncDrawToolButtons(chart);
+        });
+        if (entry.drawPalette) {
+            var toggle = entry.drawPalette.querySelector('.dp-toggle');
+            if (toggle) toggle.setAttribute('aria-pressed', String(drawMagnet() !== 'off'));
         }
     }
 
-    function handleDot(ctx, x, y) {
-        ctx.fillStyle = THEME.bg;
-        ctx.strokeStyle = THEME.accent;
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        ctx.arc(x, y, 3.2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
+    function toggleDrawVisibility(entry) {
+        if (!entry.drawMgr) return;
+        entry.drawMgr.setDrawingsVisible(!entry.drawMgr.drawingsVisible());
+        syncDrawToolButtons(entry);
+        if (entry.drawPalette) {
+            var eye = entry.drawPalette.querySelectorAll('.dp-toggle')[1];
+            if (eye) eye.setAttribute('aria-pressed', String(!entry.drawMgr.drawingsVisible()));
+        }
     }
 
+    /* ── Host text editor for text-family drawings ───────────────────────── */
 
+    function openDrawTextEditor(entry, drawing, point) {
+        if (!drawing) return;
+        entry.pendingText = drawing.id;
+        var ed = entry.textEditor;
+        var x = point && isFinite(point.x) ? point.x : 12;
+        var y = point && isFinite(point.y) ? point.y : 40;
+        ed.style.left = clamp(x, 4, Math.max(4, entry.body.clientWidth - 190)) + 'px';
+        ed.style.top = clamp(y - 30, 4, Math.max(4, entry.body.clientHeight - 40)) + 'px';
+        ed.classList.add('show');
+        entry.textInput.value = drawing.text || '';
+        // The placement click's own pointer-up lands after this event and can
+        // move focus to the chart, so grab it once the gesture is complete.
+        setTimeout(function () {
+            if (entry.pendingText !== drawing.id) return;
+            entry.textInput.focus({ preventScroll: true });
+            entry.textInput.select();
+        }, 70);
+    }
+
+    function commitDrawText(entry) {
+        if (!entry.pendingText) return;
+        var id = entry.pendingText;
+        var text = entry.textInput.value.trim();
+        entry.pendingText = null;
+        entry.textEditor.classList.remove('show');
+        entry.textInput.value = '';
+        var drawing = entry.drawMgr && entry.drawMgr.get(id);
+        if (!drawing) return;
+        if (text) entry.drawMgr.update(Object.assign({}, drawing, { text: text }));
+        else entry.drawMgr.remove(id);
+    }
+
+    function cancelDrawText(entry) {
+        entry.pendingText = null;
+        entry.textEditor.classList.remove('show');
+        entry.textInput.value = '';
+    }
+
+    /* ── Table cell editor (lightweight-charts-drawing tables) ──────────── */
+
+    function openDrawTableCellEditor(entry, drawing, cell, box) {
+        if (!drawing || !cell) return;
+        entry.pendingText = null;
+        entry.tableEditRef = { id: drawing.id, cell: cell };
+        var ed = entry.textEditor;
+        var left = box && isFinite(box.left) ? box.left : 12;
+        var top = box && isFinite(box.top) ? box.top : 40;
+        ed.style.left = clamp(left, 4, Math.max(4, entry.body.clientWidth - 190)) + 'px';
+        ed.style.top = clamp(top, 4, Math.max(4, entry.body.clientHeight - 40)) + 'px';
+        ed.classList.add('show');
+        entry.textInput.value = '';
+        setTimeout(function () {
+            if (!entry.tableEditRef) return;
+            entry.textInput.focus({ preventScroll: true });
+        }, 70);
+    }
+
+    function commitDrawTableCell(entry) {
+        var ref = entry.tableEditRef;
+        if (!ref) return;
+        var text = entry.textInput.value;
+        entry.tableEditRef = null;
+        entry.textEditor.classList.remove('show');
+        entry.textInput.value = '';
+        if (!entry.drawMgr) return;
+        entry.drawMgr.setTableCellText(ref.id, ref.cell, text);
+        entry.drawMgr.endTableEdit();
+    }
+
+    function cancelDrawTableCell(entry) {
+        if (!entry.tableEditRef) return;
+        entry.tableEditRef = null;
+        entry.textEditor.classList.remove('show');
+        entry.textInput.value = '';
+        if (entry.drawMgr) entry.drawMgr.endTableEdit();
+    }
+
+    /* ── Image / font-icon host pickers ─────────────────────────────────── */
+
+    var DRAW_IMAGE_KEY = 'trade_panel.workspace.draw_images.v1';
+    var MAX_DRAW_IMAGE_BYTES = 1_200_000;
+
+    function drawImageStoreKey(entry) {
+        return String(WS.activeId || 'ws') + '|' + String(entry.config.id || 'chart');
+    }
+
+    function readDrawImageStore() {
+        try {
+            var raw = localStorage.getItem(DRAW_IMAGE_KEY);
+            var parsed = raw ? JSON.parse(raw) : null;
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (err) {
+            return {};
+        }
+    }
+
+    function rememberDrawImage(entry, record) {
+        var all = readDrawImageStore();
+        var key = drawImageStoreKey(entry);
+        var list = Array.isArray(all[key]) ? all[key] : [];
+        list = list.filter(function (img) { return img && img.name !== record.name; });
+        list.push(record);
+        all[key] = list.slice(-8);
+        try { localStorage.setItem(DRAW_IMAGE_KEY, JSON.stringify(all)); }
+        catch (err) { toast('The drawing image could not be stored (storage is full)', true); }
+    }
+
+    function restoreDrawImages(entry) {
+        var DW = window.LightweightChartsDrawing;
+        if (!DW || !DW.cacheImage) return;
+        var list = readDrawImageStore()[drawImageStoreKey(entry)];
+        if (!Array.isArray(list)) return;
+        list.forEach(function (img) {
+            if (!img || !img.name || !img.url) return;
+            try {
+                DW.cacheImage(img.name, { url: img.url, width: img.width, height: img.height });
+            } catch (err) { /* stale record */ }
+        });
+    }
+
+    function pickDrawImage(entry) {
+        var input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/png,image/jpeg,image/webp,image/gif';
+        input.style.display = 'none';
+        document.body.appendChild(input);
+        input.addEventListener('change', function () {
+            var file = input.files && input.files[0];
+            input.remove();
+            if (!file || !entry.drawMgr) return;
+            if (file.size > MAX_DRAW_IMAGE_BYTES) {
+                toast('Image is too large — maximum 1.2 MB', true);
+                return;
+            }
+            var reader = new FileReader();
+            reader.onload = function () {
+                var url = String(reader.result || '');
+                var probe = new Image();
+                probe.onload = function () {
+                    var scale = Math.min(1, 360 / probe.naturalWidth, 240 / probe.naturalHeight);
+                    var cssWidth = Math.max(24, Math.round(probe.naturalWidth * scale));
+                    var cssHeight = Math.max(24, Math.round(probe.naturalHeight * scale));
+                    var name = 'img-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+                    var DW = window.LightweightChartsDrawing;
+                    var record = { name: name, url: url, width: probe.naturalWidth, height: probe.naturalHeight };
+                    try { DW.cacheImage(name, record); } catch (err) { /* older build */ }
+                    rememberDrawImage(entry, record);
+                    var id = entry.drawMgr.addImage({ name: name, width: cssWidth, height: cssHeight });
+                    if (!id) toast('Could not place the image', true);
+                    else entry.drawMgr.select([id]);
+                };
+                probe.onerror = function () { toast('Unsupported image file', true); };
+                probe.src = url;
+            };
+            reader.onerror = function () { toast('Could not read the image', true); };
+            reader.readAsDataURL(file);
+        });
+        input.click();
+    }
+
+    function pickDrawGlyph(entry) {
+        openPrompt('Font icon', '★', function (glyph) {
+            if (!entry.drawMgr) return;
+            setDrawTool(entry, 'font-icon', { glyph: glyph });
+        });
+    }
+
+    function finishDrawing(entry) {
+        var keepPosition = entry.selectedPosition;
+        var keepMeasure = entry.selectedMeasure;
+        setDrawTool(entry, null);
+        // A just-created position/measure stays selected so its handles and
+        // stats are immediately editable (TradingView behaviour).
+        entry.selectedPosition = keepPosition;
+        entry.selectedMeasure = keepMeasure;
+        renderDrawings(entry);
+    }
     /* ── Position projections + measure ─────────────────────────────────── */
 
     var POS_STORE_KEY = 'trade_panel.workspace.positions.v1';
@@ -4081,7 +4855,8 @@
     function loadPositions(entry) {
         var all = readJsonStorage(POS_STORE_KEY, {});
         var list = all[positionSymbolKey(entry)];
-        return Array.isArray(list) ? list : [];
+        if (!Array.isArray(list)) return [];
+        return list.map(PositionTool.normalizePosition).filter(Boolean).slice(-200);
     }
 
     function savePositions(entry) {
@@ -4093,14 +4868,7 @@
     }
 
     function loadPositionSettings() {
-        var saved = readJsonStorage(POS_SETTINGS_KEY, {});
-        return {
-            acct: Number(saved.acct) || 10000,
-            risk: Number(saved.risk) || 1,
-            lev: Number(saved.lev) || 10,
-            widthPx: Number(saved.widthPx) || Number(saved.widthBars) * 6 || 140,
-            showStats: saved.showStats !== false
-        };
+        return PositionTool.normalizeSettings(readJsonStorage(POS_SETTINGS_KEY, {}));
     }
 
     function savePositionSettings(entry) {
@@ -4118,65 +4886,374 @@
         } catch (err) { /* ignore */ }
     }
 
-    function positionStats(entry, pos) {
-        var risk = Math.abs(pos.entry - pos.sl);
-        var reward = Math.abs(pos.tp - pos.entry);
-        var settings = entry.posSettings;
-        var riskAmount = settings.acct * (settings.risk / 100);
-        var qty = risk > 0 ? riskAmount / risk : 0;
-        return {
-            rr: risk > 0 ? reward / risk : 0,
-            qty: qty,
-            margin: qty * pos.entry / (settings.lev || 1),
-            risk: riskAmount,
-            reward: qty * reward
+    /** Close of the candle that contains `time` (0 when it is in the future). */
+    function closeAtTime(entry, time) {
+        var candles = entry.candles;
+        if (!candles || !candles.length) return 0;
+        var idx = lowerBound(candles, time);
+        if (idx < candles.length && candles[idx].time === time) return candles[idx].close;
+        idx -= 1;
+        return idx >= 0 ? candles[idx].close : 0;
+    }
+
+    /**
+     * Market inputs for the sizing engine. The box's right edge decides
+     * between "open PnL at the last price" (future edge) and the close of the
+     * edge candle (past edge), mirroring TradingView's PnL states.
+     */
+    function positionMarket(entry, pos) {
+        var precision = entry.precision == null ? 2 : entry.precision;
+        var tickSize = entry.minMove > 0 ? entry.minMove : Math.pow(10, -precision);
+        var last = entry.candles && entry.candles.length
+            ? entry.candles[entry.candles.length - 1]
+            : null;
+        var market = {
+            precision: precision,
+            tickSize: tickSize,
+            lastPrice: last ? last.close : 0,
+            closeAtEnd: 0
         };
+        if (pos && last && isFinite(pos.endTime) && pos.endTime <= last.time) {
+            market.closeAtEnd = closeAtTime(entry, pos.endTime);
+        }
+        return market;
+    }
+
+    function computePosition(entry, pos) {
+        return PositionTool.compute(pos, entry.posSettings, positionMarket(entry, pos));
     }
 
     function openPositionSettings(entry) {
-        var s = entry.posSettings;
-        var wrap = el('div');
-        wrap.style.display = 'grid';
-        wrap.style.gridTemplateColumns = '1fr 1fr';
-        wrap.style.gap = '10px';
-        // `showStats` is toggled from the drawing rail; keep Apply from
-        // clobbering it (only numeric inputs are read below).
-        function field(label, key, value, step) {
+        var s = PositionTool.normalizeSettings(entry.posSettings);
+        var pos = entry.selectedPosition
+            ? entry.positions.filter(function (p) { return p.id === entry.selectedPosition; })[0] || null
+            : null;
+        var form = el('div', 'pos-form');
+        var error = el('p', 'pos-error');
+        error.setAttribute('role', 'alert');
+        var fieldSeq = 0;
+
+        function field(parent, label, value, step, hint) {
             var box = el('div', 'field');
-            box.appendChild(el('label', '', label));
             var input = el('input', 'input mono');
+            fieldSeq += 1;
+            var inputId = 'pos-field-' + fieldSeq;
+            var labelNode = el('label', '', label);
+            labelNode.htmlFor = inputId;
+            input.id = inputId;
+            box.appendChild(labelNode);
             input.type = 'number';
             input.step = step || '1';
+            input.inputMode = 'decimal';
             input.value = value;
-            input.dataset.key = key;
             box.appendChild(input);
-            wrap.appendChild(box);
+            if (hint) box.appendChild(el('div', 'pos-hint', hint));
+            parent.appendChild(box);
+            return input;
         }
-        field('Account (USDT)', 'acct', s.acct, '100');
-        field('Risk per trade (%)', 'risk', s.risk, '0.1');
-        field('Leverage', 'lev', s.lev, '1');
-        field('Default box width (px)', 'widthPx', s.widthPx, '10');
+
+        function title(text, sub) {
+            var row = el('div', 'pos-section-title');
+            row.appendChild(el('span', '', text));
+            if (sub) row.appendChild(el('span', 'sub', sub));
+            return row;
+        }
+
+        function toggleRow(parent, label, desc, checked, onChange) {
+            var row = el('div', 'pos-switch');
+            var lbl = el('div', 'lbl');
+            lbl.appendChild(el('b', '', label));
+            lbl.appendChild(el('span', '', desc));
+            var sw = el('button', 'switch');
+            sw.type = 'button';
+            sw.setAttribute('role', 'switch');
+            sw.setAttribute('aria-checked', String(!!checked));
+            sw.setAttribute('aria-label', label);
+            sw.addEventListener('click', function () {
+                var next = sw.getAttribute('aria-checked') !== 'true';
+                sw.setAttribute('aria-checked', String(next));
+                if (onChange) onChange(next);
+            });
+            row.appendChild(lbl);
+            row.appendChild(sw);
+            parent.appendChild(row);
+            return sw;
+        }
+
+        /* ── Sizing ── */
+        var sizing = el('div', 'pos-section');
+        sizing.appendChild(title('Position sizing', 'Qty = min(risk qty, leverage qty)'));
+        var sizingGrid = el('div', 'pos-grid');
+        var acctInput = field(sizingGrid, 'Account size (USDT)', s.acct, '100');
+        var levInput = field(sizingGrid, 'Leverage', s.lev, '1');
+        var lotInput = field(sizingGrid, 'Lot size', s.lotSize, '0.1');
+        var qtyPrecisionInput = field(sizingGrid, 'Quantity precision', s.qtyPrecision, '1', 'Decimals shown on tags (0–8)');
+        sizing.appendChild(sizingGrid);
+
+        var riskBox = el('div', 'field');
+        var riskLabel = el('label', '', 'Risk per trade');
+        riskLabel.htmlFor = 'pos-risk-input';
+        riskBox.appendChild(riskLabel);
+        var riskRow = el('div', 'pos-risk');
+        var seg = el('div', 'seg');
+        seg.setAttribute('role', 'group');
+        seg.setAttribute('aria-label', 'Risk mode');
+        var mode = s.riskMode;
+        var riskDraft = { percent: s.riskPercent, amount: s.riskAmount };
+        var modeButtons = {};
+        ['percent', 'amount'].forEach(function (key) {
+            var btn = el('button', '', key === 'percent' ? '%' : 'USDT');
+            btn.type = 'button';
+            btn.dataset.mode = key;
+            btn.setAttribute('aria-pressed', String(mode === key));
+            btn.title = key === 'percent' ? 'Risk as a percentage of the account' : 'Risk as a fixed amount';
+            btn.addEventListener('click', function () {
+                if (mode === key) return;
+                var acct = Number(acctInput.value);
+                var current = Number(riskInput.value);
+                var nextValue = key === 'percent'
+                    ? (isFinite(current) && acct > 0 ? current / acct * 100 : riskDraft.percent)
+                    : (isFinite(current) ? current * acct / 100 : riskDraft.amount);
+                nextValue = Number(nextValue.toFixed(4));
+                mode = key;
+                riskDraft[key] = nextValue;
+                riskInput.value = nextValue;
+                Object.keys(modeButtons).forEach(function (k) {
+                    modeButtons[k].setAttribute('aria-pressed', String(k === mode));
+                });
+                renderPreview();
+            });
+            modeButtons[key] = btn;
+            seg.appendChild(btn);
+        });
+        var riskInput = el('input', 'input mono');
+        riskInput.id = 'pos-risk-input';
+        riskInput.type = 'number';
+        riskInput.step = mode === 'percent' ? '0.1' : '10';
+        riskInput.inputMode = 'decimal';
+        riskInput.value = mode === 'percent' ? s.riskPercent : s.riskAmount;
+        riskRow.appendChild(seg);
+        riskRow.appendChild(riskInput);
+        riskBox.appendChild(riskRow);
+        riskBox.appendChild(el('div', 'pos-hint', 'Balance at target / stop is derived from this budget.'));
+        sizing.appendChild(riskBox);
+        form.appendChild(sizing);
+
+        /* ── Display ── */
+        var display = el('div', 'pos-section');
+        display.appendChild(title('Display'));
+        var displayGrid = el('div', 'pos-grid');
+        var widthInput = field(displayGrid, 'Default box width (px)', s.widthPx, '10', 'Used by new boxes and AI overlays');
+        display.appendChild(displayGrid);
+        var switches = el('div', 'pos-switches');
+        var showSwitch = toggleRow(switches, 'Show stats panel',
+            'Selected box shows quantity, risk, reward and balances', s.showStats, renderPreview);
+        var compactSwitch = toggleRow(switches, 'Compact stats mode',
+            'Collapse tags to a single summary strip on the box', s.compactStats, renderPreview);
+        display.appendChild(switches);
+        form.appendChild(display);
+
+        /* ── Preview ── */
+        var preview = el('div', 'pos-preview');
+        form.appendChild(preview);
+
+        /* ── Selected position ── */
+        var selected = el('div', 'pos-section');
+        selected.appendChild(title('Selected position', pos ? (pos.dir === 'long' ? 'Long' : 'Short') : 'None'));
+        var entryInput = null;
+        var tpInput = null;
+        var slInput = null;
+        if (pos) {
+            var levelGrid = el('div', 'pos-grid three');
+            entryInput = field(levelGrid, 'Entry', trimNumber(pos.entry, entry.precision), '0.01');
+            tpInput = field(levelGrid, 'Take profit', trimNumber(pos.tp, entry.precision), '0.01');
+            slInput = field(levelGrid, 'Stop loss', trimNumber(pos.sl, entry.precision), '0.01');
+            selected.appendChild(levelGrid);
+            var actions = el('div');
+            actions.style.display = 'flex';
+            actions.style.alignItems = 'center';
+            actions.style.gap = '10px';
+            var reset = el('button', 'btn-ghost', 'Reset stop to 1:1');
+            reset.type = 'button';
+            reset.addEventListener('click', function () {
+                var entryPrice = Number(entryInput.value);
+                var target = Number(tpInput.value);
+                if (!(entryPrice > 0) || !(target > 0)) return;
+                var stop = PositionTool.mirrorStop(pos.dir, entryPrice, target);
+                slInput.value = trimNumber(stop, entry.precision);
+                renderPreview();
+            });
+            actions.appendChild(reset);
+            actions.appendChild(el('span', 'pos-hint', 'Dragging a level on the chart keeps levels independent.'));
+            selected.appendChild(actions);
+        } else {
+            selected.appendChild(el('div', 'pos-empty',
+                'Select a long or short box to edit its entry, target and stop here.'));
+        }
+        form.appendChild(selected);
+        form.appendChild(error);
+
+        function readSettings() {
+            var acct = Number(acctInput.value);
+            var riskValue = Number(riskInput.value);
+            var percent = mode === 'percent' ? riskValue : (acct > 0 ? riskValue / acct * 100 : riskDraft.percent);
+            var amount = mode === 'amount' ? riskValue : acct * riskValue / 100;
+            return {
+                acct: acct,
+                riskMode: mode,
+                riskPercent: percent,
+                riskAmount: amount,
+                lev: Number(levInput.value),
+                lotSize: Number(lotInput.value),
+                qtyPrecision: Number(qtyPrecisionInput.value),
+                widthPx: Number(widthInput.value),
+                showStats: showSwitch.getAttribute('aria-checked') === 'true',
+                compactStats: compactSwitch.getAttribute('aria-checked') === 'true'
+            };
+        }
+
+        function previewMetrics(settings) {
+            var market = positionMarket(entry, pos);
+            if (pos) {
+                var live = {
+                    dir: pos.dir,
+                    entry: entryInput ? Number(entryInput.value) : pos.entry,
+                    tp: tpInput ? Number(tpInput.value) : pos.tp,
+                    sl: slInput ? Number(slInput.value) : pos.sl,
+                    startTime: pos.startTime,
+                    endTime: pos.endTime
+                };
+                return PositionTool.compute(live, settings, market);
+            }
+            var last = entry.candles && entry.candles.length
+                ? entry.candles[entry.candles.length - 1].close
+                : 100;
+            if (!(last > 0)) last = 100;
+            return PositionTool.compute({
+                dir: 'long', entry: last, tp: last * 1.02, sl: last * 0.99,
+                startTime: 1, endTime: 2
+            }, settings, {
+                precision: entry.precision,
+                tickSize: entry.minMove,
+                lastPrice: last,
+                closeAtEnd: 0
+            });
+        }
+
+        function renderPreview() {
+            var settings = readSettings();
+            var normalized = PositionTool.normalizeSettings(settings);
+            var m = previewMetrics(normalized);
+            preview.innerHTML = '';
+            var head = el('div', 'pos-preview-head');
+            var dirLabel = (m ? (m.dir === 'long' ? 'LONG' : 'SHORT') : (pos ? pos.dir.toUpperCase() : 'LONG'));
+            var dirNode = el('b', 'dir ' + dirLabel.toLowerCase(), dirLabel);
+            head.appendChild(dirNode);
+            head.appendChild(el('span', '', entry.config.symbol + ' · ' + tfLabel(entry.config.timeframe)));
+            head.appendChild(el('span', 'spacer', pos ? 'Live preview' : '2% / 1% template'));
+            preview.appendChild(head);
+            if (!m) {
+                preview.appendChild(el('div', 'pos-hint', 'Enter a valid entry, target and stop to see sizing.'));
+                return;
+            }
+            var rows = el('div', 'pos-preview-rows');
+            PositionTool.statsRows(m).forEach(function (row) {
+                var line = el('div', 'pos-preview-row');
+                line.appendChild(el('span', '', row.label));
+                var value = el('b', row.tone || '', row.value);
+                line.appendChild(value);
+                rows.appendChild(line);
+            });
+            preview.appendChild(rows);
+            var warn = '';
+            if (m.capped === 'leverage') warn = 'Quantity is capped by leverage, so the actual risk is below the budget.';
+            else if (m.qty <= 0) warn = 'Quantity is zero — check the risk budget and stop distance.';
+            if (warn) preview.appendChild(el('div', 'pos-hint', warn));
+        }
+
+        [acctInput, levInput, lotInput, qtyPrecisionInput, widthInput, riskInput,
+            entryInput, tpInput, slInput].forEach(function (input) {
+            if (input) input.addEventListener('input', renderPreview);
+        });
+
+        /* ── Footer ── */
         var foot = el('div');
         foot.style.marginLeft = 'auto';
         foot.style.display = 'flex';
         foot.style.gap = '8px';
         var cancel = el('button', 'btn-ghost', 'Cancel');
+        cancel.type = 'button';
         cancel.addEventListener('click', closeModal);
         var apply = el('button', 'btn-ghost primary', 'Apply');
+        apply.type = 'button';
         apply.addEventListener('click', function () {
-            wrap.querySelectorAll('input').forEach(function (input) {
-                var value = Number(input.value);
-                if (isFinite(value) && value > 0) {
-                    entry.posSettings[input.dataset.key] = value;
+            error.textContent = '';
+            var settings = readSettings();
+            if (!(settings.acct > 0)) { error.textContent = 'Account size must be greater than zero.'; return; }
+            if (!(settings.riskPercent > 0) || !(settings.riskAmount > 0)) {
+                error.textContent = 'Risk must be greater than zero.';
+                return;
+            }
+            if (!(settings.lev >= 1)) { error.textContent = 'Leverage must be at least 1×.'; return; }
+            if (!(settings.lotSize > 0)) { error.textContent = 'Lot size must be greater than zero.'; return; }
+            if (!(settings.widthPx >= 40)) { error.textContent = 'Default box width must be at least 40 px.'; return; }
+            if (pos) {
+                var entryPrice = Number(entryInput.value);
+                var target = Number(tpInput.value);
+                var stop = Number(slInput.value);
+                if (![entryPrice, target, stop].every(function (v) { return isFinite(v) && v > 0; })) {
+                    error.textContent = 'Entry, target and stop must be positive prices.';
+                    return;
                 }
-            });
+                var ordered = pos.dir === 'long'
+                    ? stop < entryPrice && entryPrice < target
+                    : target < entryPrice && entryPrice < stop;
+                if (!ordered) {
+                    error.textContent = pos.dir === 'long'
+                        ? 'A long needs stop < entry < target.'
+                        : 'A short needs target < entry < stop.';
+                    return;
+                }
+                pos.entry = entryPrice;
+                pos.tp = target;
+                pos.sl = stop;
+                savePositions(entry);
+                notifyPosition(entry, pos);
+            }
+            entry.posSettings = PositionTool.normalizeSettings(settings);
             savePositionSettings(entry);
+            syncStatsButtons(entry);
             closeModal();
             renderDrawings(entry);
         });
         foot.appendChild(cancel);
         foot.appendChild(apply);
-        openModal({ title: 'Position tool settings', sub: 'Sizing, risk and default box width', body: wrap, foot: foot });
+
+        form.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Enter' && ev.target && ev.target.tagName === 'INPUT') {
+                ev.preventDefault();
+                apply.click();
+            }
+        });
+
+        renderPreview();
+        openModal({
+            title: 'Position tool',
+            sub: 'Sizing, risk, display and the selected box',
+            body: form,
+            foot: foot,
+            onOpen: function () {
+                var first = form.querySelector('input');
+                if (first) first.focus();
+            }
+        });
+    }
+
+    /** Price without thousands separators, trimmed to the chart precision. */
+    function trimNumber(value, precision) {
+        if (!isFinite(value)) return '';
+        var places = precision == null ? 2 : precision;
+        return String(Number(Number(value).toFixed(places)));
     }
 
     function pinnedLevelY(entry, price, box) {
@@ -4187,91 +5264,339 @@
         return y;
     }
 
-    function drawPositions(entry, ctx, box) {
-        entry.positions.forEach(function (pos) {
-            var x0 = xForTime(entry, pos.startTime);
-            var x1 = xForTime(entry, pos.endTime);
-            var yEntry = pinnedLevelY(entry, pos.entry, box);
-            var yTp = pinnedLevelY(entry, pos.tp, box);
-            var ySl = pinnedLevelY(entry, pos.sl, box);
-            var entryOff = Math.abs((yForPrice(entry, pos.entry) || 0) - yEntry) > 1;
-            var tpOff = Math.abs((yForPrice(entry, pos.tp) || 0) - yTp) > 1;
-            var slOff = Math.abs((yForPrice(entry, pos.sl) || 0) - ySl) > 1;
-            if (x0 == null || yEntry == null || yTp == null || ySl == null) return;
-            if (x1 == null) x1 = box.w;
-            if (x1 < -20 || x0 > box.w + 20) return;
-            var selected = pos.id === entry.selectedPosition;
-            var long = pos.dir === 'long';
-            var color = long ? THEME.up : THEME.down;
-            var top = Math.min(yEntry, yTp, ySl);
-            var bottom = Math.max(yEntry, yTp, ySl);
-            var boxW = Math.max(1, x1 - x0);
-            // Profit zone (entry→TP) is always green, risk zone (entry→SL)
-            // always red — for shorts the zones simply swap sides.
-            ctx.fillStyle = rgbaOf('upRgb', 0.10);
-            ctx.fillRect(x0, Math.min(yEntry, yTp), boxW,
-                Math.max(1, Math.abs(yTp - yEntry)));
-            ctx.fillStyle = rgbaOf('downRgb', 0.10);
-            ctx.fillRect(x0, Math.min(yEntry, ySl), boxW,
-                Math.max(1, Math.abs(ySl - yEntry)));
-            if (selected) {
-                ctx.strokeStyle = rgbaOf('accentRgb', 0.65);
-                ctx.lineWidth = 1;
-                ctx.strokeRect(x0 + 0.5, top + 0.5, Math.max(1, x1 - x0 - 1), Math.max(1, bottom - top - 1));
-            }
-            function level(y, price, colorValue, dashed, label, offscreen) {
-                if (y == null) return;
-                ctx.strokeStyle = colorValue;
-                ctx.lineWidth = 1.2;
-                ctx.setLineDash(dashed ? [4, 3] : []);
-                ctx.beginPath();
-                ctx.moveTo(x0, y);
-                ctx.lineTo(x1, y);
-                ctx.stroke();
-                ctx.setLineDash([]);
-                ctx.font = '8.5px "JetBrains Mono", monospace';
-                var text = label + ' ' + formatPrice(price, entry.precision) + (offscreen ? ' \u25B2' : '');
-                var width = ctx.measureText(text).width + 8;
-                var tx = Math.min(x1 + 4, box.w - width);
-                ctx.fillStyle = THEME.bg;
-                ctx.fillRect(tx, y - 7, width, 12);
-                ctx.fillStyle = colorValue;
-                ctx.fillText(text, tx + 4, y + 2);
-                if (selected) handleDot(ctx, x0, y);
-            }
-            level(yEntry, pos.entry, THEME.accent, false, 'ENTRY', entryOff);
-            level(yTp, pos.tp, THEME.up, true, 'TP', tpOff);
-            level(ySl, pos.sl, THEME.down, true, 'SL', slOff);
-            if (selected) {
-                ctx.fillStyle = THEME.accent;
-                ctx.fillRect(x1 - 1, top, 3, Math.max(2, bottom - top));
-            }
-            if (selected && entry.posSettings.showStats !== false) {
-                var stats = positionStats(entry, pos);
-                var lines = [
-                    (long ? 'LONG' : 'SHORT') + '  ' + pos.entry.toFixed(entry.precision),
-                    'R/R ' + stats.rr.toFixed(2),
-                    'Qty ' + compactNumber(stats.qty),
-                    'Margin ' + compactNumber(stats.margin),
-                    'Risk ' + compactNumber(stats.risk),
-                    'Reward ' + compactNumber(stats.reward)
-                ];
-                var cardW = 132, cardH = lines.length * 13 + 12;
-                var cardX = Math.min(Math.max(x0 + 8, 8), box.w - cardW - 8);
-                var cardY = Math.max(8, Math.min(yEntry - cardH - 10, box.h - cardH - 10));
-                ctx.fillStyle = THEME.panel;
-                ctx.strokeStyle = THEME.grid;
-                ctx.fillRect(cardX, cardY, cardW, cardH);
-                ctx.strokeRect(cardX + 0.5, cardY + 0.5, cardW - 1, cardH - 1);
-                ctx.font = '9px "JetBrains Mono", monospace';
-                ctx.fillStyle = color;
-                ctx.fillText(lines[0], cardX + 8, cardY + 13);
-                ctx.fillStyle = THEME.text;
-                for (var i = 1; i < lines.length; i++) {
-                    ctx.fillText(lines[i], cardX + 8, cardY + 13 + i * 13);
-                }
-            }
+    function roundedRect(ctx, x, y, w, h, r) {
+        var radius = Math.max(0, Math.min(r, w / 2, h / 2));
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + w - radius, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+        ctx.lineTo(x + w, y + h - radius);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+        ctx.lineTo(x + radius, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
+    }
+
+    function fitText(ctx, text, maxWidth) {
+        if (ctx.measureText(text).width <= maxWidth) return text;
+        var clipped = text;
+        while (clipped.length > 1 && ctx.measureText(clipped + '\u2026').width > maxWidth) {
+            clipped = clipped.slice(0, -1);
+        }
+        return clipped + '\u2026';
+    }
+
+    /**
+     * Right/left aligned pill. `x` is the anchored edge, `y` the centre.
+     * Returns the drawn width so callers can stack tags.
+     */
+    function drawTag(ctx, text, x, y, opts) {
+        var font = opts.font || '9.5px "JetBrains Mono", monospace';
+        ctx.font = font;
+        var padX = opts.padX == null ? 5 : opts.padX;
+        var height = opts.height || 16;
+        var width = Math.min(opts.maxWidth || Infinity, ctx.measureText(text).width + padX * 2);
+        var left = opts.align === 'left' ? x : x - width;
+        left = Math.max(1, left);
+        roundedRect(ctx, left, y - height / 2, width, height, 3);
+        if (opts.fill) {
+            ctx.fillStyle = opts.fill;
+            ctx.fill();
+        }
+        if (opts.border) {
+            ctx.strokeStyle = opts.border;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+        ctx.fillStyle = opts.color || THEME.text;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.font = font;
+        var clipped = fitText(ctx, text, width - padX * 2);
+        ctx.fillText(clipped, left + padX, y + 0.5);
+        ctx.textBaseline = 'alphabetic';
+        return width;
+    }
+
+    /** Push stacked tags apart while keeping them inside the plot. */
+    function stackTagCentres(tags, box) {
+        var gap = 17;
+        var min = 9, max = box.h - 9;
+        if (tags.length * gap > max - min) gap = Math.max(11, (max - min) / tags.length);
+        tags.sort(function (a, b) { return a.y - b.y; });
+        tags.forEach(function (tag, i) {
+            tag.y = clamp(tag.y, min, max);
+            if (i > 0 && tag.y - tags[i - 1].y < gap) tag.y = tags[i - 1].y + gap;
         });
+        for (var i = tags.length - 1; i >= 0; i--) {
+            var limit = i === tags.length - 1 ? max : tags[i + 1].y - gap;
+            if (tags[i].y > limit) tags[i].y = limit;
+        }
+    }
+
+    function drawPositions(entry, ctx, box) {
+        // Selected box last so its stats panel sits above neighbouring boxes.
+        entry.positions.slice().sort(function (a, b) {
+            return (a.id === entry.selectedPosition ? 1 : 0) - (b.id === entry.selectedPosition ? 1 : 0);
+        }).forEach(function (pos) {
+            var metrics = computePosition(entry, pos);
+            if (!metrics) return;
+            drawPositionBox(entry, ctx, box, pos, metrics, pos.id === entry.selectedPosition);
+        });
+    }
+
+    function drawPositionBox(entry, ctx, box, pos, m, selected) {
+        var x0 = xForTime(entry, pos.startTime);
+        var x1 = xForTime(entry, pos.endTime);
+        if (x0 == null) {
+            if (x1 == null) return;
+            x0 = Math.max(0, x1 - 80);
+        }
+        if (x1 == null) x1 = box.w - 2;
+        if (x1 <= x0) return;
+        if (x1 < -40 || x0 > box.w + 60) return;
+        var yEntry = pinnedLevelY(entry, pos.entry, box);
+        var yTp = pinnedLevelY(entry, pos.tp, box);
+        var ySl = pinnedLevelY(entry, pos.sl, box);
+        if (yEntry == null || yTp == null || ySl == null) return;
+
+        var precision = entry.precision == null ? 2 : entry.precision;
+        var long = m.long;
+        var dirRgb = long ? 'upRgb' : 'downRgb';
+        var dirColor = long ? THEME.up : THEME.down;
+        var left = Math.max(1, x0);
+        var right = Math.min(box.w - 1, x1);
+        if (right - left < 1) right = left + 1;
+        var boxW = right - left;
+        var profitTop = Math.min(yEntry, yTp);
+        var lossTop = Math.min(yEntry, ySl);
+        var entryOff = Math.abs((yForPrice(entry, pos.entry) || 0) - yEntry) > 1;
+        var tpOff = Math.abs((yForPrice(entry, pos.tp) || 0) - yTp) > 1;
+        var slOff = Math.abs((yForPrice(entry, pos.sl) || 0) - ySl) > 1;
+
+        // Profit zone (entry → TP) is green, risk zone (entry → SL) is red;
+        // for shorts the zones simply swap sides.
+        ctx.fillStyle = rgbaOf('upRgb', selected ? 0.17 : 0.11);
+        ctx.fillRect(left, profitTop, boxW, Math.max(1, Math.abs(yTp - yEntry)));
+        ctx.fillStyle = rgbaOf('downRgb', selected ? 0.17 : 0.11);
+        ctx.fillRect(left, lossTop, boxW, Math.max(1, Math.abs(ySl - yEntry)));
+
+        ctx.strokeStyle = rgbaOf(dirRgb, selected ? 0.85 : 0.5);
+        ctx.lineWidth = 1;
+        ctx.setLineDash(selected ? [] : [2, 2]);
+        ctx.strokeRect(left + 0.5, Math.min(yEntry, yTp, ySl) + 0.5,
+            Math.max(1, boxW - 1), Math.max(1, Math.abs(Math.max(yEntry, yTp, ySl) - Math.min(yEntry, yTp, ySl)) - 1));
+        ctx.setLineDash([]);
+
+        function levelLine(y, color, dashed) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = dashed ? 1.1 : 1.4;
+            ctx.setLineDash(dashed ? [5, 3] : []);
+            ctx.beginPath();
+            ctx.moveTo(left, y);
+            ctx.lineTo(right, y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+        levelLine(yEntry, dirColor, false);
+        levelLine(yTp, THEME.up, true);
+        levelLine(ySl, THEME.down, true);
+
+        if (selected) {
+            [[yEntry, dirColor], [yTp, THEME.up], [ySl, THEME.down]].forEach(function (pair) {
+                ctx.fillStyle = THEME.panel;
+                ctx.strokeStyle = pair[1];
+                ctx.lineWidth = 1.3;
+                ctx.beginPath();
+                ctx.rect(left - 3.5, pair[0] - 3.5, 7, 7);
+                ctx.fill();
+                ctx.stroke();
+            });
+            ctx.fillStyle = THEME.accent;
+            roundedRect(ctx, right - 1.5, Math.min(yEntry, yTp, ySl), 3,
+                Math.max(4, Math.abs(Math.max(yEntry, yTp, ySl) - Math.min(yEntry, yTp, ySl))), 1.5);
+            ctx.fill();
+        }
+
+        // In-box quantity / balance tags: always on, hidden in compact mode.
+        var compact = !!(entry.posSettings && entry.posSettings.compactStats);
+        var showStats = !entry.posSettings || entry.posSettings.showStats !== false;
+        if (!compact) {
+            var entryText = 'Qty ' + PositionTool.formatQty(m.qty, m.qtyPrecision);
+            ctx.font = '9px "JetBrains Mono", monospace';
+            if (boxW > 84) {
+                var above = long ? yEntry - 4 : yEntry + 11;
+                drawTag(ctx, entryText, left + 5, above, {
+                    font: '9px "JetBrains Mono", monospace',
+                    align: 'left', height: 14,
+                    color: dirColor, fill: rgbaOf(dirRgb, 0.14),
+                    border: rgbaOf(dirRgb, 0.4),
+                    maxWidth: boxW - 10
+                });
+            }
+            if (boxW > 132) {
+                var balance = function (y, value, color) {
+                    var yText = (y + yEntry) / 2 + 3;
+                    ctx.font = '9px "JetBrains Mono", monospace';
+                    ctx.fillStyle = color;
+                    ctx.textAlign = 'left';
+                    ctx.fillText(fitText(ctx, 'Bal ' + PositionTool.formatMoney(value),
+                        boxW - 62), left + 6, yText);
+                };
+                if (Math.abs(yTp - yEntry) >= 18) balance(yTp, m.balanceAtTp, THEME.up);
+                if (Math.abs(ySl - yEntry) >= 18) balance(ySl, m.balanceAtSl, THEME.down);
+            }
+        } else if (boxW > 60) {
+            var strip = PositionTool.compactSummary(m);
+            var stripY = Math.min(yEntry, yTp, ySl) - 9;
+            if (stripY < 8) stripY = Math.max(yEntry, yTp, ySl) + 9;
+            if (stripY <= box.h - 8) {
+                // Compact tags may extend past the box, like TradingView's
+                // performance tags, so the numbers are never ellipsised.
+                drawTag(ctx, strip, left + 5, stripY, {
+                    font: '9px "JetBrains Mono", monospace',
+                    align: 'left', height: 14,
+                    color: dirColor, fill: THEME.panel,
+                    border: rgbaOf(dirRgb, 0.4),
+                    maxWidth: Math.max(80, box.w - left - 8)
+                });
+            }
+        }
+
+        // Right-edge level tags (TradingView style), stacked when compressed.
+        if (boxW > 34) {
+            var anchor = clamp(right, 34, box.w - 3);
+            var tags = [
+                {
+                    y: yEntry, key: 'entry',
+                    text: 'ENTRY ' + formatPrice(pos.entry, precision) + (entryOff ? ' \u25B2' : ''),
+                    fill: dirColor, color: THEME.bg, border: null
+                },
+                {
+                    y: yTp, key: 'tp',
+                    text: 'TP ' + formatPrice(pos.tp, precision) + '  ' + PositionTool.formatPct(m.tpMovePct) + (tpOff ? ' \u25B2' : ''),
+                    fill: THEME.panel, color: THEME.up, border: rgbaOf('upRgb', 0.7)
+                },
+                {
+                    y: ySl, key: 'sl',
+                    text: 'SL ' + formatPrice(pos.sl, precision) + '  ' + PositionTool.formatPct(m.slMovePct) + (slOff ? ' \u25B2' : ''),
+                    fill: THEME.panel, color: THEME.down, border: rgbaOf('downRgb', 0.7)
+                }
+            ];
+            stackTagCentres(tags, box);
+            tags.forEach(function (tag) {
+                drawTag(ctx, tag.text, anchor - 2, tag.y, {
+                    align: 'right',
+                    fill: tag.fill, color: tag.color, border: tag.border,
+                    maxWidth: Math.max(64, Math.min(box.w - 4, anchor - 2))
+                });
+            });
+        }
+
+        if (selected && showStats) {
+            drawPositionStatsCard(entry, ctx, box, pos, m, {
+                left: left, right: right, yEntry: yEntry, yTp: yTp, ySl: ySl
+            });
+        }
+    }
+
+    /**
+     * Dotted full-width guide at the price being edited. It exists only while
+     * a level (or the whole box) is being dragged, so releasing the pointer
+     * removes it automatically.
+     */
+    function drawPositionGuide(entry, ctx, box) {
+        var drag = entry.positionDrag;
+        if (!drag || !drag.pos) return;
+        var pos = drag.pos;
+        var spec;
+        if (drag.type === 'tp') spec = { price: pos.tp, rgb: 'upRgb' };
+        else if (drag.type === 'sl') spec = { price: pos.sl, rgb: 'downRgb' };
+        else if (drag.type === 'entry' || drag.type === 'body') {
+            spec = { price: pos.entry, rgb: pos.dir === 'long' ? 'upRgb' : 'downRgb' };
+        } else return;
+        var y = pinnedLevelY(entry, spec.price, box);
+        if (y == null) return;
+        ctx.save();
+        ctx.strokeStyle = rgbaOf(spec.rgb, 0.85);
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 4]);
+        ctx.beginPath();
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(box.w, y + 0.5);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+
+    function drawPositionStatsCard(entry, ctx, box, pos, m, geom) {
+        var rows = PositionTool.statsRows(m);
+        var tone = {
+            up: THEME.up, down: THEME.down, dir: m.long ? THEME.up : THEME.down,
+            muted: THEME.muted, text: THEME.ink
+        };
+        var labelFont = '9px "JetBrains Mono", monospace';
+        var valueFont = '9.5px "JetBrains Mono", monospace';
+        var labelW = 0, valueW = 0;
+        ctx.font = labelFont;
+        rows.forEach(function (row) { labelW = Math.max(labelW, ctx.measureText(row.label).width); });
+        ctx.font = valueFont;
+        rows.forEach(function (row) { valueW = Math.max(valueW, ctx.measureText(row.value).width); });
+        var maxCardW = Math.max(176, Math.min(340, box.w - 20));
+        var cardW = clamp(Math.ceil(labelW + valueW + 34), 176, maxCardW);
+        var headerH = 24;
+        var rowH = 13;
+        var cardH = headerH + rows.length * rowH + 9;
+
+        var x = geom.left - cardW - 10;
+        if (x < 8) {
+            if (geom.right + cardW + 10 < box.w - 8) x = geom.right + 10;
+            else x = clamp(geom.left + 8, 8, box.w - cardW - 8);
+        }
+        x = clamp(x, 8, Math.max(8, box.w - cardW - 8));
+        var y = clamp(geom.yEntry - cardH / 2, 8, Math.max(8, box.h - cardH - 8));
+
+        roundedRect(ctx, x, y, cardW, cardH, 6);
+        ctx.fillStyle = THEME.panel;
+        ctx.fill();
+        ctx.strokeStyle = rgbaOf(m.long ? 'upRgb' : 'downRgb', 0.45);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        var dirColor = m.long ? THEME.up : THEME.down;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.font = '9.5px "JetBrains Mono", monospace';
+        ctx.fillStyle = dirColor;
+        ctx.fillText(m.long ? 'LONG' : 'SHORT', x + 10, y + 15);
+        var dirW = ctx.measureText(m.long ? 'LONG' : 'SHORT').width;
+        ctx.fillStyle = THEME.muted;
+        ctx.fillText('  ' + entry.config.symbol + '  ' + tfLabel(entry.config.timeframe), x + 10 + dirW, y + 15);
+        var rr = PositionTool.rrLabel(m.rr);
+        ctx.font = '9px "JetBrains Mono", monospace';
+        var rrW = ctx.measureText(rr).width;
+        ctx.fillStyle = THEME.ink;
+        ctx.fillText(rr, x + cardW - 10 - rrW, y + 15);
+        ctx.strokeStyle = THEME.border;
+        ctx.beginPath();
+        ctx.moveTo(x + 10, y + headerH - 4.5);
+        ctx.lineTo(x + cardW - 10, y + headerH - 4.5);
+        ctx.stroke();
+
+        rows.forEach(function (row, i) {
+            var rowY = y + headerH + 9 + i * rowH;
+            ctx.font = labelFont;
+            ctx.fillStyle = THEME.muted;
+            ctx.fillText(row.label, x + 10, rowY);
+            ctx.font = valueFont;
+            ctx.fillStyle = tone[row.tone] || THEME.ink;
+            var value = fitText(ctx, row.value, Math.max(40, cardW - labelW - 24));
+            var width = ctx.measureText(value).width;
+            ctx.fillText(value, x + cardW - 10 - width, rowY);
+        });
+        ctx.font = valueFont;
     }
 
     function drawPositionDraft(entry, ctx, box) {
@@ -4279,82 +5604,217 @@
         if (!draft) return;
         var long = draft.dir === 'long';
         var target = draft.current;
-        var sl = long ? draft.entry - (target - draft.entry) : draft.entry + (draft.entry - target);
+        var sl = PositionTool.mirrorStop(draft.dir, draft.entry, target);
         var x0 = xForTime(entry, draft.time);
         var x1 = xForTime(entry, draft.currentTime || draft.time);
         var yEntry = yForPrice(entry, draft.entry);
         var yTp = yForPrice(entry, target);
         var ySl = yForPrice(entry, sl);
         if (x0 == null || yEntry == null || yTp == null || ySl == null) return;
-        if (x1 == null || x1 < x0) x1 = x0 + 80;
-        var color = long ? THEME.up : THEME.down;
-        ctx.fillStyle = long ? rgbaOf('upRgb', 0.12) : rgbaOf('downRgb', 0.12);
-        ctx.fillRect(x0, Math.min(yEntry, yTp, ySl), Math.max(1, x1 - x0),
-            Math.max(1, Math.abs(ySl - yTp)));
-        ctx.strokeStyle = color;
+        if (x1 == null || x1 <= x0) x1 = x0 + 80;
+        var dirColor = long ? THEME.up : THEME.down;
+        var dirRgb = long ? 'upRgb' : 'downRgb';
+        var top = Math.min(yEntry, yTp, ySl);
+        var bottom = Math.max(yEntry, yTp, ySl);
+        ctx.fillStyle = rgbaOf('upRgb', 0.12);
+        ctx.fillRect(x0, Math.min(yEntry, yTp), Math.max(1, x1 - x0), Math.max(1, Math.abs(yTp - yEntry)));
+        ctx.fillStyle = rgbaOf('downRgb', 0.12);
+        ctx.fillRect(x0, Math.min(yEntry, ySl), Math.max(1, x1 - x0), Math.max(1, Math.abs(ySl - yEntry)));
+        ctx.strokeStyle = rgbaOf(dirRgb, 0.9);
+        ctx.lineWidth = 1.2;
         ctx.setLineDash([4, 3]);
-        [yEntry, yTp, ySl].forEach(function (y) {
-            ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
-        });
+        ctx.beginPath();
+        ctx.moveTo(x0, top);
+        ctx.lineTo(x1, top);
+        ctx.lineTo(x1, bottom);
+        ctx.lineTo(x0, bottom);
+        ctx.closePath();
+        ctx.stroke();
         ctx.setLineDash([]);
-        ctx.font = '9px "JetBrains Mono", monospace';
-        ctx.fillStyle = color;
-        ctx.fillText(long ? 'LONG' : 'SHORT', x0 + 5, Math.min(yEntry, yTp) - 6);
-        ctx.fillStyle = THEME.accent;
-        ctx.fillText('ENTRY ' + formatPrice(draft.entry, entry.precision), x0 + 5, yEntry - 3);
+        ctx.strokeStyle = dirColor;
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        ctx.moveTo(x0, yEntry);
+        ctx.lineTo(x1, yEntry);
+        ctx.stroke();
+
+        var metrics = PositionTool.compute({
+            dir: draft.dir,
+            entry: draft.entry,
+            tp: target,
+            sl: sl,
+            startTime: 1,
+            endTime: 2
+        }, entry.posSettings, {
+            precision: entry.precision,
+            tickSize: entry.minMove,
+            lastPrice: target,
+            closeAtEnd: 0
+        });
+        var label = (long ? 'LONG' : 'SHORT') +
+            (metrics ? '  ·  ' + PositionTool.rrLabel(metrics.rr) + '  ·  Qty ' +
+                PositionTool.formatQty(metrics.qty, metrics.qtyPrecision) : '') +
+            '  ·  ENTRY ' + formatPrice(draft.entry, entry.precision);
+        var chipY = clamp(yTp - 14, 12, box.h - 12);
+        drawTag(ctx, label, x1 + 8, chipY, {
+            align: 'left', height: 16,
+            fill: THEME.panel, color: dirColor, border: rgbaOf(dirRgb, 0.5),
+            maxWidth: Math.max(90, box.w - x1 - 12)
+        });
+        if (metrics) {
+            drawTag(ctx, 'SL ' + formatPrice(sl, entry.precision), x1 + 8, clamp(ySl + 14, 12, box.h - 12), {
+                align: 'left', height: 14,
+                fill: THEME.panel, color: THEME.down, border: rgbaOf('downRgb', 0.45),
+                font: '9px "JetBrains Mono", monospace',
+                maxWidth: Math.max(80, box.w - x1 - 12)
+            });
+        }
+    }
+
+    function measureHandle(ctx, x, y, color, active) {
+        ctx.fillStyle = THEME.panel;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = active ? 1.7 : 1.2;
+        ctx.beginPath();
+        ctx.arc(x, y, active ? 4.6 : 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
     }
 
     function drawMeasure(entry, ctx, box) {
-        var measure = entry.measure;
+        var draft = entry.measureDraft;
+        var measure = draft || entry.measure;
         if (!measure || !measure.start || !measure.end) return;
         var x0 = xForTime(entry, measure.start.time);
         var x1 = xForTime(entry, measure.end.time);
         var y0 = yForPrice(entry, measure.start.price);
         var y1 = yForPrice(entry, measure.end.price);
         if (x0 == null || x1 == null || y0 == null || y1 == null) return;
+        var selected = !draft && !!entry.selectedMeasure;
         var up = measure.end.price >= measure.start.price;
         var color = up ? THEME.up : THEME.down;
-        ctx.fillStyle = up ? rgbaOf('upRgb', 0.10) : rgbaOf('downRgb', 0.10);
+        var rgb = up ? 'upRgb' : 'downRgb';
+        ctx.fillStyle = rgbaOf(rgb, selected ? 0.15 : 0.10);
         ctx.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+        if (selected) {
+            ctx.strokeStyle = rgbaOf(rgb, 0.55);
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 3]);
+            ctx.strokeRect(Math.min(x0, x1) + 0.5, Math.min(y0, y1) + 0.5,
+                Math.max(1, Math.abs(x1 - x0) - 1), Math.max(1, Math.abs(y1 - y0) - 1));
+            ctx.setLineDash([]);
+        }
         ctx.strokeStyle = color;
-        ctx.lineWidth = 1.4;
+        ctx.lineWidth = selected ? 1.8 : 1.4;
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-        handleDot(ctx, x0, y0);
-        handleDot(ctx, x1, y1);
+        measureHandle(ctx, x0, y0, color, selected);
+        measureHandle(ctx, x1, y1, color, selected);
         var delta = measure.end.price - measure.start.price;
         var pct = measure.start.price ? delta / measure.start.price * 100 : 0;
         var bars = Math.round((measure.end.time - measure.start.time) / barSeconds(entry.config.timeframe));
         var text = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%  ' +
             (delta >= 0 ? '+' : '') + formatPrice(delta, entry.precision) + '  ' + bars + ' bars';
-        ctx.font = '9.5px "JetBrains Mono", monospace';
-        var width = ctx.measureText(text).width + 12;
-        var tx = Math.min((x0 + x1) / 2 + 8, box.w - width - 8);
-        var ty = Math.max(10, Math.min((y0 + y1) / 2 - 10, box.h - 14));
-        ctx.fillStyle = THEME.panel;
-        ctx.fillRect(tx, ty - 10, width, 16);
-        ctx.fillStyle = color;
-        ctx.fillText(text, tx + 6, ty + 1);
+        var tx = clamp((x0 + x1) / 2 + 8, 4, box.w - 30);
+        var ty = clamp((y0 + y1) / 2 - 10, 10, box.h - 14);
+        drawTag(ctx, text, tx, ty + 8, {
+            align: 'left', height: 16,
+            fill: THEME.panel, color: color,
+            border: rgbaOf(rgb, selected ? 0.75 : 0.45),
+            font: '9.5px "JetBrains Mono", monospace',
+            maxWidth: box.w - tx - 6
+        });
+    }
+
+    function hitTestMeasure(entry, x, y) {
+        var measure = entry.measure;
+        if (!measure || !measure.start || !measure.end) return null;
+        var x0 = xForTime(entry, measure.start.time);
+        var x1 = xForTime(entry, measure.end.time);
+        var y0 = yForPrice(entry, measure.start.price);
+        var y1 = yForPrice(entry, measure.end.price);
+        if (x0 == null || x1 == null || y0 == null || y1 == null) return null;
+        if (Math.hypot(x - x0, y - y0) <= 9) return { type: 'start' };
+        if (Math.hypot(x - x1, y - y1) <= 9) return { type: 'end' };
+        if (distanceToSegment(x, y, x0, y0, x1, y1) <= 6) return { type: 'body' };
+        return null;
+    }
+
+    function moveMeasureDrag(entry, x, y) {
+        var drag = entry.measureDrag;
+        var measure = entry.measure;
+        if (!drag || !measure) return;
+        var t2 = timeForX(entry, x);
+        var p2 = priceForY(entry, y);
+        if (t2 == null || p2 == null) return;
+        var tick = entry.minMove > 0 ? entry.minMove : Math.max(1e-9, measure.start.price * 1e-9);
+        if (drag.type === 'body') {
+            var t1 = timeForX(entry, drag.startX);
+            var p1 = priceForY(entry, drag.startY);
+            if (t1 == null || p1 == null) return;
+            var dt = t2 - t1;
+            var dp = p2 - p1;
+            var floor = Math.min(drag.orig.start.price, drag.orig.end.price);
+            if (floor + dp < tick) dp = tick - floor;
+            measure.start = { time: drag.orig.start.time + dt, price: drag.orig.start.price + dp };
+            measure.end = { time: drag.orig.end.time + dt, price: drag.orig.end.price + dp };
+        } else {
+            var point = drag.type === 'start' ? measure.start : measure.end;
+            point.time = t2;
+            point.price = Math.max(tick, p2);
+        }
+        renderDrawings(entry);
+    }
+
+    function endMeasureDrag(entry) {
+        if (!entry.measureDrag) return;
+        entry.measureDrag = null;
+        renderDrawings(entry);
+    }
+
+    /** Commit a dragged measure; a bare click keeps the previous one. */
+    function commitMeasure(entry) {
+        var draft = entry.measureDraft;
+        entry.measureDraft = null;
+        if (!draft) return;
+        var x0 = xForTime(entry, draft.start.time);
+        var x1 = xForTime(entry, draft.end.time);
+        var y0 = yForPrice(entry, draft.start.price);
+        var y1 = yForPrice(entry, draft.end.price);
+        var moved = x0 != null && x1 != null && y0 != null && y1 != null &&
+            (Math.abs(x1 - x0) > 2 || Math.abs(y1 - y0) > 2);
+        if (moved) {
+            var tick = entry.minMove > 0 ? entry.minMove
+                : Math.max(1e-9, Math.min(draft.start.price, draft.end.price) * 1e-9);
+            entry.measure = {
+                start: { time: draft.start.time, price: Math.max(tick, draft.start.price) },
+                end: { time: draft.end.time, price: Math.max(tick, draft.end.price) }
+            };
+            entry.selectedMeasure = true;
+        }
+        renderDrawings(entry);
     }
 
     function hitTestPosition(entry, x, y) {
+        var box = plotBox(entry);
         for (var i = entry.positions.length - 1; i >= 0; i--) {
             var pos = entry.positions[i];
             var x0 = xForTime(entry, pos.startTime);
             var x1 = xForTime(entry, pos.endTime);
-            if (x0 == null) continue;
-            if (x1 == null) x1 = plotBox(entry).w;
-            if (x < x0 - 6 || x > x1 + 8) continue;
+            if (x0 == null && x1 == null) continue;
+            if (x0 == null) x0 = 0;
+            if (x1 == null) x1 = box.w;
+            if (x < x0 - 8 || x > x1 + 8) continue;
             if (Math.abs(x - x1) <= 7) return { pos: pos, type: 'end' };
             var levels = [['entry', pos.entry], ['tp', pos.tp], ['sl', pos.sl]];
             for (var j = 0; j < levels.length; j++) {
-                var levelY = pinnedLevelY(entry, levels[j][1], plotBox(entry));
-                if (levelY != null && Math.abs(y - levelY) <= 6) {
+                var levelY = pinnedLevelY(entry, levels[j][1], box);
+                if (levelY != null && Math.abs(y - levelY) <= 7) {
                     return { pos: pos, type: levels[j][0] };
                 }
             }
-            var yEntry = pinnedLevelY(entry, pos.entry, plotBox(entry));
-            var yTp = pinnedLevelY(entry, pos.tp, plotBox(entry));
-            var ySl = pinnedLevelY(entry, pos.sl, plotBox(entry));
+            var yEntry = pinnedLevelY(entry, pos.entry, box);
+            var yTp = pinnedLevelY(entry, pos.tp, box);
+            var ySl = pinnedLevelY(entry, pos.sl, box);
             if (yEntry != null && yTp != null && ySl != null) {
                 var top = Math.min(yEntry, yTp, ySl);
                 var bottom = Math.max(yEntry, yTp, ySl);
@@ -4364,6 +5824,13 @@
         return null;
     }
 
+    function positionCursor(hit) {
+        if (!hit) return '';
+        if (hit.type === 'end') return 'ew-resize';
+        if (hit.type === 'body') return 'move';
+        return 'ns-resize';
+    }
+
     function commitPosition(entry, draft) {
         var dir = draft.dir;
         var entryPrice = draft.entry;
@@ -4371,11 +5838,12 @@
         var valid = dir === 'long' ? target > entryPrice : target < entryPrice;
         var sl;
         if (!valid || Math.abs(target - entryPrice) < entryPrice * 1e-6) {
+            // A click without a drag places a 2R template: 1% target, 0.5% stop.
             var riskPct = 0.005;
             target = dir === 'long' ? entryPrice * 1.01 : entryPrice * 0.99;
             sl = dir === 'long' ? entryPrice * (1 - riskPct) : entryPrice * (1 + riskPct);
         } else {
-            sl = dir === 'long' ? entryPrice - (target - entryPrice) : entryPrice + (entryPrice - target);
+            sl = PositionTool.mirrorStop(dir, entryPrice, target);
         }
         if (!isFinite(sl) || sl <= 0) sl = entryPrice * 0.5;
         var barSec = barSeconds(entry.config.timeframe);
@@ -4389,7 +5857,7 @@
                 bars = Math.max(6, Math.round((entry.posSettings.widthPx || 140) / Math.abs(px1 - px0)));
             }
         }
-        var pos = {
+        var pos = PositionTool.normalizePosition({
             id: 'p-' + Math.random().toString(36).slice(2, 9),
             dir: dir,
             entry: entryPrice,
@@ -4397,10 +5865,10 @@
             sl: sl,
             startTime: draft.time,
             endTime: draft.time + barSec * bars
-        };
+        });
+        if (!pos) return null;
         entry.positions.push(pos);
         entry.selectedPosition = pos.id;
-        entry.selectedDrawing = null;
         savePositions(entry);
         notifyPosition(entry, pos);
         renderDrawings(entry);
@@ -4540,8 +6008,7 @@
         var existing = findMatchingPosition(entry, trade);
         if (existing) {
             entry.selectedPosition = existing.id;
-            entry.selectedDrawing = null;
-            renderDrawings(entry);
+                renderDrawings(entry);
             revealTradePosition(entry, existing);
             return { ok: true, message: 'That plan is already on the ' + trade.symbol + ' chart.' };
         }
@@ -4550,7 +6017,7 @@
         var anchor = last && isFinite(last.time)
             ? last.time
             : Math.floor(Date.now() / 1000 / barSec) * barSec;
-        var pos = {
+        var pos = PositionTool.normalizePosition({
             id: 'p-' + Math.random().toString(36).slice(2, 9),
             dir: trade.dir,
             entry: trade.entry,
@@ -4558,10 +6025,10 @@
             sl: trade.sl,
             startTime: anchor - barSec * OVERLAY_LEAD_BARS,
             endTime: anchor + barSec * (OVERLAY_BARS - OVERLAY_LEAD_BARS)
-        };
+        });
+        if (!pos) return { ok: false, message: 'The plan has no usable price levels.' };
         entry.positions.push(pos);
         entry.selectedPosition = pos.id;
-        entry.selectedDrawing = null;
         entry.measure = null;
         savePositions(entry);
         renderDrawings(entry);
@@ -4641,41 +6108,14 @@
         return { ok: true, message: 'Opening a ' + symbol + ' chart for the plan…' };
     }
 
-    /**
-     * Move an existing drawing by the pointer delta.  Time/price origins are
-     * kept in data space, so the shape stays anchored while the chart pans or
-     * zooms.  hline/vline only move along their own axis.
-     */
-    function moveDrawingDrag(entry, x, y) {
-        var drag = entry.drawingDrag;
-        if (!drag) return;
-        var t1 = timeForX(entry, drag.startX);
-        var t2 = timeForX(entry, x);
-        var p1 = priceForY(entry, drag.startY);
-        var p2 = priceForY(entry, y);
-        var dt = (t1 != null && t2 != null) ? t2 - t1 : 0;
-        var dp = (p1 != null && p2 != null) ? p2 - p1 : 0;
-        var d = drag.drawing;
-        d.points.forEach(function (point, idx) {
-            var origin = drag.points[idx] || point;
-            if (d.tool === 'hline') {
-                point.price = origin.price + dp;
-            } else if (d.tool === 'vline') {
-                point.time = origin.time + dt;
-            } else {
-                point.time = origin.time + dt;
-                point.price = origin.price + dp;
-            }
-        });
-        renderDrawings(entry);
-    }
-
     function updatePositionDrag(entry, x, y) {
         var drag = entry.positionDrag;
         if (!drag) return;
         var pos = drag.pos;
         var orig = drag.orig;
         var dragPrice = priceForY(entry, y);
+        var tick = entry.minMove > 0 ? entry.minMove : Math.max(1e-9, orig.entry * 1e-9);
+        var long = pos.dir === 'long';
         if (drag.type === 'body') {
             var oldTime = timeForX(entry, drag.startX);
             var newTime = timeForX(entry, x);
@@ -4683,19 +6123,29 @@
             if (oldTime != null && newTime != null && oldPrice != null && dragPrice != null) {
                 var dt = newTime - oldTime;
                 var dp = dragPrice - oldPrice;
+                // Never drag the lowest level through zero.
+                var floor = Math.min(orig.entry, orig.tp, orig.sl);
+                if (floor + dp < tick) dp = tick - floor;
                 pos.startTime = orig.startTime + dt;
                 pos.endTime = orig.endTime + dt;
-                pos.entry = Math.max(1e-9, orig.entry + dp);
-                pos.tp = Math.max(1e-9, orig.tp + dp);
-                pos.sl = Math.max(1e-9, orig.sl + dp);
+                pos.entry = orig.entry + dp;
+                pos.tp = orig.tp + dp;
+                pos.sl = orig.sl + dp;
             }
         } else if (drag.type === 'end') {
             var endTime = timeForX(entry, x);
             if (endTime != null) pos.endTime = Math.max(pos.startTime + barSeconds(entry.config.timeframe), endTime);
         } else if (dragPrice != null) {
-            if (drag.type === 'entry') pos.entry = dragPrice;
-            else if (drag.type === 'tp') pos.tp = dragPrice;
-            else if (drag.type === 'sl') pos.sl = dragPrice;
+            // Keep the risk/reward sides intact while dragging a level.
+            if (drag.type === 'entry') {
+                pos.entry = long
+                    ? clamp(dragPrice, pos.sl + tick, pos.tp - tick)
+                    : clamp(dragPrice, pos.tp + tick, pos.sl - tick);
+            } else if (drag.type === 'tp') {
+                pos.tp = long ? Math.max(dragPrice, pos.entry + tick) : Math.min(dragPrice, pos.entry - tick);
+            } else if (drag.type === 'sl') {
+                pos.sl = long ? Math.min(dragPrice, pos.entry - tick) : Math.max(dragPrice, pos.entry + tick);
+            }
         }
         renderDrawings(entry);
     }
@@ -4709,17 +6159,26 @@
         renderDrawings(entry);
     }
 
-    function endDrawingDrag(entry) {
-        if (!entry.drawingDrag) return;
-        entry.drawingDrag = null;
-        scheduleSave();
-        renderDrawings(entry);
+    /**
+     * True while a lightweight-charts-drawing gesture owns the pointer:
+     * the manager holds the chart (savedScroll) or a drawing is hovered /
+     * selected under the cursor. Used to keep the app's vertical price pan
+     * from moving the chart when the user drags a drawing.
+     */
+    function drawingGestureActive(entry) {
+        var manager = entry.drawMgr;
+        if (!manager) return false;
+        if (manager.savedScroll) return true;
+        if (manager.hoveredId && manager.hoveredId()) return true;
+        var cursor = manager.cursorAt && manager.cursorAt();
+        return !!cursor && cursor !== 'crosshair';
     }
 
     function wireDrawingCanvas(entry) {
         var canvas = entry.drawCanvas;
-        var dragging = null;
 
+        // The overlay only hosts the app-specific tools (position box, measure).
+        // Library drawings are rendered and hit-tested by the chart primitive.
         canvas.addEventListener('pointerdown', function (ev) {
             if (!entry.drawTool) return;
             ev.preventDefault();
@@ -4743,62 +6202,47 @@
                 return;
             }
             if (entry.drawTool === 'measure') {
-                entry.measure = { start: { time: time, price: price }, end: { time: time, price: price } };
+                // Draft only: the committed measure is replaced on pointerup so
+                // an abandoned gesture keeps the previous measurement.
+                entry.measureDraft = {
+                    start: { time: time, price: price },
+                    end: { time: time, price: price }
+                };
+                entry.selectedMeasure = false;
                 renderDrawings(entry);
                 return;
             }
-            if (entry.drawTool === 'select') {
-                var posHit = hitTestPosition(entry, x, y);
-                if (posHit) {
-                    entry.selectedPosition = posHit.pos.id;
-                    entry.selectedDrawing = null;
-                    entry.positionDrag = {
-                        pos: posHit.pos,
-                        type: posHit.type,
-                        startX: x,
-                        startY: y,
-                        orig: clone(posHit.pos)
-                    };
-                    notifyPosition(entry, posHit.pos);
-                    renderDrawings(entry);
-                    return;
-                }
+            if (entry.drawTool !== 'select') return;
+
+            var measureHit = hitTestMeasure(entry, x, y);
+            if (measureHit) {
+                entry.selectedMeasure = true;
                 entry.selectedPosition = null;
-                var hit = hitTest(entry, x, y);
-                entry.selectedDrawing = hit ? hit.id : null;
-                if (hit) {
-                    entry.drawingDrag = {
-                        drawing: hit,
-                        startX: x,
-                        startY: y,
-                        points: clone(hit.points)
-                    };
-                }
+                entry.measureDrag = {
+                    type: measureHit.type,
+                    startX: x,
+                    startY: y,
+                    orig: clone(entry.measure)
+                };
                 renderDrawings(entry);
                 return;
             }
-            if (entry.drawTool === 'hline') {
-                addDrawing(entry, { tool: 'hline', points: [{ time: 0, price: price }] });
-                finishDrawing(entry);
-                return;
+            entry.selectedMeasure = false;
+            var posHit = hitTestPosition(entry, x, y);
+            if (posHit) {
+                entry.selectedPosition = posHit.pos.id;
+                entry.positionDrag = {
+                    pos: posHit.pos,
+                    type: posHit.type,
+                    startX: x,
+                    startY: y,
+                    orig: clone(posHit.pos)
+                };
+                notifyPosition(entry, posHit.pos);
+            } else {
+                entry.selectedPosition = null;
             }
-            if (entry.drawTool === 'vline') {
-                addDrawing(entry, { tool: 'vline', points: [{ time: time, price: 0 }] });
-                finishDrawing(entry);
-                return;
-            }
-            if (entry.drawTool === 'text') {
-                openTextEditor(entry, x, y, time, price);
-                return;
-            }
-            dragging = {
-                tool: entry.drawTool,
-                start: { time: time, price: price },
-                current: { time: time, price: price }
-            };
-            entry.drawPreview = { id: 'preview', tool: entry.drawTool, points: [dragging.start, dragging.current], color: THEME.accent };
             renderDrawings(entry);
-            void dragging;
         });
 
         canvas.addEventListener('pointermove', function (ev) {
@@ -4816,37 +6260,25 @@
                 renderDrawings(entry);
                 return;
             }
-            if (entry.measure) {
+            if (entry.measureDraft) {
                 var measureTime = timeForX(entry, x);
                 var measurePrice = priceForY(entry, y);
                 if (measureTime != null && measurePrice != null) {
-                    entry.measure.end = { time: measureTime, price: measurePrice };
+                    entry.measureDraft.end = { time: measureTime, price: measurePrice };
                 }
                 renderDrawings(entry);
                 return;
             }
+            if (entry.measureDrag) {
+                moveMeasureDrag(entry, x, y);
+                return;
+            }
             if (entry.positionDrag) {
                 updatePositionDrag(entry, x, y);
-                return;
-            }
-            if (entry.drawingDrag) {
-                moveDrawingDrag(entry, x, y);
-                return;
-            }
-            if (dragging && dragging.tool) {
-                var t2 = timeForX(entry, x);
-                var p2 = priceForY(entry, y);
-                if (t2 == null || p2 == null) return;
-                dragging.current = { time: t2, price: p2 };
-                entry.drawPreview = {
-                    id: 'preview', tool: dragging.tool,
-                    points: [dragging.start, dragging.current], color: THEME.accent
-                };
-                renderDrawings(entry);
             }
         });
 
-        canvas.addEventListener('pointerup', function (ev) {
+        canvas.addEventListener('pointerup', function () {
             if (!entry.drawTool) return;
             if (entry.posDraft) {
                 commitPosition(entry, entry.posDraft);
@@ -4854,52 +6286,42 @@
                 finishDrawing(entry);
                 return;
             }
-            if (entry.measure) {
+            if (entry.measureDraft) {
+                commitMeasure(entry);
                 finishDrawing(entry);
                 return;
             }
-            if (entry.positionDrag) {
-                endPositionDrag(entry);
+            if (entry.measureDrag) {
+                endMeasureDrag(entry);
                 return;
             }
-            if (entry.drawingDrag) {
-                endDrawingDrag(entry);
-                return;
-            }
-            if (dragging && dragging.tool) {
-                var rect = canvas.getBoundingClientRect();
-                var x = ev.clientX - rect.left;
-                var y = ev.clientY - rect.top;
-                var p2 = priceForY(entry, y);
-                var t2 = timeForX(entry, x);
-                if (p2 != null && t2 != null && (Math.abs(x - (xForTime(entry, dragging.start.time) || 0)) > 3 || Math.abs(y - (yForPrice(entry, dragging.start.price) || 0)) > 3)) {
-                    addDrawing(entry, {
-                        tool: dragging.tool,
-                        points: [dragging.start, { time: t2, price: p2 }]
-                    });
-                }
-                entry.drawPreview = null;
-                dragging = null;
-                finishDrawing(entry);
-                return;
-            }
-            dragging = null;
+            if (entry.positionDrag) endPositionDrag(entry);
         });
 
         canvas.addEventListener('pointercancel', function () {
-            dragging = null;
-            entry.drawPreview = null;
             entry.posDraft = null;
             entry.positionDrag = null;
-            entry.drawingDrag = null;
+            entry.measureDraft = null;
+            entry.measureDrag = null;
             renderDrawings(entry);
         });
 
+        var host = entry.host;
+        var hostPoint = function (ev) {
+            var rect = canvas.getBoundingClientRect();
+            return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+        };
+
         // Price-axis drags and wheel zoom have no LWC subscription; keep the
         // overlay in lockstep while the pointer is down or wheel is used.
-        var host = entry.host;
         var onHostDown = function () { entry.allowBackfill = true; startDrawSync(entry); };
-        var onDocUp = function () { stopDrawSync(entry); };
+        var onDocUp = function () {
+            stopDrawSync(entry);
+            if (entry.drawDirty) {
+                entry.drawDirty = false;
+                commitDrawings(entry);
+            }
+        };
         var onWheel = function (ev) {
             entry.allowBackfill = true;
             var point = hostPoint(ev);
@@ -4912,16 +6334,12 @@
         document.addEventListener('pointercancel', onDocUp, { passive: true, capture: true });
         host.addEventListener('wheel', onWheel, { passive: true, capture: true });
 
-        // In cursor mode the overlay is click-through, yet drawings and
-        // positions must still be selectable/movable directly.  Intercept the
-        // host pointerdown only when something is actually hit; otherwise the
-        // event reaches Lightweight Charts for pan/zoom as usual.
+        // In cursor mode the overlay is click-through, yet positions and the
+        // measure must still be selectable/movable directly.  Intercept the
+        // host pointerdown only when one of them is hit; otherwise the event
+        // reaches Lightweight Charts for pan/zoom as usual.
         var directMove = null;
         var directUp = null;
-        var hostPoint = function (ev) {
-            var rect = canvas.getBoundingClientRect();
-            return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
-        };
         var clearDirect = function (finalize) {
             if (entry.directPointerId != null) {
                 try { host.releasePointerCapture(entry.directPointerId); } catch (err) { /* ignore */ }
@@ -4936,21 +6354,21 @@
             directUp = null;
             if (finalize !== false) {
                 if (entry.positionDrag) endPositionDrag(entry);
-                if (entry.drawingDrag) endDrawingDrag(entry);
+                if (entry.measureDrag) endMeasureDrag(entry);
             }
             entry.positionDrag = null;
-            entry.drawingDrag = null;
+            entry.measureDrag = null;
             entry.drawCanvas.classList.remove('active');
             entry.panel.classList.remove('drawing');
             renderDrawings(entry);
         };
         var onHostSelect = function (ev) {
             if ((entry.drawTool && entry.drawTool !== 'select') || ev.button !== 0) return;
-            if (entry.config.drawings.length === 0 && entry.positions.length === 0) return;
+            if (entry.positions.length === 0 && !entry.measure) return;
             var point = hostPoint(ev);
-            var posHit = hitTestPosition(entry, point.x, point.y);
-            var shapeHit = posHit ? null : hitTest(entry, point.x, point.y);
-            if (!posHit && !shapeHit) return;
+            var measureHit = hitTestMeasure(entry, point.x, point.y);
+            var posHit = measureHit ? null : hitTestPosition(entry, point.x, point.y);
+            if (!measureHit && !posHit) return;
             ev.preventDefault();
             ev.stopPropagation();
             try { host.setPointerCapture(ev.pointerId); entry.directPointerId = ev.pointerId; }
@@ -4958,9 +6376,17 @@
             focusChart(entry);
             entry.drawCanvas.classList.add('active');
             entry.panel.classList.add('drawing');
-            entry.selectedDrawing = null;
             entry.selectedPosition = null;
-            if (posHit) {
+            entry.selectedMeasure = false;
+            if (measureHit) {
+                entry.selectedMeasure = true;
+                entry.measureDrag = {
+                    type: measureHit.type,
+                    startX: point.x,
+                    startY: point.y,
+                    orig: clone(entry.measure)
+                };
+            } else {
                 entry.selectedPosition = posHit.pos.id;
                 entry.positionDrag = {
                     pos: posHit.pos,
@@ -4970,25 +6396,17 @@
                     orig: clone(posHit.pos)
                 };
                 notifyPosition(entry, posHit.pos);
-            } else {
-                entry.selectedDrawing = shapeHit.id;
-                entry.drawingDrag = {
-                    drawing: shapeHit,
-                    startX: point.x,
-                    startY: point.y,
-                    points: clone(shapeHit.points)
-                };
             }
             renderDrawings(entry);
             directMove = function (moveEv) {
                 moveEv.preventDefault();
                 var p = hostPoint(moveEv);
-                if (entry.positionDrag) updatePositionDrag(entry, p.x, p.y);
-                else if (entry.drawingDrag) moveDrawingDrag(entry, p.x, p.y);
+                if (entry.measureDrag) moveMeasureDrag(entry, p.x, p.y);
+                else if (entry.positionDrag) updatePositionDrag(entry, p.x, p.y);
             };
             directUp = function () {
+                if (entry.measureDrag) endMeasureDrag(entry);
                 if (entry.positionDrag) endPositionDrag(entry);
-                if (entry.drawingDrag) endDrawingDrag(entry);
                 clearDirect();
             };
             document.addEventListener('pointermove', directMove);
@@ -4997,13 +6415,17 @@
         };
         var onHostHover = function (ev) {
             if (entry.drawTool && entry.drawTool !== 'select') return;
-            if (entry.config.drawings.length === 0 && entry.positions.length === 0) {
+            if (entry.positions.length === 0 && !entry.measure) {
                 entry.host.style.cursor = '';
                 return;
             }
             var point = hostPoint(ev);
-            var hit = hitTestPosition(entry, point.x, point.y) || hitTest(entry, point.x, point.y);
-            entry.host.style.cursor = hit ? 'move' : '';
+            if (hitTestMeasure(entry, point.x, point.y)) {
+                entry.host.style.cursor = 'move';
+                return;
+            }
+            var posHit = hitTestPosition(entry, point.x, point.y);
+            entry.host.style.cursor = posHit ? positionCursor(posHit) : '';
         };
         host.addEventListener('pointerdown', onHostSelect, { capture: true });
         host.addEventListener('pointermove', onHostHover, { passive: true, capture: true });
@@ -5025,8 +6447,11 @@
         };
         var onHostPriceStart = function (ev) {
             if ((entry.drawTool && entry.drawTool !== 'select') || ev.button !== 0) return;
+            // A drawing under the pointer owns the gesture: the manager moves
+            // (or resizes) it, the chart must not price-pan underneath.
+            if (drawingGestureActive(entry)) return;
             if (entry.pricePan) endPricePan();
-            if (entry.positionDrag || entry.drawingDrag || entry.directPointerId != null) return;
+            if (entry.positionDrag || entry.measureDrag || entry.directPointerId != null) return;
             var point = hostPoint(ev);
             var box = plotBox(entry);
             if (!box.w || box.h < 20 || !entry.mainSeries) return;
@@ -5034,7 +6459,15 @@
             // gesture switches to a manual scale, so drop the frozen window.
             if (point.x >= box.w - 2) { clearPanBase(entry); return; }
             if (point.y >= box.h - 2) return;
-            entry.pricePan = { startX: point.x, startY: point.y, lastY: point.y, active: false };
+            entry.pricePan = {
+                startX: point.x, startY: point.y, lastY: point.y, active: false,
+                startOffset: Number(entry.priceOffset) || 0,
+                cancel: function () {
+                    entry.priceOffset = this.startOffset;
+                    releasePanBase(entry);
+                    endPricePan();
+                }
+            };
             pricePanMove = function (moveEv) {
                 var pan = entry.pricePan;
                 if (!pan) return;
@@ -5045,6 +6478,9 @@
                     // Start on a mostly vertical gesture so a horizontal pan
                     // with a few pixels of jitter does not drift the price.
                     if (Math.abs(dy) < 3 || Math.abs(dy) < Math.abs(dx)) return;
+                    // The press may not have produced a hover (touch / fast
+                    // gesture); re-check once the manager has begun its drag.
+                    if (drawingGestureActive(entry)) { endPricePan(); return; }
                     pan.active = true;
                 }
                 // coordinateToPrice is the display value (raw price,
@@ -5067,7 +6503,16 @@
         host.addEventListener('pointerdown', onHostPriceStart, { capture: true });
         var onPriceDblClick = function (ev) {
             var point = hostPoint(ev);
-            if (point.x >= plotBox(entry).w - 2) resetPricePan(entry);
+            if (point.x >= plotBox(entry).w - 2) { resetPricePan(entry); return; }
+            if (entry.drawTool && entry.drawTool !== 'select') return;
+            var posHit = hitTestPosition(entry, point.x, point.y);
+            if (!posHit) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            entry.selectedPosition = posHit.pos.id;
+            notifyPosition(entry, posHit.pos);
+            renderDrawings(entry);
+            openPositionSettings(entry);
         };
         host.addEventListener('dblclick', onPriceDblClick, true);
         var onWindowBlur = function () {
@@ -5089,7 +6534,6 @@
             clearDirect();
         };
     }
-
     function startDrawSync(entry) {
         if (entry.drawSyncRaf) return;
         var step = function () {
@@ -5108,111 +6552,6 @@
         scheduleDraw(entry);
     }
 
-    function addDrawing(entry, drawing) {
-        var id = 'd-' + Math.random().toString(36).slice(2, 9);
-        var record = {
-            id: id,
-            tool: drawing.tool,
-            points: drawing.points,
-            color: THEME.muted,
-            text: drawing.text || ''
-        };
-        entry.config.drawings.push(record);
-        entry.selectedDrawing = id;
-        renderDrawings(entry);
-        scheduleSave();
-        return record;
-    }
-
-    function finishDrawing(entry) {
-        entry.drawPreview = null;
-        var keepPosition = entry.selectedPosition;
-        var keepDrawing = entry.selectedDrawing;
-        setDrawTool(entry, null);
-        // A just-created position/drawing stays selected so its stats and
-        // handles are immediately editable (TradingView behaviour).
-        entry.selectedPosition = keepPosition;
-        entry.selectedDrawing = keepDrawing;
-        renderDrawings(entry);
-    }
-
-    function openTextEditor(entry, x, y, time, price) {
-        entry.pendingText = { time: time, price: price };
-        var ed = entry.textEditor;
-        ed.style.left = Math.max(4, x) + 'px';
-        ed.style.top = Math.max(4, y - 28) + 'px';
-        ed.classList.add('show');
-        entry.textInput.value = '';
-        entry.textInput.focus();
-    }
-
-    function commitTextDrawing(entry) {
-        if (!entry.pendingText) return;
-        var text = entry.textInput.value.trim();
-        if (text) {
-            addDrawing(entry, {
-                tool: 'text',
-                points: [{ time: entry.pendingText.time, price: entry.pendingText.price }],
-                text: text
-            });
-        }
-        cancelTextDrawing(entry);
-        finishDrawing(entry);
-    }
-
-    function cancelTextDrawing(entry) {
-        entry.pendingText = null;
-        entry.textEditor.classList.remove('show');
-        entry.textInput.value = '';
-    }
-
-    function hitTest(entry, x, y) {
-        var drawings = entry.config.drawings || [];
-        for (var i = drawings.length - 1; i >= 0; i--) {
-            var d = drawings[i];
-            if (hitShape(entry, d, x, y)) return d;
-        }
-        return null;
-    }
-
-    function hitShape(entry, d, x, y) {
-        var p0 = d.points && d.points[0];
-        if (!p0) return false;
-        if (d.tool === 'hline') {
-            var y0 = yForPrice(entry, p0.price);
-            return y0 != null && Math.abs(y - y0) < 6;
-        }
-        if (d.tool === 'vline') {
-            var x0 = xForTime(entry, p0.time);
-            return x0 != null && Math.abs(x - x0) < 6;
-        }
-        if (d.tool === 'text') {
-            var tx = xForTime(entry, p0.time);
-            var ty = yForPrice(entry, p0.price);
-            return tx != null && ty != null && x >= tx - 2 && x <= tx + 130 && y >= ty - 16 && y <= ty + 4;
-        }
-        var p1 = d.points[1];
-        if (!p1) return false;
-        var x1 = xForTime(entry, p0.time), y1 = yForPrice(entry, p0.price);
-        var x2 = xForTime(entry, p1.time), y2 = yForPrice(entry, p1.price);
-        if (x1 == null || y1 == null || x2 == null || y2 == null) return false;
-        if (d.tool === 'trend') return distanceToSegment(x, y, x1, y1, x2, y2) < 6;
-        if (d.tool === 'rect') {
-            var left = Math.min(x1, x2), right = Math.max(x1, x2);
-            var top = Math.min(y1, y2), bottom = Math.max(y1, y2);
-            return (x >= left && x <= right && y >= top && y <= bottom);
-        }
-        if (d.tool === 'fib') {
-            if (x < Math.min(x1, x2) - 4 || x > Math.max(x1, x2) + 40) return false;
-            var levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-            return levels.some(function (level) {
-                var ly = y1 + (y2 - y1) * level;
-                return Math.abs(y - ly) < 5;
-            });
-        }
-        return false;
-    }
-
     function distanceToSegment(px, py, x1, y1, x2, y2) {
         var dx = x2 - x1, dy = y2 - y1;
         if (dx === 0 && dy === 0) return Math.hypot(px - x1, py - y1);
@@ -5224,6 +6563,14 @@
     function deleteSelectedDrawing() {
         var entry = WS.charts[WS.focused];
         if (!entry) return;
+        if (entry.selectedMeasure) {
+            entry.measure = null;
+            entry.measureDraft = null;
+            entry.measureDrag = null;
+            entry.selectedMeasure = false;
+            renderDrawings(entry);
+            return;
+        }
         if (entry.selectedPosition) {
             entry.positions = entry.positions.filter(function (p) { return p.id !== entry.selectedPosition; });
             entry.selectedPosition = null;
@@ -5231,11 +6578,10 @@
             renderDrawings(entry);
             return;
         }
-        if (!entry.selectedDrawing) return;
-        entry.config.drawings = entry.config.drawings.filter(function (d) { return d.id !== entry.selectedDrawing; });
-        entry.selectedDrawing = null;
-        renderDrawings(entry);
-        scheduleSave();
+        if (!entry.drawMgr) return;
+        var ids = entry.drawMgr.selection().slice();
+        ids.forEach(function (id) { entry.drawMgr.remove(id); });
+        updateDrawStyleBar(entry);
     }
 
     /* ── Workspace persistence ───────────────────────────────────────────── */
@@ -5500,6 +6846,13 @@
                 !ev.target.closest('.group-chip') && !ev.target.closest('#ws-modal-backdrop')) {
                 closeDrawer();
             }
+            Object.keys(WS.charts).forEach(function (id) {
+                var chart = WS.charts[id];
+                if (!chart.drawPalette) return;
+                if (chart.drawPalette.contains(ev.target)) return;
+                if (ev.target.closest && ev.target.closest('.draw-rail')) return;
+                closeToolPalette(chart);
+            });
         }, true);
 
         document.addEventListener('keydown', function (ev) {
@@ -5509,7 +6862,14 @@
                 if (WS.menu) { closeMenu(); return; }
                 if ($('#ws-drawer').classList.contains('open')) { closeDrawer(); return; }
                 var focused = WS.charts[WS.focused];
-                if (focused && focused.drawTool) setDrawTool(focused, null);
+                if (focused && focused.drawPalette) { closeToolPalette(focused); return; }
+                if (focused && focused.drawTool) { setDrawTool(focused, null); return; }
+                if (focused && focused.measureDrag) { endMeasureDrag(focused); return; }
+                if (focused && focused.selectedMeasure) {
+                    focused.selectedMeasure = false;
+                    renderDrawings(focused);
+                    return;
+                }
                 return;
             }
             if ((ev.key === 'Delete' || ev.key === 'Backspace') && !inField) {

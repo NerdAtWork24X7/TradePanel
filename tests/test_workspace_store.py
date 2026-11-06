@@ -172,6 +172,50 @@ class StoreTests(unittest.TestCase):
         self.assertEqual([d["tool"] for d in drawings], ["hline", "text"])
         self.assertEqual(len(drawings[1]["text"]), 120)
 
+    def test_new_drawing_model_round_trips(self):
+        payload = {
+            "id": "dw-1",
+            "kind": "fib-retracement",
+            "points": [{"time": 1700000000, "price": 100.5}, {"time": 1700003600, "price": 120.25}],
+            "style": {
+                "color": "#f23645",
+                "width": 2,
+                "lineStyle": "dashed",
+                "transparency": 80,
+                "levels": [{"coeff": 0.618, "color": "#089981", "visible": True}],
+                "nested": {"bogus": object()},
+            },
+            "text": "swing",
+            "locked": True,
+            "hidden": True,
+            "visibility": {"ranges": [{"from": 1, "to": 5}]},
+        }
+        store = ws._store({"workspaces": [{
+            "id": "w",
+            "charts": [{"id": "c1", "drawings": [
+                payload,
+                {"id": "bad-kind", "kind": "script", "points": [{"time": 1, "price": 2}]},
+                {"id": "no-points", "kind": "trend-line", "points": []},
+                {"id": "bad-point", "kind": "trend-line", "points": [{"time": "x", "price": 2}]},
+                {"id": "brush", "kind": "brush", "points": [
+                    {"time": 1700000000 + i, "price": 100 + i} for i in range(600)
+                ]},
+            ]}],
+            "syncGroups": [],
+        }]})
+        drawings = store["workspaces"][0]["charts"][0]["drawings"]
+        self.assertEqual([d["id"] for d in drawings], ["dw-1", "brush"])
+        fib = drawings[0]
+        self.assertEqual(fib["kind"], "fib-retracement")
+        self.assertEqual(fib["points"][1]["price"], 120.25)
+        self.assertEqual(fib["style"]["color"], "#f23645")
+        self.assertEqual(fib["style"]["levels"][0]["coeff"], 0.618)
+        self.assertNotIn("nested", fib["style"])
+        self.assertEqual(fib["text"], "swing")
+        self.assertTrue(fib["locked"] and fib["hidden"])
+        self.assertEqual(fib["visibility"]["ranges"][0]["to"], 5)
+        self.assertEqual(len(drawings[1]["points"]), ws.MAX_DRAWING_POINTS)
+
     def test_indicator_defaults_are_complete(self):
         store = ws.default_store()
         indicators = store["workspaces"][0]["charts"][0]["indicators"]

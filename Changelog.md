@@ -1,5 +1,112 @@
 # Changelog
 
+## 2026-11-06 — Drawing tools: lightweight-charts-drawing integration (v5)
+- **TradingView-parity drawing engine**: adopted
+  [`lightweight-charts-drawing@0.6.3`](https://github.com/deepentropy/lightweight-charts-drawing)
+  (MIT, one series primitive that renders every drawing, preview, anchor and axis label).
+  This required upgrading the bundled Lightweight Charts **4.2.2 → 5.2.1** and migrating
+  every series factory (`addCandlestickSeries`/`addLineSeries`/`addHistogramSeries`/… →
+  `addSeries(<SeriesDefinition>, options)`) in `workspace.js`, the indicator overlays and
+  the hidden AI snapshot renderer (`src/ai-snapshot/main.ts`).
+- **86 tools**, including trend lines, channels, pitchforks, Fibonacci and Gann tools,
+  chart patterns, Elliott waves, cycles, forecasts, volume profiles, measurers, brushes,
+  arrows, shapes, text/notes, table, image and font icon. Long/short position, table cell,
+  image and font-icon tools get host support: the trade-linked long/short position box and
+  measure tool remain custom, text notes and table cells open the in-place editor, images
+  use a size-capped file picker (cached in localStorage so they survive reloads) and the
+  font icon prompts for a glyph.
+- **Personal toolbar**: pin/unpin any catalog tool with its ☆ (or right-click a pinned
+  tool), up to 8 pinned tools on the rail, persisted in workspace preferences. The rail
+  keeps the cursor, magnet, hide-all, measure, long/short trade tools and clear button;
+  **All tools** opens the searchable catalog with recents and per-family groups.
+- **Editing UX**: a selected drawing gets a style bar (colour, line width, dash, lock,
+  delete, deselect), magnet defaults to weak, the library keys (Esc / Delete / Ctrl-click
+  multi-select / Shift constraints) work unchanged, and `setInterval` follows the chart
+  timeframe so per-interval visibility is honoured.
+- **Fixed — dragging a drawing panned the chart**: the workspace's vertical price-pan
+  gesture ran on every vertical pane drag, so dragging *any* drawing (horizontal line,
+  trend line, Fibonacci tool, text, table, image, Gann box, …) also shifted the price
+  scale underneath it. The pan now yields to a drawing gesture (hover/`savedScroll`/
+  cursor check) and reverts itself if a drag starts without a prior hover (touch / fast
+  drags). Empty-pane drags still pan; verified by `tmp/draw_drag_audit.mjs` and
+  `tmp/draw_all_drag_audit.mjs` (19 tool kinds, anchor resize, empty-pane control).
+- **Persistence**: drawings stay in the chart's workspace config, always in raw price
+  units; percentage/indexed modes are re-based through the manager (`display → raw` on
+  change, `raw → display` on load, reprojected when the reference price moves). Legacy
+  `{tool: "trend"}` records migrate on attach (trend/rect/fib/text/hline/vline) and the
+  Python store validates both models (bounded points/style/kind payloads, 86-kind
+  whitelist, 512-point cap for brushes).
+- Verified: `frontend/tests/chart-drawings.test.mjs` (catalog, migration, projection,
+  interval map, defensive parsing), `tests/test_workspace_store.py` (new + legacy models),
+  `npm --prefix frontend test` (85 pass), `tsc --noEmit`, `vite build`, the AI snapshot
+  renderer on v5, and Playwright audits for placement, style edits, persistence across
+  reloads, price-mode rebasing, chart-type rebinding, legacy migration, timeframe interval,
+  pinned tools (pin/unpin/cap/persist), text/table/image/font-icon tooling, layouts at
+  900×620 and 1280×720 in both themes, plus the existing position/measure/guide audits.
+
+
+## 2026-11-06 — Dotted price guide while dragging Long/Short levels
+- Dragging the entry, take-profit or stop-loss handle (and the box body) now
+  draws a dotted horizontal line across the full plot at the live price, so the
+  level can be traced to the price axis while it moves. The line uses the level's
+  colour (green target, red stop, direction colour for entry) and disappears as
+  soon as the pointer is released or the gesture is cancelled.
+- Implemented as `drawPositionGuide` in `frontend/web/workspace.js`; it reads
+  `entry.positionDrag`, so it exists only during the gesture and adds no
+  persistent state.
+- Verified: `tmp/guide_audit.mjs` (entry/TP/SL/body drags draw a plot-wide dotted
+  row at the pointer, no line before or after the drag, zero console errors) plus
+  the position, measure and modal audits.
+
+## 2026-11-06 — Measure tool is movable and no longer blocks other tools
+- Root cause: the committed measurement reused the transient gesture object, so
+  `pointermove`/`pointerup` kept treating it as a live drag. Every later shape
+  was swallowed by the measure branch and the tool was dismissed without drawing.
+- The measurement now has separate draft (`measureDraft`), committed (`measure`)
+  and selected states. Dragging the line body moves it; dragging an endpoint moves
+  just that point; both work with the Select tool and in cursor mode (no rail
+  open). Hovering shows `move`, `Delete` removes it and `Esc` deselects. A bare
+  click with the measure tool keeps the previous measurement instead of leaving a
+  zero-length ghost. Starting another tool or symbol switch clears in-progress
+  state but keeps the committed measurement.
+- Verified: `tmp/measure_audit.mjs` (draw, trend line created afterwards, body
+  drag, endpoint drag, cursor-mode drag, hover cursor, Esc/Delete, replacement
+  drag, bare click) with zero console errors; full frontend suite and typecheck.
+
+## 2026-11-06 — Long/Short position tool redesigned to TradingView parity
+- New `frontend/web/position_tool.js` (UMD, DOM-free) owns the documented sizing math:
+  `Qty = min(QtyRisk, QtyLvg)`, `QtyRisk = riskBudget / |entry − stop| / lotSize`,
+  `QtyLvg = account × leverage / entry / lotSize`, risk/reward, profit/loss,
+  balance at target/stop, PnL state (future edge vs right-edge close) and
+  price/percent/tick offsets. Settings migrate the v1 single `risk` percentage.
+- Canvas redesign: profit/risk zones, a solid entry line, dashed target/stop,
+  TradingView-style right-edge level tags stacked on overlap (`ENTRY`, `TP +x%`,
+  `SL −x%`, off-screen `▲`), an in-box quantity tag, balance chips at each exit,
+  a compact one-line mode, and a selected-box stats panel with quantity, R/R,
+  target/stop in price + percent + ticks, risk, reward, both balances and open /
+  right-edge PnL. Entry handles are square, the right-edge grip is rounded, and
+  the panel clamps to the plot on every side.
+- Interaction: distinct `ns-resize` / `ew-resize` / `move` cursors per hit type,
+  double-click opens the editor, the placement draft shows live R/R and quantity,
+  and an abandoned draft no longer stays painted after Esc or a tool switch.
+- Settings modal rebuilt around position sizing / display / selected-position
+  sections: account, risk mode (% or USDT), leverage, lot size, quantity precision,
+  default width, stats and compact switches, selected entry/target/stop inputs
+  validated per direction, a 1:1 stop reset and a live preview that flags a
+  leverage-capped quantity. All fields keep the 12 px type floor and were audited
+  for clipping/overflow in both themes.
+- Stored positions are normalized on load (invalid direction/prices/times dropped),
+  so corrupt or hand-edited `localStorage` records cannot break rendering.
+- Verified: `node --test frontend/tests/position-tool.test.mjs` (12 formula/guard
+  tests), `npm --prefix frontend test` (76 pass), `tsc --noEmit`, plus Playwright
+  audits for drag level/body/edge, single-click 2R placement, hover cursors,
+  canvas pixels, compact mode, inline validation, delete, persistence across
+  reloads and stored-record sanitization (`tmp/pos_audit.mjs`,
+  `tmp/pos_short_audit.mjs`, `tmp/pos_persist_audit.mjs`, `tmp/pos_modal_audit.mjs`).
+- Not implemented: TradingView's position alerts (the workspace has no price-alert
+  service; alerts live in the Python shell), and per-object "always show stats"
+  (stats visibility is a global default for new/selected boxes).
+
 ## 2026-11-06 — application-wide typography, icon and readability standard
 - One text family (bundled Satoshi; mono reserved for numeric readouts) and a
   centralized scale on `--text-xs` 12 → `--text-xl` 24 with 14 px as the interface

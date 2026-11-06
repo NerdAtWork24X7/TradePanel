@@ -48,6 +48,9 @@ interface SnapshotRequest {
 
 type Lwc = {
   createChart: (element: HTMLElement, options: Record<string, unknown>) => any;
+  CandlestickSeries: unknown;
+  LineSeries: unknown;
+  HistogramSeries: unknown;
   LineStyle: { Solid: number; Dashed: number; Dotted: number };
   ColorType: { Solid: string };
   CrosshairMode: { Normal: number; Magnet: number };
@@ -249,7 +252,7 @@ async function render(
   const macdElement = pane();
 
   const main = LWC.createChart(mainElement, chartOptions(MAIN_HEIGHT, false, 0.28));
-  const candleSeries = main.addCandlestickSeries({
+  const candleSeries = main.addSeries(LWC.CandlestickSeries, {
     upColor: COLORS.up,
     downColor: COLORS.down,
     borderVisible: false,
@@ -270,7 +273,7 @@ async function render(
 
   const emaColors = [COLORS.blue, COLORS.orange, COLORS.purple];
   [series.ema1, series.ema2, series.ema3].forEach((values, index) => {
-    const line = main.addLineSeries({
+    const line = main.addSeries(LWC.LineSeries, {
       color: emaColors[index],
       lineWidth: 1,
       priceLineVisible: false,
@@ -283,7 +286,7 @@ async function render(
     [series.bbUpper, COLORS.faint],
     [series.bbLower, COLORS.faint],
   ] as const) {
-    const line = main.addLineSeries({
+    const line = main.addSeries(LWC.LineSeries, {
       color,
       lineWidth: 1,
       lineStyle: LWC.LineStyle.Dashed,
@@ -294,7 +297,7 @@ async function render(
     line.setData(lineData(candles, values));
   }
 
-  const volume = main.addHistogramSeries({
+  const volume = main.addSeries(LWC.HistogramSeries, {
     priceScaleId: "volume",
     priceFormat: { type: "volume" },
     priceLineVisible: false,
@@ -330,7 +333,7 @@ async function render(
   setRange(main, candles.length);
 
   const rsiChart = LWC.createChart(rsiElement, chartOptions(RSI_HEIGHT, false, 0.08));
-  const rsiLine = rsiChart.addLineSeries({
+  const rsiLine = rsiChart.addSeries(LWC.LineSeries, {
     color: COLORS.purple,
     lineWidth: 1,
     priceLineVisible: false,
@@ -357,7 +360,7 @@ async function render(
   setRange(rsiChart, candles.length);
 
   const macdChart = LWC.createChart(macdElement, chartOptions(MACD_HEIGHT, true, 0.08));
-  const histogram = macdChart.addHistogramSeries({
+  const histogram = macdChart.addSeries(LWC.HistogramSeries, {
     priceLineVisible: false,
     lastValueVisible: false,
   });
@@ -371,14 +374,14 @@ async function render(
           : "rgba(255,158,150,0.45)",
     })),
   );
-  const macdLine = macdChart.addLineSeries({
+  const macdLine = macdChart.addSeries(LWC.LineSeries, {
     color: COLORS.blue,
     lineWidth: 1,
     priceLineVisible: false,
     lastValueVisible: false,
   });
   macdLine.setData(lineData(candles, series.macd));
-  const signalLine = macdChart.addLineSeries({
+  const signalLine = macdChart.addSeries(LWC.LineSeries, {
     color: COLORS.orange,
     lineWidth: 1,
     priceLineVisible: false,

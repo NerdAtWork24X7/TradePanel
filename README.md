@@ -187,11 +187,33 @@ in Python from the same exchange data and cached briefly.
 
 ### Drawing and trade tools
 
-Long/Short position boxes (drag entry→target, stop mirrors 1:1; click for a 0.5 % stop with
-2R target), Select (drag levels/edge, Delete removes, Esc exits), cursor move, pan (with
-vertical price offset), measure, horizontal/vertical lines, trend lines, rectangles,
-Fibonacci retracement and text. Position drawings persist per symbol in local storage and
-the selected box feeds the trade ticket.
+Long/Short position boxes follow TradingView's long and short position tools:
+drag entry→target and the stop mirrors 1:1, or click once for a 2R template. Every box
+carries right-edge entry/target/stop tags with price and signed percentage, an in-box
+quantity tag and account-balance tags at target and stop. The selected box opens a stats
+panel with quantity, risk/reward, target and stop in price, percentage and ticks, risk,
+reward, balances at each exit, and open PnL (or the PnL at the box's right-edge close).
+Hovering a level shows a `ns-resize` cursor, the right edge `ew-resize`, the body `move`;
+dragging entry/target/stop draws a dotted guide across the chart until release, and
+double-click opens the editor. Position settings cover account size, risk as a percentage
+or a fixed USDT amount, leverage, lot size, quantity precision, default width, stats
+visibility and compact mode, plus entry/target/stop editing and a 1:1 stop reset with a
+live preview. Position drawings persist per symbol in local storage and the selected box
+feeds the trade ticket.
+
+All other chart drawings come from
+[`lightweight-charts-drawing`](https://github.com/deepentropy/lightweight-charts-drawing)
+(MIT, 86 TradingView-parity tools) rendered as a Lightweight Charts v5 series primitive:
+trend lines, rays, channels, pitchforks, Fibonacci and Gann tools, chart patterns,
+Elliott waves, cycles, forecasts, volume profiles, measurers, brushes, arrows, shapes,
+text/notes, table, image and font icon. The left rail is your personal toolbar: pin a tool
+with the ☆ in the **All tools** catalog (or right-click a pinned tool to unpin) and up to
+eight pinned tools show next to the cursor. The catalog adds instant search, recently used
+tools, a magnet toggle and hide-all. Selecting a drawing opens a style bar (colour, line
+width, dash, lock, delete); text notes and table cells edit in place, and drawings are
+saved per chart in the workspace store, including after timeframe, chart-type and
+percentage/indexed price-mode changes. The measure tool and the trade-linked long/short
+position boxes remain custom.
 
 ## AI Analysis (Pi)
 

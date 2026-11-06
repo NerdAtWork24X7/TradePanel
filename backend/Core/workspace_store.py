@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from typing import Any
@@ -71,6 +72,35 @@ DEFAULT_INDICATORS: dict[str, Any] = {
 }
 
 DRAWING_TOOLS = ("hline", "vline", "trend", "rect", "fib", "text")
+
+# Drawing kinds accepted from the chart layer (lightweight-charts-drawing
+# 0.6.3 plus the host's custom position tools). Anything else is dropped.
+DRAWING_KINDS = frozenset({
+    "trend-line", "ray", "info-line", "extended-line", "trend-angle",
+    "horizontal-line", "horizontal-ray", "vertical-line", "cross-line",
+    "parallel-channel", "regression-trend", "flat-top-bottom", "disjoint-channel",
+    "pitchfork", "schiff-pitchfork", "modified-schiff-pitchfork", "inside-pitchfork",
+    "fib-retracement", "trend-based-fib-extension", "fib-channel", "fib-time-zone",
+    "fib-speed-resistance-fan", "trend-based-fib-time", "fib-circles", "fib-spiral",
+    "fib-speed-resistance-arcs", "fib-wedge", "pitchfan",
+    "gann-box", "gann-square-fixed", "gann-square", "gann-fan",
+    "xabcd-pattern", "cypher-pattern", "head-and-shoulders", "abcd-pattern",
+    "triangle-pattern", "three-drives-pattern",
+    "elliott-impulse", "elliott-correction", "elliott-triangle",
+    "elliott-double-combo", "elliott-triple-combo",
+    "cyclic-lines", "time-cycles", "sine-line",
+    "long-position", "short-position", "position-forecast", "bar-pattern",
+    "ghost-feed", "sector", "anchored-vwap", "fixed-range-volume-profile",
+    "anchored-volume-profile", "price-range", "date-range", "date-and-price-range",
+    "brush", "highlighter", "arrow-marker", "arrow", "arrow-mark-up", "arrow-mark-down",
+    "rectangle", "rotated-rectangle", "path", "circle", "ellipse", "polyline",
+    "triangle", "arc", "curve", "double-curve",
+    "text", "note", "price-note", "pin", "table", "callout", "comment",
+    "price-label", "signpost", "flag-mark", "image", "font-icon",
+})
+
+MAX_DRAWING_POINTS = 512
+MAX_DRAWING_BYTES = 64_000
 
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
@@ -199,6 +229,113 @@ def _indicators(value: Any) -> dict:
     return out
 
 
+def _drawing_points(value: Any) -> list[dict]:
+    """Anchors of a drawing: epoch seconds (or a date string) + price."""
+    if not isinstance(value, list):
+        return []
+    out = []
+    for point in value[:MAX_DRAWING_POINTS]:
+        if not isinstance(point, dict):
+            continue
+        time = point.get("time")
+        if isinstance(time, str):
+            # Lightweight Charts accepts a business-day string ("2024-01-31").
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", time):
+                continue
+        elif isinstance(time, (int, float)) and not isinstance(time, bool):
+            time = _int(time, 0, 0, 4102444800)
+        else:
+            continue
+        out.append({"time": time, "price": _num(point.get("price"), 0.0, -1e12, 1e12)})
+    return out
+
+
+def _json_clean(value: Any, depth: int = 0) -> Any:
+    """Bounded JSON copy for drawing style/kind-specific metadata."""
+    if depth > 6:
+        return None
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int, float)):
+        number = float(value)
+        return number if number == number else None
+    if isinstance(value, str):
+        return value[:4000]
+    if isinstance(value, list):
+        items = [_json_clean(item, depth + 1) for item in value[:256]]
+        items = [item for item in items if item is not None]
+        return items or None
+    if isinstance(value, dict):
+        out = {}
+        for index, (key, item) in enumerate(value.items()):
+            if index >= 60 or not isinstance(key, str):
+                break
+            clean = _json_clean(item, depth + 1)
+            if clean is not None:
+                out[key[:40]] = clean
+        return out or None
+    return None
+
+
+def _drawing(value: dict) -> dict | None:
+    """One drawing of the chart layer, new (kind) or legacy (tool) model."""
+    raw_points = value.get("points")
+    kind = _str(value.get("kind"), "", 40)
+    if kind:
+        if kind not in DRAWING_KINDS:
+            return None
+        points = _drawing_points(raw_points)
+        if not points:
+            return None
+        record: dict[str, Any] = {
+            "id": _str(value.get("id"), f"dw-{uuid.uuid4().hex[:6]}", 64),
+            "kind": kind,
+            "points": points,
+        }
+        style = _json_clean(value.get("style"))
+        if isinstance(style, dict) and style:
+            record["style"] = style
+        for field, limit in (("text", 2000), ("name", 120), ("glyph", 2000),
+                             ("group", 64), ("owner", 64)):
+            text = value.get(field)
+            if isinstance(text, str) and text:
+                record[field] = text[:limit]
+        for field in ("locked", "hidden", "closed"):
+            if value.get(field) is True:
+                record[field] = True
+        fmt = value.get("fmt")
+        if isinstance(fmt, int) and not isinstance(fmt, bool):
+            record["fmt"] = fmt
+        # Kind-specific payloads the renderer needs back after a reload.
+        for field in ("visibility", "image", "pattern", "ghost", "anchored", "table"):
+            clean = _json_clean(value.get(field))
+            if isinstance(clean, dict) and clean:
+                record[field] = clean
+        if len(json.dumps(record)) > MAX_DRAWING_BYTES:
+            return None
+        return record
+
+    tool = _str(value.get("tool"), "", 12)
+    if tool not in DRAWING_TOOLS:
+        return None
+    clean_points = []
+    if isinstance(raw_points, list):
+        for point in raw_points[:8]:
+            if not isinstance(point, dict):
+                continue
+            clean_points.append({
+                "time": _int(point.get("time"), 0, 0, 4102444800),
+                "price": _num(point.get("price"), 0.0, -1e12, 1e12),
+            })
+    return {
+        "id": _str(value.get("id"), f"d-{uuid.uuid4().hex[:6]}", 40),
+        "tool": tool,
+        "points": clean_points,
+        "color": _str(value.get("color"), "#F5C400", 16),
+        "text": _str(value.get("text"), "", 120),
+    }
+
+
 def _drawings(value: Any) -> list[dict]:
     if not isinstance(value, list):
         return []
@@ -206,26 +343,9 @@ def _drawings(value: Any) -> list[dict]:
     for raw in value[:400]:
         if not isinstance(raw, dict):
             continue
-        tool = _str(raw.get("tool"), "", 12)
-        if tool not in DRAWING_TOOLS:
-            continue
-        points = raw.get("points")
-        clean_points = []
-        if isinstance(points, list):
-            for point in points[:8]:
-                if not isinstance(point, dict):
-                    continue
-                clean_points.append({
-                    "time": _int(point.get("time"), 0, 0, 4102444800),
-                    "price": _num(point.get("price"), 0.0, -1e12, 1e12),
-                })
-        out.append({
-            "id": _str(raw.get("id"), f"d-{uuid.uuid4().hex[:6]}", 40),
-            "tool": tool,
-            "points": clean_points,
-            "color": _str(raw.get("color"), "#F5C400", 16),
-            "text": _str(raw.get("text"), "", 120),
-        })
+        record = _drawing(raw)
+        if record is not None:
+            out.append(record)
     return out
 
 

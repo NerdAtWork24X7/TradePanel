@@ -17,7 +17,7 @@ const factory = vm.runInThisContext(`(function (module, exports) {\n${source}\n}
 });
 const chartSyncModule = { exports: {} };
 factory(chartSyncModule, chartSyncModule.exports);
-const { ChartSyncManager, findNearestCandle } = chartSyncModule.exports;
+const { ChartSyncManager, findNearestCandle, DEFAULT_SETTINGS } = chartSyncModule.exports;
 
 const M5 = 300;
 const H1 = 3600;
@@ -101,11 +101,11 @@ function makeChart(initialRange = null) {
 
 const RED = {
     id: 'g-red', name: 'BTC', color: '#FF5A3C', enabled: true,
-    settings: { crosshair: true, timeRange: true, horizontalScroll: true, zoom: true, timeframe: false },
+    settings: { crosshair: true, timeRange: true, horizontalScroll: true, zoom: true },
 };
 const BLUE = {
     id: 'g-blue', name: 'Alts', color: '#2962FF', enabled: true,
-    settings: { crosshair: true, timeRange: true, horizontalScroll: true, zoom: true, timeframe: false },
+    settings: { crosshair: true, timeRange: true, horizontalScroll: true, zoom: true },
 };
 
 function makeManager(extra) {
@@ -340,16 +340,17 @@ test('range: coverage gap callback asks for older history', () => {
     assert.equal(gaps[0][0], 'b');
 });
 
-test('range: timeframe propagation is opt-in', () => {
-    const synced = [];
-    const mgr = makeManager({ onTimeframeSync: (src, tf, ids) => synced.push([src, tf, ids]) });
-    const a = register(mgr, 'a', candles5m(10));
-    register(mgr, 'b', candles5m(10));
-    assert.deepEqual(mgr.notifyTimeframeChange('a', '1h'), []);
-    assert.deepEqual(synced, []);
-    mgr.setSettings({ timeframe: true });
-    assert.deepEqual(mgr.notifyTimeframeChange('a', '1h'), ['b']);
-    assert.equal(synced.length, 1);
+test('timeframe: independent per chart and never propagated', () => {
+    const mgr = makeManager();
+    register(mgr, 'a', candles5m(10), { timeframe: '5m' });
+    register(mgr, 'b', candles5m(10), { timeframe: '1h' });
+    // The sync layer has no timeframe-propagation API and no timeframe setting,
+    // so a chart can never rewrite another chart's interval.
+    assert.equal(mgr.notifyTimeframeChange, undefined);
+    assert.equal(mgr.getTimeframeTargets, undefined);
+    assert.equal(ChartSyncManager.prototype.notifyTimeframeChange, undefined);
+    assert.equal(DEFAULT_SETTINGS.timeframe, undefined);
+    assert.equal(mgr.settingsFor('a').timeframe, undefined);
 });
 
 /* ── groups ────────────────────────────────────────────────────────────── */

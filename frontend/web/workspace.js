@@ -417,12 +417,6 @@
                 var entry = WS.charts[chartId];
                 if (entry && range) maybeLoadOlder(entry, range.from);
             },
-            onTimeframeSync: function (sourceId, tf, ids) {
-                ids.forEach(function (id) {
-                    var entry = WS.charts[id];
-                    if (entry) changeTimeframe(entry, tf, true);
-                });
-            },
             onError: function (chartId, op, err) {
                 console.warn('[sync]', chartId, op, err && err.message ? err.message : err);
             }
@@ -3408,12 +3402,12 @@
                 checked: entry.config.timeframe === tf,
                 disabled: !supportedTf,
                 tag: agg && agg[tf] ? 'agg ' + agg[tf][0] : (supportedTf ? '' : 'n/a'),
-                onClick: function () { changeTimeframe(entry, tf, false); }
+                onClick: function () { changeTimeframe(entry, tf); }
             };
         }), 'Timeframe');
     }
 
-    function changeTimeframe(entry, tf, fromSync) {
+    function changeTimeframe(entry, tf) {
         if (!entry || entry.config.timeframe === tf) return;
         var supported = timeframesFor(entry.config.exchange, entry.config.market);
         if (supported.indexOf(tf) < 0) {
@@ -3432,7 +3426,6 @@
         if (WS.focused === entry.id) notifyFocused(entry);
         if (WS.sync) {
             WS.sync.updateRegistration(entry.id, { timeframe: tf, barSeconds: barSeconds(tf) });
-            if (!fromSync) WS.sync.notifyTimeframeChange(entry.id, tf);
         }
         scheduleSave();
     }
@@ -3905,7 +3898,7 @@
 
     WS.setFocusedTimeframe = function (timeframe) {
         var entry = WS.charts[WS.focused];
-        if (entry && timeframe) changeTimeframe(entry, timeframe, false);
+        if (entry && timeframe) changeTimeframe(entry, timeframe);
     };
 
     WS.centerFocused = function () {
@@ -4030,7 +4023,7 @@
             card.appendChild(head);
 
             var grid = el('div', 'sync-grid');
-            [['crosshair', 'Crosshair'], ['timeRange', 'Time'], ['horizontalScroll', 'Scroll'], ['zoom', 'Zoom'], ['timeframe', 'TF']].forEach(function (pair) {
+            [['crosshair', 'Crosshair'], ['timeRange', 'Time'], ['horizontalScroll', 'Scroll'], ['zoom', 'Zoom']].forEach(function (pair) {
                 var toggle = el('button', 'sync-toggle', pair[1]);
                 toggle.type = 'button';
                 toggle.setAttribute('aria-pressed', String(!!group.settings[pair[0]]));
@@ -7334,7 +7327,7 @@
 
     function syncTopbar(ws) {
         var settings = ws.globalSettings;
-        ['crosshair', 'timeRange', 'horizontalScroll', 'zoom', 'timeframe'].forEach(function (key) {
+        ['crosshair', 'timeRange', 'horizontalScroll', 'zoom'].forEach(function (key) {
             var btn = document.querySelector('.chip[data-sync="' + key + '"]');
             if (btn) btn.setAttribute('aria-pressed', String(!!settings[key]));
         });

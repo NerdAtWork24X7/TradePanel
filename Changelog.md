@@ -1,3 +1,12 @@
+## 2026-11-07 — Per-chart timeframes
+
+- **Timeframes are no longer synchronized.** Two charts showing the same
+  instrument (same coin and exchange) keep independent intervals: changing one
+  chart's timeframe never reloads another chart. The `TF` toggle was removed
+  from the synchronization bar and the per-group sync drawer, and the workspace
+  store no longer persists a timeframe sync setting.
+- Crosshair, visible range, scroll and zoom synchronization are unchanged.
+
 ## 2026-11-07 — One-command bootstrap: `./tradePanel`
 
 - **`./start.sh` is now `./tradePanel`.** The launcher detects Linux, macOS or

@@ -8,10 +8,12 @@
  * Features
  *   • crosshair sync (timestamp based, destination price from its own data)
  *   • visible timestamp-range sync (scroll / zoom gated independently)
- *   • timeframe propagation (opt-in)
  *   • synchronization groups with independent settings
  *   • absolute price-scale coordination (compatibility guarded)
  *   • rAF coalescing + re-entrancy guards (no feedback loops)
+ *
+ * Timeframes are deliberately *not* synchronized: every chart owns its own
+ * interval, even when two charts show the same instrument.
  * ═══════════════════════════════════════════════════════════════════════════ */
 (function (root, factory) {
     var api = factory();
@@ -28,7 +30,6 @@
         timeRange: true,
         horizontalScroll: true,
         zoom: true,
-        timeframe: false,
         priceScale: 'independent',
         nearestPolicy: 'previous',
         maxDriftBars: 2,
@@ -41,7 +42,6 @@
         timeRange: false,
         horizontalScroll: false,
         zoom: false,
-        timeframe: false,
         priceScale: 'independent',
         nearestPolicy: 'previous',
         maxDriftBars: 0,
@@ -140,7 +140,6 @@
         this.onCrosshair = options.onCrosshair || null;
         this.onRangeApplied = options.onRangeApplied || null;
         this.onCoverageGap = options.onCoverageGap || null;
-        this.onTimeframeSync = options.onTimeframeSync || null;
         this.onError = options.onError || null;
         if (options.groups) this.setGroups(options.groups);
         if (options.chartGroups) this.setChartGroups(options.chartGroups);
@@ -535,28 +534,6 @@
             this.onRangeApplied(target.chartId, applied || range,
                 !!(clampedStart || clampedEnd));
         }
-    };
-
-    /* ── Timeframe propagation ─────────────────────────────────────────── */
-
-    /**
-     * Returns the linked chart ids that should switch timeframe, or [] when the
-     * group has timeframe sync disabled. The workspace performs the reload.
-     */
-    ChartSyncManager.prototype.getTimeframeTargets = function (sourceChartId, timeframe) {
-        var settings = this.settingsFor(sourceChartId);
-        if (!settings.timeframe) return [];
-        return this.getLinkedCharts(sourceChartId)
-            .filter(function (reg) { return reg.timeframe !== timeframe; })
-            .map(function (reg) { return reg.chartId; });
-    };
-
-    ChartSyncManager.prototype.notifyTimeframeChange = function (sourceChartId, timeframe) {
-        var targetIds = this.getTimeframeTargets(sourceChartId, timeframe);
-        if (targetIds.length && this.onTimeframeSync) {
-            this.onTimeframeSync(sourceChartId, timeframe, targetIds);
-        }
-        return targetIds;
     };
 
     /* ── Price-scale coordination ──────────────────────────────────────── */

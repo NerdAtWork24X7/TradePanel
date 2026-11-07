@@ -68,6 +68,7 @@ tmp/
 
 
 # ── Tauri / frontend build artifacts ─────────────────────────────────────────
+release/
 node_modules/
 frontend/dist/
 frontend/web/indicators/

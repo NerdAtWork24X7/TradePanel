@@ -138,6 +138,18 @@ npx tauri dev
 backend/scripts/build-linux.sh        # thin wrapper over ./build.sh
 ```
 
+To collect the finished AppImage and `.deb` in a single `./release` folder
+(useful for distributing or attaching to a GitHub release):
+
+```bash
+./release.sh                 # build + copy to ./release
+./release.sh --clean         # wipe ./release first
+./release.sh --skip-backend  # reuse the staged sidecar
+```
+
+`release.sh` accepts the same flags as `./build.sh` (except `--bundles`) and
+forwards anything it does not recognise to `tauri build`.
+
 `./build.sh` options:
 
 | Flag | Effect |

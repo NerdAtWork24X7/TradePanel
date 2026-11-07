@@ -31,7 +31,7 @@ sudo apt install -y \
 * Python 3.12 + [uv](https://docs.astral.sh/uv/) (or plain venv/pip).
 * Node 20+ and Rust 1.77+.
 
-If the `-dev` packages are missing, `start.sh` / `build.sh` fall back to a
+If the `-dev` packages are missing, `tradePanel` / `build.sh` fall back to a
 pkg-config sysroot under `${XDG_DATA_HOME:-~/.local/share}/tradepanel/webkit-sysroot`
 (see `backend/scripts/webkit-env.sh`). That fallback only works when the
 runtime packages (`libwebkit2gtk-4.1-0`, `libjavascriptcoregtk-4.1-0`,
@@ -50,15 +50,25 @@ by an older fallback staged in `/tmp`, which the system clears on restart.
   (`bundle.windows.webviewInstallMode = downloadBootstrapper`).
 * NSIS is downloaded by the Tauri bundler on first release build.
 
+`tradePanel.cmd` performs the same first-run check as `./tradePanel`: it lists
+missing tools and installs them with winget after asking for consent. Use
+`-Yes` for unattended setup and `-NoInstall` to only print instructions. Winget
+(App Installer) ships with Windows 11 and recent Windows 10; if it is missing,
+install it from the Microsoft Store or use the printed manual commands.
+
 ## 2. First-time setup
+
+The launcher does this for you. `./tradePanel` (Linux/macOS/Git Bash) and
+`tradePanel.cmd` (native Windows) detect the platform, list anything missing,
+and install it after asking for consent. Use `--yes` / `-Yes` for unattended
+setup and `--no-install` / `-NoInstall` to only print instructions.
+
+Manual equivalent:
 
 ```bash
 # repository root
 npm install                 # Tauri CLI (dev dependency)
 npm --prefix frontend install   # Vite/TypeScript/@tauri-apps/api
-
-# or let the launcher do it:
-./start.sh
 ```
 
 The Python app environment (legacy Qt app and tests) is managed by uv:
@@ -103,15 +113,18 @@ Notes:
 ## 4. Development
 
 ```bash
-./start.sh                  # deps + sidecar (if missing) + tauri dev
-./start.sh --rebuild-backend   # force a fresh PyInstaller sidecar first
+./tradePanel                  # deps + sidecar (if missing) + tauri dev
+./tradePanel --rebuild-backend   # force a fresh PyInstaller sidecar first
 backend/scripts/dev.sh              # same launcher without the toolchain checks
 ```
 
-`./start.sh` is safe from any working directory: it installs `node_modules` when missing,
-builds `src-tauri/backend-dist/tradepanel-backend` when missing (or when
+`./tradePanel` is safe from any working directory: on first run it checks the
+platform and installs missing toolchains/system packages with your consent;
+afterwards it installs `node_modules` when missing, builds
+`src-tauri/backend-dist/tradepanel-backend` when missing (or when
 `--rebuild-backend` is passed), then runs `tauri dev`. Arguments after `--` go to
-`tauri dev`, e.g. `./start.sh -- --no-watch`.
+`tauri dev`, e.g. `./tradePanel -- --no-watch`. On native Windows use
+`tradePanel.cmd` with the same flags (`-Yes`, `-NoInstall`, `--rebuild-backend`).
 
 Manual equivalent:
 

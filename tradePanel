@@ -1,0 +1,532 @@
+#!/usr/bin/env bash
+#
+# TradePanel launcher — one command from a fresh clone.
+#
+#   ./tradePanel                    # check/install prerequisites (with consent), then run
+#   ./tradePanel --yes              # install missing prerequisites without prompting
+#   ./tradePanel --no-install       # never install; print instructions instead
+#   ./tradePanel --rebuild-backend  # force a fresh PyInstaller sidecar first
+#   ./tradePanel -- --no-watch      # arguments after -- go to `tauri dev`
+#
+# Linux and macOS use this script. On native Windows run `tradePanel.cmd` (or
+# this script from Git Bash); both delegate to
+# backend/scripts/bootstrap-windows.ps1.
+#
+# The first run detects the platform, lists anything missing, asks for consent,
+# and installs only what is needed. Later runs start directly.
+
+set -euo pipefail
+
+SCRIPT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
+ROOT="$(dirname -- "$SCRIPT")"
+cd "$ROOT"
+
+ASSUME_YES=0
+NO_INSTALL=0
+is_true() {
+  case "${1:-}" in
+    ""|0|false|FALSE|no|NO|n|N|off|OFF) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+if is_true "${TRADEPANEL_YES:-}"; then ASSUME_YES=1; fi
+if is_true "${TRADEPANEL_NO_INSTALL:-}"; then NO_INSTALL=1; fi
+PASSTHRU=()
+
+usage() {
+  sed -n '3,16p' "$SCRIPT" | sed 's/^# \{0,1\}//'
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -y|--yes) ASSUME_YES=1 ;;
+    --no-install) NO_INSTALL=1 ;;
+    -h|--help) usage; exit 0 ;;
+    --)
+      shift
+      while [[ $# -gt 0 ]]; do PASSTHRU+=("$1"); shift; done
+      break
+      ;;
+    *) PASSTHRU+=("$1") ;;
+  esac
+  shift
+done
+
+# ── Platform ────────────────────────────────────────────────────────────────
+case "$(uname -s)" in
+  Linux*) PLATFORM=linux ;;
+  Darwin*) PLATFORM=macos ;;
+  MINGW*|MSYS*|CYGWIN*) PLATFORM=windows ;;
+  *) echo "TradePanel: unsupported operating system: $(uname -s)" >&2; exit 1 ;;
+esac
+
+# Keep a log when launched without a terminal (desktop icon, file manager).
+if [[ ! -t 1 ]]; then
+  LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/trade-panel"
+  if mkdir -p "$LOG_DIR" 2>/dev/null; then
+    exec >>"$LOG_DIR/launcher.log" 2>&1
+    printf -- '--- %s starting TradePanel (%s)\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$PLATFORM"
+  fi
+fi
+
+# ── PATH ────────────────────────────────────────────────────────────────────
+add_path() {
+  [[ -d "$1" ]] || return 0
+  case ":$PATH:" in
+    *":$1:"*) ;;
+    *) PATH="$1:$PATH" ;;
+  esac
+}
+add_path "${CARGO_HOME:-$HOME/.cargo}/bin"
+add_path "$HOME/.local/bin"
+add_path "/opt/homebrew/bin"
+add_path "/usr/local/bin"
+add_path "${XDG_DATA_HOME:-$HOME/.local/share}/tradepanel/toolchain/node/bin"
+for _d in "$HOME"/.nvm/versions/node/*/bin; do add_path "$_d"; done
+export PATH
+
+# Windows (Git Bash/MSYS): hand the whole job to the native bootstrap so the
+# same consent/install logic runs for cmd.exe and PowerShell users.
+if [[ "$PLATFORM" == windows ]]; then
+  WIN_ARGS=()
+  [[ "$ASSUME_YES" -eq 1 ]] && WIN_ARGS+=(-Yes)
+  [[ "$NO_INSTALL" -eq 1 ]] && WIN_ARGS+=(-NoInstall)
+  if [[ ${#PASSTHRU[@]} -gt 0 ]]; then
+    exec powershell -NoProfile -ExecutionPolicy Bypass \
+      -File "$ROOT/backend/scripts/bootstrap-windows.ps1" "${WIN_ARGS[@]}" "${PASSTHRU[@]}"
+  fi
+  exec powershell -NoProfile -ExecutionPolicy Bypass \
+    -File "$ROOT/backend/scripts/bootstrap-windows.ps1" "${WIN_ARGS[@]}"
+fi
+
+# Tauri's Linux webview (webkit2gtk) needs pkg-config metadata. The helper uses
+# the system -dev packages when installed and otherwise falls back to a
+# persistent local sysroot (see backend/scripts/webkit-env.sh).
+if [[ "$PLATFORM" == linux ]]; then
+  # shellcheck source=backend/scripts/webkit-env.sh
+  source "$ROOT/backend/scripts/webkit-env.sh"
+fi
+
+# ── Detection ───────────────────────────────────────────────────────────────
+have() { command -v "$1" >/dev/null 2>&1; }
+
+node_major() {
+  have node || { echo 0; return; }
+  node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0
+}
+
+python_ok() {
+  have python3 || return 1
+  python3 - <<'PY' >/dev/null 2>&1
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 12) else 1)
+PY
+}
+
+python_venv_ok() {
+  have python3 || return 1
+  python3 -c 'import ensurepip' >/dev/null 2>&1
+}
+
+NEED_NODE=0
+NEED_RUST=0
+NEED_UV=0
+NEED_SYSTEM=0
+NEED_XCODE=0
+REASONS=()
+
+add_reason() { REASONS+=("$1"); }
+
+check_prereqs() {
+  NEED_NODE=0
+  NEED_RUST=0
+  NEED_UV=0
+  NEED_SYSTEM=0
+  NEED_XCODE=0
+  REASONS=()
+
+  if [[ "$(node_major)" -lt 20 ]]; then
+    NEED_NODE=1
+    if have node; then
+      add_reason "Node.js 20+ (found $(node --version 2>/dev/null || echo unknown))"
+    else
+      add_reason "Node.js 20+"
+    fi
+  fi
+
+  if ! have cargo || ! have rustc; then
+    NEED_RUST=1
+    add_reason "Rust toolchain (cargo + rustc, installed with rustup)"
+  fi
+
+  if [[ "$PLATFORM" == linux ]]; then
+    if ! have curl; then
+      NEED_SYSTEM=1
+      add_reason "curl"
+    fi
+    if ! have cc || ! have make || ! have pkg-config || { ! have c++ && ! have g++; }; then
+      NEED_SYSTEM=1
+      add_reason "C/C++ build tools, make and pkg-config"
+    fi
+    # The helper returns success when either the -dev packages or the local
+    # runtime-only sysroot can satisfy Tauri's pkg-config lookups.
+    if ! tradepanel_webkit_env >/dev/null 2>&1; then
+      NEED_SYSTEM=1
+      add_reason "GTK 3 / WebKitGTK 4.1 development packages"
+    fi
+    if ! python_ok || ! python_venv_ok; then
+      if ! have uv; then
+        NEED_UV=1
+        add_reason "uv (provisions Python 3.12 for the Python sidecar)"
+      fi
+    fi
+  elif [[ "$PLATFORM" == macos ]]; then
+    if ! xcode-select -p >/dev/null 2>&1; then
+      NEED_XCODE=1
+      add_reason "Xcode Command Line Tools"
+    fi
+    if ! python_ok || ! python_venv_ok; then
+      if ! have uv; then
+        NEED_UV=1
+        add_reason "Python 3.12 or uv (for the Python sidecar)"
+      fi
+    fi
+  fi
+}
+
+detect_pm() {
+  local pm
+  for pm in apt-get dnf pacman zypper; do
+    if have "$pm"; then
+      printf '%s' "$pm"
+      return 0
+    fi
+  done
+  return 1
+}
+
+print_plan() {
+  local reason pm
+  printf '\n'
+  printf 'TradePanel needs a few tools before it can run on this %s machine:\n' "$PLATFORM"
+  for reason in "${REASONS[@]}"; do
+    printf '  • %s\n' "$reason"
+  done
+  printf '\n'
+  case "$PLATFORM" in
+    linux)
+      if [[ "$NEED_SYSTEM" -eq 1 ]]; then
+        if pm="$(detect_pm)"; then
+          printf 'System packages will be installed with %s (sudo); language toolchains\n' "$pm"
+          printf 'go under your home directory and need no root access.\n'
+        else
+          printf 'No supported package manager was found; you will need to install the\n'
+          printf 'system packages manually (see docs/BUILD.md).\n'
+        fi
+      else
+        printf 'Language toolchains are installed under your home directory and need no\n'
+        printf 'root access.\n'
+      fi
+      ;;
+    macos)
+      if [[ "$NEED_XCODE" -eq 1 || "$NEED_NODE" -eq 1 || "$NEED_UV" -eq 1 ]]; then
+        printf 'Missing system tools are installed with Xcode and Homebrew; language\n'
+        printf 'toolchains are installed under your home directory.\n'
+      else
+        printf 'Language toolchains are installed under your home directory.\n'
+      fi
+      ;;
+  esac
+  printf '\n'
+}
+
+print_manual() {
+  case "$PLATFORM" in
+    linux)
+      if [[ "$NEED_SYSTEM" -eq 1 ]]; then
+        case "$(detect_pm 2>/dev/null || true)" in
+          apt-get)
+            cat <<'EOF'
+Ubuntu/Debian:
+  sudo apt update
+  sudo apt install -y build-essential curl wget file pkg-config libssl-dev \
+      libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+      libjavascriptcoregtk-4.1-dev librsvg2-dev python3 python3-venv \
+      xz-utils ca-certificates
+EOF
+            ;;
+          dnf)
+            cat <<'EOF'
+Fedora:
+  sudo dnf install -y gcc gcc-c++ make curl wget file pkgconf-pkg-config \
+      openssl-devel gtk3-devel webkit2gtk4.1-devel libsoup3-devel \
+      javascriptcoregtk4.1-devel librsvg2-devel python3
+EOF
+            ;;
+          pacman)
+            cat <<'EOF'
+Arch:
+  sudo pacman -S --needed base-devel curl wget file pkgconf openssl gtk3 \
+      webkit2gtk-4.1 libsoup3 javascriptcoregtk-4.1 librsvg python
+EOF
+            ;;
+          zypper)
+            cat <<'EOF'
+openSUSE:
+  sudo zypper install -y gcc gcc-c++ make curl wget file pkg-config \
+      libopenssl-devel gtk3-devel webkit2gtk4.1-devel libsoup3-devel \
+      javascriptcoregtk4.1-devel librsvg-devel python3
+EOF
+            ;;
+          *)
+            printf '\nNo supported package manager found. Install the GTK 3 / WebKitGTK 4.1\n'
+            printf 'development packages for your distribution (see docs/BUILD.md).\n'
+            ;;
+        esac
+      fi
+      if [[ "$NEED_NODE" -eq 1 ]]; then
+        printf '\nNode.js 20+:  https://nodejs.org/en/download\n'
+      fi
+      if [[ "$NEED_RUST" -eq 1 ]]; then
+        printf '%s\n' "Rust:         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+      fi
+      if [[ "$NEED_UV" -eq 1 ]]; then
+        printf 'uv:           curl -LsSf https://astral.sh/uv/install.sh | sh\n'
+      fi
+      ;;
+    macos)
+      if [[ "$NEED_XCODE" -eq 1 ]]; then
+        printf 'xcode-select --install\n'
+      fi
+      if [[ "$NEED_NODE" -eq 1 || "$NEED_UV" -eq 1 ]]; then
+        printf 'brew install node python@3.12 uv\n'
+      fi
+      if [[ "$NEED_RUST" -eq 1 ]]; then
+        printf '%s\n' "Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+      fi
+      ;;
+  esac
+}
+
+consent() {
+  [[ "$ASSUME_YES" -eq 1 ]] && return 0
+  if [[ ! -t 0 ]]; then
+    printf 'TradePanel: cannot ask for consent without a terminal.\n' >&2
+    printf 'Re-run with --yes (or TRADEPANEL_YES=1) to install automatically.\n' >&2
+    return 1
+  fi
+  local reply=""
+  read -r -p "Install these now? [y/N] " reply || true
+  case "$reply" in
+    y|Y|yes|YES) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ── Installation ────────────────────────────────────────────────────────────
+as_root() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+  elif have sudo; then
+    sudo "$@"
+  else
+    printf 'TradePanel: root privileges are required to run: %s\n' "$*" >&2
+    return 1
+  fi
+}
+
+install_linux_system() {
+  local pm p
+  local pkgs=()
+  local available=()
+  pm="$(detect_pm)" || {
+    printf 'TradePanel: no supported package manager found.\n' >&2
+    return 1
+  }
+
+  case "$pm" in
+    apt-get)
+      pkgs=(build-essential curl wget file pkg-config libssl-dev libgtk-3-dev
+        libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
+        librsvg2-dev python3 python3-venv xz-utils ca-certificates)
+      as_root apt-get update
+      for p in "${pkgs[@]}"; do
+        if apt-cache show "$p" >/dev/null 2>&1; then
+          available+=("$p")
+        else
+          printf 'TradePanel: package %s is not available in this release\n' "$p" >&2
+        fi
+      done
+      if [[ ${#available[@]} -eq 0 ]]; then
+        return 1
+      fi
+      as_root apt-get install -y "${available[@]}"
+      ;;
+    dnf)
+      as_root dnf install -y gcc gcc-c++ make curl wget file pkgconf-pkg-config \
+        openssl-devel gtk3-devel webkit2gtk4.1-devel libsoup3-devel \
+        javascriptcoregtk4.1-devel librsvg2-devel python3
+      ;;
+    pacman)
+      as_root pacman -S --needed --noconfirm base-devel curl wget file pkgconf \
+        openssl gtk3 webkit2gtk-4.1 libsoup3 javascriptcoregtk-4.1 librsvg python
+      ;;
+    zypper)
+      as_root zypper install -y gcc gcc-c++ make curl wget file pkg-config \
+        libopenssl-devel gtk3-devel webkit2gtk4.1-devel libsoup3-devel \
+        javascriptcoregtk4.1-devel librsvg-devel python3
+      ;;
+  esac
+}
+
+sha256_file() {
+  if have sha256sum; then
+    sha256sum "$1" | awk '{print $1}'
+  elif have shasum; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    openssl dgst -sha256 "$1" | awk '{print $NF}'
+  fi
+}
+
+toolchain_dir() {
+  printf '%s/tradepanel/toolchain' "${XDG_DATA_HOME:-$HOME/.local/share}"
+}
+
+install_node() {
+  local version node_os node_arch base dest tmp expected actual
+  version="${TRADEPANEL_NODE_VERSION:-22.23.4}"
+  case "$PLATFORM" in
+    linux) node_os=linux ;;
+    macos) node_os=darwin ;;
+    *) return 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) node_arch=x64 ;;
+    aarch64|arm64) node_arch=arm64 ;;
+    *) printf 'TradePanel: unsupported CPU architecture: %s\n' "$(uname -m)" >&2; return 1 ;;
+  esac
+
+  base="node-v${version}-${node_os}-${node_arch}"
+  dest="$(toolchain_dir)/node"
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/tradepanel-node.XXXXXX")"
+  trap "rm -rf '$tmp'" EXIT
+
+  printf 'Installing Node.js %s into %s\n' "$version" "$dest"
+  curl -fsSL "https://nodejs.org/dist/v${version}/${base}.tar.xz" -o "$tmp/node.tar.xz"
+  curl -fsSL "https://nodejs.org/dist/v${version}/SHASUMS256.txt" -o "$tmp/SHASUMS256.txt"
+
+  expected="$(awk -v f="${base}.tar.xz" '$2 == f { print $1 }' "$tmp/SHASUMS256.txt")"
+  if [[ -z "$expected" ]]; then
+    printf 'TradePanel: no checksum for %s.tar.xz\n' "$base" >&2
+    return 1
+  fi
+  actual="$(sha256_file "$tmp/node.tar.xz")"
+  if [[ "$actual" != "$expected" ]]; then
+    printf 'TradePanel: Node.js checksum mismatch (expected %s, got %s)\n' "$expected" "$actual" >&2
+    return 1
+  fi
+
+  tar -xf "$tmp/node.tar.xz" -C "$tmp"
+  rm -rf "$dest"
+  mkdir -p "$(dirname "$dest")"
+  mv "$tmp/$base" "$dest"
+  rm -rf "$tmp"
+  trap - EXIT
+  export PATH="$dest/bin:$PATH"
+  hash -r
+}
+
+install_rust() {
+  printf 'Installing the Rust toolchain with rustup\n'
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+  # shellcheck disable=SC1090
+  [[ -f "${CARGO_HOME:-$HOME/.cargo}/env" ]] && source "${CARGO_HOME:-$HOME/.cargo}/env"
+  export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+  hash -r
+}
+
+install_uv() {
+  printf 'Installing uv\n'
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+  hash -r
+}
+
+ensure_brew() {
+  have brew && return 0
+  printf 'Installing Homebrew\n'
+  NONINTERACTIVE=1 /bin/bash -c \
+    "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  if [[ -x /opt/homebrew/bin/brew ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [[ -x /usr/local/bin/brew ]]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+  have brew
+}
+
+install_macos_system() {
+  if [[ "$NEED_XCODE" -eq 1 ]]; then
+    printf 'Requesting Xcode Command Line Tools (a system dialog will open)\n'
+    xcode-select --install 2>/dev/null || true
+    printf 'Finish the Xcode installer, then run ./tradePanel again.\n' >&2
+    return 1
+  fi
+  ensure_brew || return 1
+  if [[ "$NEED_NODE" -eq 1 ]]; then
+    brew install node || return 1
+  fi
+  if [[ "$NEED_UV" -eq 1 ]]; then
+    brew install python@3.12 uv || return 1
+  fi
+  hash -r
+}
+
+install_missing() {
+  if [[ "$PLATFORM" == linux ]]; then
+    [[ "$NEED_SYSTEM" -eq 1 ]] && { install_linux_system || return 1; }
+    [[ "$NEED_NODE" -eq 1 ]] && { install_node || return 1; }
+    [[ "$NEED_RUST" -eq 1 ]] && { install_rust || return 1; }
+    [[ "$NEED_UV" -eq 1 ]] && { install_uv || return 1; }
+  elif [[ "$PLATFORM" == macos ]]; then
+    if [[ "$NEED_XCODE" -eq 1 || "$NEED_NODE" -eq 1 || "$NEED_UV" -eq 1 ]]; then
+      install_macos_system || return 1
+    fi
+    [[ "$NEED_RUST" -eq 1 ]] && { install_rust || return 1; }
+  fi
+  hash -r
+}
+
+# ── Run ─────────────────────────────────────────────────────────────────────
+check_prereqs
+
+if [[ ${#REASONS[@]} -gt 0 ]]; then
+  print_plan
+  if [[ "$NO_INSTALL" -eq 1 ]]; then
+    printf 'TradePanel: --no-install was given; nothing will be installed.\n\n' >&2
+    print_manual
+    exit 1
+  fi
+  if ! consent; then
+    printf 'Aborted. Nothing was installed.\n' >&2
+    printf 'Run ./tradePanel again when you are ready.\n' >&2
+    exit 1
+  fi
+  install_missing
+  check_prereqs
+  if [[ ${#REASONS[@]} -gt 0 ]]; then
+    printf '\nTradePanel: still missing after installation:\n' >&2
+    for reason in "${REASONS[@]}"; do
+      printf '  • %s\n' "$reason" >&2
+    done
+    print_manual >&2
+    exit 1
+  fi
+fi
+
+# bash 3.2 (macOS) errors on an empty "${arr[@]}" under `set -u`.
+if [[ ${#PASSTHRU[@]} -gt 0 ]]; then
+  exec "$ROOT/backend/scripts/dev.sh" "${PASSTHRU[@]}"
+fi
+exec "$ROOT/backend/scripts/dev.sh"

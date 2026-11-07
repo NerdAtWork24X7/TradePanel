@@ -246,7 +246,9 @@ and a private AI analyst into one local desktop workflow** that you own and can 
 | [uv](https://docs.astral.sh/uv/) | latest |
 | Tauri Linux dependencies | `libwebkit2gtk-4.1-dev`, `libsoup-3.0-dev`, `libgtk-3-dev`, and related packages |
 
-Full platform notes: [`docs/BUILD.md`](docs/BUILD.md).
+Full platform notes: [`docs/BUILD.md`](docs/BUILD.md). You do not need to install
+these by hand: `./tradePanel` checks the platform and offers to install anything
+missing on first run.
 
 ### Run from source
 
@@ -254,9 +256,19 @@ Full platform notes: [`docs/BUILD.md`](docs/BUILD.md).
 git clone https://github.com/NerdAtWork24X7/TradePanel.git
 cd TradePanel
 
-./start.sh                     # installs deps, stages the sidecar if needed, launches tauri dev
-./start.sh --rebuild-backend   # force a fresh PyInstaller sidecar, then launch
+./tradePanel                   # checks/installs prerequisites (with consent), then launches tauri dev
+./tradePanel --rebuild-backend # force a fresh PyInstaller sidecar, then launch
+./tradePanel --no-install      # print install instructions instead of installing
 ```
+
+On native Windows use `tradePanel.cmd` instead (cmd.exe or PowerShell):
+
+```bat
+tradePanel.cmd
+```
+
+The AI Analysis panel additionally needs the bundled Pi runtime
+(`npm run ai:runtime`); the rest of the app starts without it.
 
 Then:
 
@@ -331,7 +343,8 @@ TradePanel/
 ├── backend/         # Python sidecar, market data, exchange integrations, trading core
 ├── ai/runtime/      # pinned Pi runtime source
 ├── docs/            # architecture, IPC, security, build, testing, AI docs
-├── start.sh         # one-command dev launcher
+├── tradePanel       # one-command dev launcher (Linux/macOS/Git Bash)
+├── tradePanel.cmd   # Windows launcher (cmd.exe / PowerShell)
 ├── build.sh         # reproducible release build
 └── logo.png
 ```

@@ -175,6 +175,12 @@ function installPi(staging) {
   if (installed.version !== PI_VERSION) {
     throw new Error(`Installed Pi ${installed.version}, expected ${PI_VERSION}`);
   }
+  // npm writes node_modules/.bin entries as absolute symlinks into the staging
+  // tree. They dangle as soon as staging is cleaned up, and Tauri refuses to
+  // bundle a resource tree containing broken symlinks. Nothing launches Pi
+  // through .bin (the host uses manifest.piCli), and in-app updates create
+  // their own .bin links inside the writable overlay, so drop them here.
+  rmSync(join(prefix, "node_modules", ".bin"), { recursive: true, force: true });
   mkdirSync(join(prefix, "extensions"), { recursive: true });
   cpSync(join(SOURCE, "extensions"), join(prefix, "extensions"), { recursive: true });
   cpSync(join(SOURCE, "prompts"), join(prefix, "prompts"), { recursive: true });
@@ -206,6 +212,18 @@ function stageNpm(extractedNode, out, nodeOut) {
   const version = execFileSync(nodeOut, [npmCli, "--version"], { encoding: "utf8" }).trim();
   if (!/^\d+\.\d+\.\d+/.test(version)) throw new Error(`Unexpected staged npm version: ${version}`);
   log(`staged npm ${version}`);
+}
+
+/** Tauri aborts on dangling symlinks in a bundled resource tree; fail clearly. */
+function assertNoBrokenSymlinks(directory) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      if (!existsSync(path)) throw new Error(`Broken symlink in staged runtime: ${path}`);
+    } else if (entry.isDirectory()) {
+      assertNoBrokenSymlinks(path);
+    }
+  }
 }
 
 function removeMaps(directory) {
@@ -251,6 +269,7 @@ async function buildTarget(target, installedPiDir) {
   if (spec.exe !== "node.exe") chmodSync(nodeOut, 0o755);
   stageNpm(extracted, out, nodeOut);
   cpSync(installedPiDir, join(out, "pi"), { recursive: true });
+  assertNoBrokenSymlinks(out);
 
   // Verify the staged runtime actually runs before it is shipped.
   const probe = join(out, "pi");

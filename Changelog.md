@@ -1,3 +1,26 @@
+## 2026-11-07 — One-command bootstrap: `./tradePanel`
+
+- **`./start.sh` is now `./tradePanel`.** The launcher detects Linux, macOS or
+  Windows, lists anything missing, and installs it only after asking for consent.
+  `--yes` / `TRADEPANEL_YES=1` runs unattended; `--no-install` prints the manual
+  commands instead.
+- **Linux** uses the detected package manager (apt, dnf, pacman, zypper) for the
+  GTK/WebKitGTK build dependencies, and installs Node 22, Rust (rustup) and uv
+  under the user's home directory so no root access is needed for toolchains.
+  The existing WebKitGTK runtime-only sysroot fallback still avoids `-dev`
+  packages when they are not required.
+- **macOS** requests Xcode Command Line Tools and uses Homebrew for Node/Python/uv;
+  Rust still comes from rustup.
+- **Windows** gets a native `tradePanel.cmd` and `backend/scripts/bootstrap-windows.ps1`
+  that install Node, Rust (MSVC), Python 3.12, uv, VS C++ Build Tools and WebView2
+  through winget, then build the sidecar and run `tauri dev`.
+- **First run from a fresh clone** installs `node_modules`, stages the Python
+  sidecar if it is missing/stale, and launches Vite + Tauri. The AI Analysis panel
+  still needs the optional bundled Pi runtime (`npm run ai:runtime`).
+- **AI runtime staging** no longer ships npm's absolute `node_modules/.bin`
+  symlinks, which dangled after `backend/build/ai-staging` was cleaned and made
+  Tauri abort with `resource path ... doesn't exist`.
+
 ## 2026-11-06 — In-app Pi (AI runtime) updates from Settings → Updates
 
 - **Settings → Updates is now two cards.** The signed TradePanel release channel is

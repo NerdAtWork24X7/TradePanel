@@ -2,6 +2,9 @@
 #
 # Install a desktop launcher (application-menu entry + desktop icon) for
 # Trade Panel. Re-run this after moving the checkout to refresh the paths.
+#
+# Run ./tradePanel once from a terminal first: the desktop entry has no
+# terminal, so the first-run prerequisite consent prompt cannot be shown there.
 
 set -euo pipefail
 
@@ -28,7 +31,7 @@ Version=1.0
 Name=$APP_NAME
 GenericName=Crypto Trading Panel
 Comment=Hyperliquid and Binance trading panel with TradingView-style charts
-Exec=$ROOT_DIR/start.sh
+Exec=$ROOT_DIR/tradePanel
 Path=$ROOT_DIR
 Icon=$APP_ID
 Terminal=false

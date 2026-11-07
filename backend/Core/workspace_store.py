@@ -84,6 +84,13 @@ DRAWING_KINDS = frozenset({
 MAX_DRAWING_POINTS = 512
 MAX_DRAWING_BYTES = 64_000
 
+# Chart price alerts live at the store root: a rule targets an instrument, not
+# a layout, so it survives session switches.
+MAX_ALERTS = 200
+ALERT_CONDITIONS = ("crossing", "crossing-up", "crossing-down", "greater", "less")
+ALERT_FREQUENCIES = ("once", "repeating")
+ALERT_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -130,7 +137,12 @@ def default_store() -> dict:
         "globalSettings": json.loads(json.dumps(DEFAULT_SETTINGS)),
         "updatedAt": int(time.time() * 1000),
     }
-    return {"version": STORE_VERSION, "active": workspace["id"], "workspaces": [workspace]}
+    return {
+        "version": STORE_VERSION,
+        "active": workspace["id"],
+        "alerts": [],
+        "workspaces": [workspace],
+    }
 
 
 def empty_workspace(name: str = "Workspace") -> dict:
@@ -383,6 +395,52 @@ def _drawings(value: Any) -> list[dict]:
     return out
 
 
+def _alert(raw: Any) -> dict | None:
+    """One price-alert rule; unusable targets are dropped, not defaulted."""
+    if not isinstance(raw, dict):
+        return None
+    price = _num(raw.get("price"), 0.0, 0.0, 1e12)
+    symbol = _str(raw.get("symbol"), "", 32).upper()
+    exchange = _str(raw.get("exchange"), "", 16).lower()
+    market = _str(raw.get("market"), "spot", 12).lower()
+    if price <= 0 or not symbol or exchange not in EXCHANGES:
+        return None
+    if market not in ("spot", "futures"):
+        market = "spot"
+    condition = _str(raw.get("condition"), "crossing", 20)
+    frequency = _str(raw.get("frequency"), "once", 20)
+    alert_id = _str(raw.get("id"), "", 40)
+    if not ALERT_ID.match(alert_id):
+        alert_id = f"a-{uuid.uuid4().hex[:10]}"
+    return {
+        "id": alert_id,
+        "exchange": exchange,
+        "market": market,
+        "symbol": symbol,
+        "timeframe": _str(raw.get("timeframe"), "", 8),
+        "price": price,
+        "condition": condition if condition in ALERT_CONDITIONS else "crossing",
+        "frequency": frequency if frequency in ALERT_FREQUENCIES else "once",
+        "note": _str(raw.get("note"), "", 120),
+        "enabled": _bool(raw.get("enabled"), True),
+        "createdAt": _int(raw.get("createdAt"), int(time.time() * 1000), 0, 10**14),
+    }
+
+
+def _alerts(value: Any) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for item in value[:MAX_ALERTS]:
+        alert = _alert(item)
+        if alert is None or alert["id"] in seen:
+            continue
+        seen.add(alert["id"])
+        out.append(alert)
+    return out
+
+
 def _settings(value: Any) -> dict:
     src = value if isinstance(value, dict) else {}
     mode = _str(src.get("priceScale"), "independent", 16)
@@ -535,7 +593,12 @@ def _store(raw: dict) -> dict:
     active = _str(source.get("active"), workspaces[0]["id"], 40)
     if active not in seen:
         active = workspaces[0]["id"]
-    return {"version": STORE_VERSION, "active": active, "workspaces": workspaces}
+    return {
+        "version": STORE_VERSION,
+        "active": active,
+        "alerts": _alerts(source.get("alerts")),
+        "workspaces": workspaces,
+    }
 
 
 # ── Disk I/O ─────────────────────────────────────────────────────────────────

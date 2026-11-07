@@ -27,9 +27,10 @@
 
 TradePanel is a local-first crypto trading terminal for traders who watch more than
 one exchange. It combines a TradingView-style multi-chart workspace, 1,869 technical
-studies, 86 drawing tools, trade-planning position projections, a Hyperliquid
-execution ticket, and an AI analyst that reads the charts you are actually looking
-at — all in one native desktop application.
+studies, 86 drawing tools, sidebar price alerts, bar replay with a paper backtest
+ledger, trade-planning position projections, a Hyperliquid execution ticket, and
+an AI analyst that reads the charts you are actually looking at — all in one
+native desktop application.
 
 The app is built with **Tauri 2 (Rust)**. Market data, credentials, and order
 execution are handled by a supervised **Python sidecar**; the chart workspace and

@@ -223,6 +223,21 @@
               <span class="sidebar-tab-label">AI Analysis</span>
               <span id="sidebar-tab-dot" class="sidebar-tab-dot" aria-hidden="true"></span>
             </button>
+            <button
+              id="sidebar-tab-alerts"
+              class="sidebar-tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="alerts-panel"
+              data-tab="alerts"
+              tabindex="-1"
+              title="Price alerts"
+            >
+              <span class="sidebar-tab-spark" data-icon="dt-add-alert" data-icon-size="15" aria-hidden="true"></span>
+              <span class="sidebar-tab-label">Alerts</span>
+              <span id="sidebar-tab-alert-count" class="sidebar-tab-count" aria-hidden="true" hidden>0</span>
+            </button>
             <span class="sidebar-tab-glider" aria-hidden="true"></span>
           </div>
 
@@ -362,6 +377,33 @@
                 <span class="ai-token-note">images, not candle dumps</span>
               </div>
             </form>
+          </section>
+
+          <section
+            id="alerts-panel"
+            class="alerts-side"
+            role="tabpanel"
+            aria-labelledby="sidebar-tab-alerts"
+            tabindex="-1"
+            hidden
+          >
+            <div class="alerts-side-head">
+              <div class="alerts-seg" role="tablist" aria-label="Alerts view">
+                <button id="alerts-view-rules" type="button" role="tab" aria-selected="true" aria-controls="alerts-side-list" tabindex="0">
+                  Alerts <span id="alerts-side-rules-count" class="alerts-seg-count">0</span>
+                </button>
+                <button id="alerts-view-log" type="button" role="tab" aria-selected="false" aria-controls="alerts-side-list" tabindex="-1">
+                  Log <span id="alerts-side-log-count" class="alerts-seg-count">0</span>
+                </button>
+              </div>
+              <button id="alerts-side-refresh" class="icon-btn" type="button" title="Refresh alert prices" aria-label="Refresh alert prices"></button>
+            </div>
+            <div class="alerts-side-toolbar">
+              <button id="alerts-side-new" class="primary-btn mini" type="button" title="Place a new alert on the focused chart">New</button>
+              <button id="alerts-side-sound" class="icon-btn" type="button" aria-pressed="true" title="Alert sound on" aria-label="Alert sound on"></button>
+              <button id="alerts-side-clear" class="ghost-btn mini" type="button" hidden>Clear log</button>
+            </div>
+            <div id="alerts-side-list" class="alerts-side-list"></div>
           </section>
 
           <footer class="sidebar-foot">

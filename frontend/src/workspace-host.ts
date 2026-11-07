@@ -2,7 +2,10 @@ import * as marketData from "./services/market-data";
 import * as workspace from "./services/workspace";
 import * as credentials from "./services/credentials";
 import { RpcError } from "./services/backend";
-import type { AiChartIndicator, UnknownRecord } from "./types";
+import type {
+  AiChartIndicator, UnknownRecord, WorkspaceAlert, WorkspaceAlertLogEntry,
+  WorkspaceAlertSnapshot,
+} from "./types";
 
 type Envelope =
   | { __ws: 1; type: "rpc"; id: number; method: string; args: unknown[] }
@@ -18,6 +21,8 @@ export interface WorkspaceHandlers {
   ): void;
   positionDrawing(direction: string, entry: number, tp: number, sl: number): void;
   tradeOverlay(ok: boolean, message: string): void;
+  alertTriggered(message: string, symbol: string, price: number): void;
+  alertsChanged(snapshot: WorkspaceAlertSnapshot): void;
   configRequested(): void;
   openSettings(): void;
   toggleTheme(): void;
@@ -52,6 +57,101 @@ function asString(value: unknown): string {
 function asNumber(value: unknown): number {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
+}
+
+
+function asRecord(value: unknown): UnknownRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : null;
+}
+
+function text(value: unknown, max = 200): string {
+  return typeof value === "string" ? value.slice(0, max) : "";
+}
+
+function number(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function nullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Parse and bound the workspace alert snapshot; never trust cross-frame JSON. */
+function asAlertSnapshot(value: unknown): WorkspaceAlertSnapshot | null {
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    try { parsed = JSON.parse(value); } catch { return null; }
+  }
+  const raw = asRecord(parsed);
+  if (!raw) return null;
+  const alerts: WorkspaceAlert[] = [];
+  if (Array.isArray(raw.alerts)) {
+    for (const item of raw.alerts.slice(0, 200)) {
+      const record = asRecord(item);
+      if (!record) continue;
+      const id = text(record.id, 40);
+      const symbol = text(record.symbol, 32);
+      if (!/^[a-z0-9_-]{1,40}$/i.test(id) || !symbol) continue;
+      const price = number(record.price);
+      if (!(price > 0)) continue;
+      alerts.push({
+        id,
+        exchange: text(record.exchange, 16),
+        market: text(record.market, 12),
+        symbol,
+        timeframe: text(record.timeframe, 8),
+        price,
+        condition: text(record.condition, 20),
+        frequency: text(record.frequency, 20),
+        note: text(record.note, 120),
+        enabled: record.enabled !== false,
+        live: record.live === true,
+        fired: record.fired === true,
+        count: Math.max(0, Math.floor(number(record.count))),
+        lastAt: Math.max(0, Math.floor(number(record.lastAt))),
+        precision: Math.max(0, Math.min(8, Math.floor(number(record.precision)))),
+        current: nullableNumber(record.current),
+        distance: nullableNumber(record.distance),
+      });
+    }
+  }
+  const log: WorkspaceAlertLogEntry[] = [];
+  if (Array.isArray(raw.log)) {
+    for (const item of raw.log.slice(0, 100)) {
+      const record = asRecord(item);
+      if (!record) continue;
+      const message = text(record.message, 240);
+      if (!message) continue;
+      log.push({
+        alertId: text(record.alertId, 40),
+        symbol: text(record.symbol, 32),
+        message,
+        price: number(record.price),
+        precision: Math.max(0, Math.min(8, Math.floor(number(record.precision)))),
+        source: text(record.source, 16),
+        time: Math.max(0, Math.floor(number(record.time))),
+      });
+    }
+  }
+  const focused = asRecord(raw.focused);
+  return {
+    version: Math.max(1, Math.floor(number(raw.version)) || 1),
+    alerts,
+    log,
+    sound: raw.sound !== false,
+    activeCount: alerts.filter((alert) => alert.live).length,
+    focused: focused ? {
+      exchange: text(focused.exchange, 16),
+      market: text(focused.market, 12),
+      symbol: text(focused.symbol, 32),
+      timeframe: text(focused.timeframe, 8),
+    } : null,
+  };
 }
 
 /** `[{id, inputs}]` from the workspace; malformed entries are dropped. */
@@ -152,6 +252,42 @@ export class WorkspaceHost {
     this.send("setFocusedCoin", [coin]);
   }
 
+  requestAlerts(): void {
+    this.send("requestAlerts", []);
+  }
+
+  createAlert(): void {
+    this.send("createAlert", []);
+  }
+
+  focusAlert(id: string): void {
+    this.send("focusAlert", [id]);
+  }
+
+  editAlert(id: string): void {
+    this.send("editAlert", [id]);
+  }
+
+  setAlertEnabled(id: string, enabled: boolean): void {
+    this.send("setAlertEnabled", [id, enabled]);
+  }
+
+  rearmAlert(id: string): void {
+    this.send("rearmAlert", [id]);
+  }
+
+  deleteAlert(id: string): void {
+    this.send("deleteAlert", [id]);
+  }
+
+  setAlertsSound(on: boolean): void {
+    this.send("setAlertsSound", [on]);
+  }
+
+  clearAlertLog(): void {
+    this.send("clearAlertLog", []);
+  }
+
   setFocusedTimeframe(timeframe: string): void {
     this.send("setFocusedTimeframe", [timeframe]);
   }
@@ -221,6 +357,16 @@ export class WorkspaceHost {
       case "tradeOverlay":
         this.handlers.tradeOverlay(Boolean(payload[0]), asString(payload[1]));
         break;
+      case "alertTriggered":
+        this.handlers.alertTriggered(
+          asString(payload[0]), asString(payload[1]), asNumber(payload[2]),
+        );
+        break;
+      case "alertsChanged": {
+        const snapshot = asAlertSnapshot(payload[0]);
+        if (snapshot) this.handlers.alertsChanged(snapshot);
+        break;
+      }
       case "configRequested":
         this.handlers.configRequested();
         break;

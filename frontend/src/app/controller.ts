@@ -11,6 +11,7 @@ import { formatExchangePrice } from "../lib/exchange-price";
 import { openModal } from "../components/modal";
 import { openSettingsPage, closeSettingsPage } from "../components/settings-page";
 import { AiPanel, type AiFocus, type AiTicket } from "../components/ai-panel";
+import { AlertsSidebar } from "../components/alerts-sidebar";
 import { SidebarTabs } from "../components/sidebar-tabs";
 import { toast } from "../components/toast";
 import { WorkspaceHost } from "../workspace-host";
@@ -104,6 +105,7 @@ class AppController {
 
   private readonly host: WorkspaceHost;
   private readonly aiPanel: AiPanel;
+  private readonly alertsPanel: AlertsSidebar;
   private readonly sidebarTabs: SidebarTabs;
   private aiFocus: AiFocus | null = null;
   private aiChartIndicators: AiChartIndicator[] = [];
@@ -146,6 +148,10 @@ class AppController {
       tradeOverlay: (ok, message) => {
         if (message) toast(message, ok ? "success" : "error");
       },
+      alertTriggered: (message, symbol, price) => {
+        toast(message || `Price alert: ${symbol} ${price}`, "info", 8000);
+      },
+      alertsChanged: (snapshot) => this.alertsPanel.update(snapshot),
       configRequested: () => void this.openSettingsDialog("ai"),
       openSettings: () => void this.openSettingsDialog("ai"),
       toggleTheme: () => this.toggleTheme(),
@@ -185,12 +191,31 @@ class AppController {
       closeSettings: () => closeSettingsPage(),
       log: (message) => shell.logFrontend("info", `ai: ${message}`),
     });
-    // Trade and AI analysis are separate views of the same column. Switching
-    // away from AI restores the ticket width; switching back re-pins the
-    // transcript to the newest message.
+    this.alertsPanel = new AlertsSidebar({
+      create: () => this.host.createAlert(),
+      refresh: () => this.host.requestAlerts(),
+      focus: (id) => this.host.focusAlert(id),
+      edit: (id) => this.host.editAlert(id),
+      setEnabled: (id, enabled) => this.host.setAlertEnabled(id, enabled),
+      rearm: (id) => this.host.rearmAlert(id),
+      remove: (id) => this.host.deleteAlert(id),
+      setSound: (on) => this.host.setAlertsSound(on),
+      clearLog: () => this.host.clearAlertLog(),
+    });
+    // Trade, AI analysis and alerts are separate views of the same column.
+    // Switching away from AI restores the ticket width; switching back
+    // re-pins the transcript to the newest message.
     this.sidebarTabs = new SidebarTabs(must<HTMLElement>("sidebar-tabs"), (tab) => {
-      if (tab === "ai") this.aiPanel.onShow();
-      else this.aiPanel.onHide();
+      if (tab === "ai") {
+        this.aiPanel.onShow();
+        this.alertsPanel.onHide();
+      } else if (tab === "alerts") {
+        this.aiPanel.onHide();
+        this.alertsPanel.onShow();
+      } else {
+        this.aiPanel.onHide();
+        this.alertsPanel.onHide();
+      }
     });
   }
 
@@ -383,6 +408,7 @@ class AppController {
     this.workspaceLoading.hidden = true;
     // Chart focus is reported by the workspace itself; no automatic order is
     // ever submitted here.
+    this.host.requestAlerts();
     if (this.coin.value) this.scheduleSave();
   }
 

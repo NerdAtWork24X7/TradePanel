@@ -95,7 +95,7 @@ test("boot announces readiness and exposes the QWebChannel-shaped stub", async (
   await harness.boot();
   const stub = harness.windowObject.__WS_STUB__;
   assert.ok(stub, "stub must be installed");
-  for (const method of ["meta", "loadStore", "saveStore", "requestCandles", "requestTick", "searchSymbols", "credentialStatus", "saveCredentials", "onTradeOverlayResult"]) {
+  for (const method of ["meta", "loadStore", "saveStore", "requestCandles", "requestTick", "searchSymbols", "credentialStatus", "saveCredentials", "onTradeOverlayResult", "onAlertTriggered", "onAlertsChanged"]) {
     assert.equal(typeof stub[method], "function", `${method} missing`);
   }
   assert.equal(harness.posted[0].message.type, "event");
@@ -172,6 +172,28 @@ test("workspace signals become typed host events", async () => {
   assert.equal(events.at(-3).message.event, "configRequested");
   assert.equal(events.at(-2).message.event, "toggleTopBar");
   assert.deepEqual(plain(events.at(-1).message.payload), ["hello"]);
+});
+
+test("price alert triggers become a typed host event", async () => {
+  const harness = createHarness();
+  await harness.boot();
+  harness.windowObject.__WS_STUB__.onAlertTriggered("BTC/USDT crossing up 68,000.00", "BTC/USDT", 68001.5);
+  const event = harness.posted.filter((entry) => entry.message.type === "event").at(-1).message;
+  assert.deepEqual(JSON.parse(JSON.stringify(event)), {
+    __ws: 1, type: "event", event: "alertTriggered",
+    payload: ["BTC/USDT crossing up 68,000.00", "BTC/USDT", 68001.5]
+  });
+});
+
+test("alert snapshots reach the shell as JSON strings", async () => {
+  const harness = createHarness();
+  await harness.boot();
+  const snapshot = JSON.stringify({ version: 1, alerts: [], log: [], sound: true, activeCount: 0, focused: null });
+  harness.windowObject.__WS_STUB__.onAlertsChanged(snapshot);
+  const event = harness.posted.filter((entry) => entry.message.type === "event").at(-1).message;
+  assert.deepEqual(JSON.parse(JSON.stringify(event)), {
+    __ws: 1, type: "event", event: "alertsChanged", payload: [snapshot]
+  });
 });
 
 test("fullscreen toggles use the bridge and sync state back", async () => {

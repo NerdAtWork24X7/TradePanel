@@ -1,3 +1,76 @@
+## 2026-11-07 — Alerts sidebar, draggable levels and a single workspace toolbar
+
+- **Alerts moved into the shell sidebar.** A third sidebar tab beside *AI
+  Analysis* lists every rule with its venue/timeframe, condition, current
+  distance, last trigger and fire count. Rows focus the instrument on a chart,
+  pause/resume, re-arm, edit and delete; the tab carries the active-alert count.
+  The workspace still evaluates and persists rules, but exposes a bounded
+  snapshot and intent commands over the existing postMessage bridge. The
+  topbar alert popup is gone; the chart-header bell and drawing-rail bell remain
+  the placement tools. The panel also has an *Alerts / Log* switch for the
+  per-session fire log and a sound toggle.
+- **Alert levels are draggable on the chart.** In cursor mode, pressing a line
+  and moving vertically updates its price live, snaps to the chart's precision,
+  and re-arms the rule when released. The cursor becomes `ns-resize`; clicking
+  without moving still selects the line, and double-click still opens the editor.
+- **Replay has a visible entry point.** A labelled **Replay** button in the
+  workspace topbar acts on the focused chart (and turns into the exit action
+  while replay is active). The old per-pane replay icon remains as a shortcut;
+  the topbar button is no longer hover-only.
+- **One workspace toolbar.** The old groups sub-bar is merged into the topbar:
+  session picker + session menu + Save, a layout dropdown, group chips, a View
+  menu and Replay, followed by status and window actions. Time/Scroll/Zoom sync
+  chips are removed; their per-group controls remain in the synchronization
+  drawer. Price scale, nearest-candle policy and global crosshair sync now live
+  in the View dropdown. The layout dropdown lists presets in numeric order
+  (1, 2 horizontal, 2 vertical, 4, 6, 8, custom) and includes Add chart.
+- **Theme icon semantics.** In light mode the toggle now shows a moon (the target
+  dark theme); in dark mode it shows a cleaner sun. The old light-mode sun was
+  hard to read at 18 px.
+- Verified: frontend tests (103), Python workspace-store tests (14), chart-sync
+  tests (22), typecheck/build, alert drag audit, shell alerts-panel harness
+  (rules/log/actions/contrast in both themes), topbar audit (layout order, View
+  menu, session menu, replay selection), alerts/replay audit, and readability
+  audit in both themes at 1440 px and a narrow pane.
+
+## 2026-11-07 — Chart price alerts, bar replay and a paper backtest ledger
+
+- **Price alerts live on the chart.** The bell in a panel header (and the
+  drawing rail) arms a placement tool: click a price level, choose crossing /
+  crossing up / crossing down / greater / less, once or repeating, and add a
+  note. Rules draw as amber levels with right-edge tags and are saved at the
+  root of the workspace store, so they follow the app across layout sessions.
+  Rules are listed in the shell sidebar Alerts tab (moved there from the
+  workspace popup; see the follow-up entry), play a chime, log fires for the
+  session, and mirror each trigger to a shell toast.
+- **Evaluate without a dedicated backend.** Loaded charts feed the evaluator
+  their live ticks; a 20-second background watcher polls up to 12 instruments
+  per round for rules whose symbols are not on screen. Symbols that are
+  replaying are skipped (their price is frozen by design). Alerts evaluate
+  while TradePanel is running — nothing fires while the app is closed.
+- **Bar replay with a paper ledger.** The new replay control in each pane asks
+  for a start bar, loads deep history (up to 2000 bars), truncates the series and
+  steps forward/backward with play/pause and 0.2×–10× speeds. Live polling is
+  suspended while a chart replays and restored by a reload on exit.
+  `Shift+←/→` step and `Shift+Space` toggles playback. Indicators and alert
+  rules keep evaluating on each bar close, so replay doubles as an alert test.
+- **Backtesting is honest, not a strategy engine.** Buy/Sell open full-notional
+  paper positions at the replay close (0.1 % fee per side); Close records the
+  trade. The toolbar shows equity, return, trade count and max drawdown, and
+  the report modal lists the ledger. Exiting closes any open position at the
+  last bar and shows the report.
+- **Data model and safety.** Alert rules are validated in
+  `backend/Core/workspace_store.py` (condition/frequency whitelists, exchange
+  checks, 200-rule cap); fire counts live in localStorage so a trigger never
+  dirties a session. Replay state is transient and never persisted, and the
+  speed preference is the only saved replay setting.
+- Verified: `node --test frontend/tests/alerts.test.mjs frontend/tests/replay.test.mjs`
+  (19), full frontend suite (102), `tsc --noEmit` / `vite build`, Python
+  workspace-store tests (14), Playwright alert + replay audits (crossing,
+  manager/re-arm/delete, persistence payload, replay step/trade/report/exit,
+  keyboard), and the readability/contrast audit in both themes at 1440 px and a
+  500 px pane.
+
 ## 2026-11-07 — Per-chart timeframes
 
 - **Timeframes are no longer synchronized.** Two charts showing the same

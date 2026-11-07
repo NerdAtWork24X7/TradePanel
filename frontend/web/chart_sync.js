@@ -324,6 +324,8 @@
     /* ── Crosshair synchronization ──────────────────────────────────────── */
 
     ChartSyncManager.prototype._handleCrosshair = function (chartId, param) {
+        var reg = this._charts[chartId];
+        if (!reg || reg.enabled === false) return;
         var time = null;
         if (param) {
             if (param.time !== undefined) {
@@ -351,6 +353,8 @@
     ChartSyncManager.prototype.handleCrosshairMove = function (sourceChartId, time) {
         if (this._applying > 0) return;
         if (this._isSuppressed(sourceChartId)) return;
+        var source = this._charts[sourceChartId];
+        if (!source || source.enabled === false) return;
         var settings = this.settingsFor(sourceChartId);
         if (!settings.crosshair) return;
         if (time == null) {
@@ -458,7 +462,7 @@
 
     ChartSyncManager.prototype._handleVisibleRange = function (chartId, range) {
         var reg = this._charts[chartId];
-        if (!reg) return;
+        if (!reg || reg.enabled === false) return;
         if (this._applying > 0 || this._isSuppressed(chartId)) {
             // Keep the zoom/scroll classifier in sync with programmatic moves
             // so the next user gesture is classified correctly.
@@ -566,6 +570,7 @@
         var all = !!pending['*'];
         var groups = {};
         for (var id in this._charts) {
+            if (!this._charts[id].enabled) continue;
             var group = this.getChartGroup(id);
             if (!group) continue;
             if (!all && !pending[group.id]) continue;

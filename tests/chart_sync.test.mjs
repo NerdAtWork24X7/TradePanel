@@ -373,6 +373,20 @@ test('groups: independent settings and membership', () => {
     assert.equal(c.mock.state.crosshair, null, 'removed chart is independent');
 });
 
+test('registration: a disabled chart neither sends nor receives sync', () => {
+    const mgr = makeManager();
+    const a = register(mgr, 'a', candles5m(30));
+    const b = register(mgr, 'b', candles5m(30));
+    mgr.updateRegistration('a', { enabled: false });
+    a.mock.emitCrosshair({ time: BASE + M5 });
+    mgr.flushPending();
+    assert.equal(b.mock.state.crosshair, null, 'disabled source does not broadcast');
+    b.mock.emitCrosshair({ time: BASE + 2 * M5 });
+    mgr.flushPending();
+    assert.equal(a.mock.state.crosshair, null, 'disabled target does not receive');
+    assert.deepEqual(mgr.getLinkedCharts('b'), []);
+});
+
 test('groups: disabling a group stops both directions', () => {
     const mgr = makeManager();
     const a = register(mgr, 'a', candles5m(30));

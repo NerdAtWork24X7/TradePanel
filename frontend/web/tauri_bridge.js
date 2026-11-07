@@ -119,6 +119,12 @@
         onTradeOverlayResult: function (ok, message) {
             emit('tradeOverlay', [!!ok, String(message || '')]);
         },
+        onAlertTriggered: function (message, symbol, price) {
+            emit('alertTriggered', [String(message || ''), String(symbol || ''), Number(price) || 0]);
+        },
+        onAlertsChanged: function (snapshotJson) {
+            emit('alertsChanged', [String(snapshotJson || '{}')]);
+        },
         onFocusedChartChanged: function (symbol, exchange, market, timeframe, indicatorsJson) {
             emit('focusedChart', [symbol, exchange, market, timeframe, String(indicatorsJson || '[]')]);
         },

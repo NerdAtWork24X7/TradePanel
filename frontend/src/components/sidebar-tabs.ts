@@ -1,6 +1,6 @@
 /**
- * Sidebar view switcher: the trade ticket and the AI analysis share the right
- * column but never split its height. Implements the WAI-ARIA tabs pattern
+ * Sidebar view switcher: the trade ticket, AI analysis and alerts share the
+ * right column but never split its height. Implements the WAI-ARIA tabs pattern
  * (roving tabindex, arrow/Home/End keys) and remembers the last view.
  *
  * Panels are looked up through each tab's `aria-controls`, so the markup owns
@@ -9,10 +9,10 @@
 
 const TAB_STORAGE_KEY = "tp-sidebar-tab";
 
-export type SidebarTabId = "trade" | "ai";
+export type SidebarTabId = "trade" | "ai" | "alerts";
 
 function isTabId(value: unknown): value is SidebarTabId {
-  return value === "trade" || value === "ai";
+  return value === "trade" || value === "ai" || value === "alerts";
 }
 
 function readStoredTab(): SidebarTabId {

@@ -36,7 +36,7 @@
 | Desktop shell | `src-tauri/src` | window lifecycle, process supervision, IPC validation, credential store, updates, OS integration |
 | Shell UI | `frontend/src` | typed services, toolbar/trade ticket, settings/credentials dialogs, connection state |
 | Workspace adapter | `frontend/web/tauri_bridge.js` | exposes the existing QWebChannel contract over `postMessage` |
-| Chart workspace | `frontend/web/*` | charts, layouts, sync, drawings, indicator rendering (lightweight-charts-indicators), workspace persistence |
+| Chart workspace | `frontend/web/*` | charts, layouts, sync, drawings, indicator rendering (lightweight-charts-indicators), price alerts, bar replay / paper backtest, workspace persistence |
 | Sidecar | `backend/` | JSON-RPC server, method registry, credential mirror, shutdown drain |
 | Trading core | `backend/Core/`, `backend/Exchange/` | market data, persistence, Hyperliquid execution |
 
@@ -91,18 +91,43 @@ implements `window.__WS_STUB__`, the hook that already existed for tests:
 | `meta`, `loadStore`, `saveStore` | `market.meta`, `workspace.load/save` |
 | `requestCandles`, `requestTick`, `searchSymbols` | `market.get_candles/get_tick`, `market.search_symbols` |
 | `credentialStatus`, `saveCredentials` | Rust keyring commands (never Python, never a file) |
-| `onPositionDrawingChanged`, `onFocusedChartChanged`, `onConfigRequested`, `toggleTopBar` | shell events |
+| `onPositionDrawingChanged`, `onFocusedChartChanged`, `onAlertTriggered`, `onAlertsChanged`, `onConfigRequested`, `toggleTopBar` | shell events |
 | `WS.setFocusedCoin/Timeframe`, `centerFocused`, `setIndicatorConfig`, `setActive`, `shutdown` | host → iframe commands |
+| `WS.requestAlerts`, `createAlert`, `focusAlert`, `editAlert`, `setAlertEnabled`, `rearmAlert`, `deleteAlert`, `setAlertsSound`, `clearAlertLog` | alerts sidebar → iframe commands |
 
 Both frame and parent validate origin and `event.source`; the iframe performs no Tauri
 imports and no network requests.
+
+Price alerts are evaluated in the workspace, not the sidecar: chart ticks feed the
+crossing evaluator, a 20-second watcher polls up to 12 off-screen symbols per round,
+and replay feeds one close per bar. A trigger plays a chime, writes the session log,
+and emits `onAlertTriggered` so the shell can toast it. The shell's third sidebar
+tab (`Alerts`) is a view over the same store: the workspace publishes a bounded
+`alertsChanged` snapshot and accepts `createAlert`, `focusAlert`, `editAlert`,
+`setAlertEnabled`, `rearmAlert`, `deleteAlert`, `setAlertsSound`,
+`clearAlertLog` and `requestAlerts` host commands. The chart-header/drawing-rail
+bells remain the placement tools; the old workspace alert modal/popup is gone.
+Levels are draggable in cursor mode and snap to the chart's price precision.
+Nothing fires while the app is closed.
+
+Bar replay truncates a chart at a user-picked bar, advances it with the live update
+path, and suspends that chart's polling and sync participation. The labelled topbar
+**Replay** action targets the focused chart; a per-pane icon remains as a shortcut.
+A paper ledger (0.1 % fee per side, full-notional entries) backs the backtest report;
+replay state is transient and only the speed preference is saved.
+
+The workspace topbar is one row: session picker/actions/save, layout dropdown,
+group chips, View menu (price scale, nearest candle, crosshair sync), Replay,
+status and window actions. Time/Scroll/Zoom global chips were removed; group
+sync settings remain in the drawer.
 
 ## 6. State and persistence
 
 | Data | Location | Format |
 |---|---|---|
 | Coins, window state | `<app-data>/data/` | existing JSON schemas |
-| Workspaces (layouts, charts, drawings) | `<app-data>/data/workspaces.json` | schema v1, validated and atomic |
+| Workspaces (layouts, charts, drawings, price-alert rules) | `<app-data>/data/workspaces.json` | schema v1, validated and atomic; `alerts` lives at the store root |
+| Alert runtime (fired flags, sample counts, last fire) | WebView `localStorage` | `trade_panel.workspace.alert_state.v1`; triggers never dirty a session |
 | Legacy candle cache | `<app-data>/data/candles_<tf>.db` | written by the pre-Tauri app, imported copy-only and no longer read (indicator math runs in the WebView) |
 | Order-uncertain marker | `<app-data>/data/trading_state.json` | `{"uncertain": bool}` |
 | Secrets | OS credential store | service `TradePanel`, account = env key |

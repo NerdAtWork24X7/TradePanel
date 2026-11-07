@@ -371,3 +371,49 @@ export interface AiEvent {
   type: string;
   [key: string]: unknown;
 }
+
+// ── Price alerts (workspace → shell) ───────────────────────────────────────
+
+export interface WorkspaceAlert {
+  id: string;
+  exchange: string;
+  market: string;
+  symbol: string;
+  timeframe: string;
+  price: number;
+  condition: string;
+  frequency: string;
+  note: string;
+  enabled: boolean;
+  live: boolean;
+  fired: boolean;
+  count: number;
+  lastAt: number;
+  precision: number;
+  current: number | null;
+  distance: number | null;
+}
+
+export interface WorkspaceAlertLogEntry {
+  alertId: string;
+  symbol: string;
+  message: string;
+  price: number;
+  precision: number;
+  source: string;
+  time: number;
+}
+
+export interface WorkspaceAlertSnapshot {
+  version: number;
+  alerts: WorkspaceAlert[];
+  log: WorkspaceAlertLogEntry[];
+  sound: boolean;
+  activeCount: number;
+  focused: {
+    exchange: string;
+    market: string;
+    symbol: string;
+    timeframe: string;
+  } | null;
+}

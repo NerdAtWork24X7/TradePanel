@@ -237,6 +237,51 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(chart["indicators"], [])
         self.assertTrue(chart["showVolume"])
 
+    def test_alerts_are_validated_and_survive_a_round_trip(self):
+        payload = {
+            "version": 1,
+            "active": "w1",
+            "alerts": [
+                {"id": "a-1", "exchange": "binance", "market": "spot",
+                 "symbol": "btc/usdt", "timeframe": "5m",
+                 "price": 69000.5, "condition": "crossing-up",
+                 "frequency": "repeating", "note": "  breakout  ", "enabled": True,
+                 "createdAt": 1700000000000},
+                {"id": "a-2", "exchange": "bybit", "market": "nonsense",
+                 "symbol": "eth/usdt", "price": 3800, "condition": "nope",
+                 "frequency": "nope"},
+                {"id": "a-3", "exchange": "nowhere", "symbol": "BTC/USDT", "price": 10},
+                {"id": "a-4", "exchange": "binance", "symbol": "SOL/USDT", "price": 0},
+                {"id": "a-1", "exchange": "binance", "symbol": "XRP/USDT", "price": 2},
+                {"id": "bad id!", "exchange": "okx", "symbol": "SOL/USDT", "price": 190},
+                "junk",
+            ],
+            "workspaces": [{"id": "w1", "name": "One", "charts": []}],
+        }
+        saved = ws.save_store(payload)
+        loaded = ws.load_store()
+        self.assertEqual(saved, loaded)
+        alerts = loaded["alerts"]
+        self.assertEqual(len(alerts), 3)
+        first, second, third = alerts
+        self.assertEqual(first["symbol"], "BTC/USDT")
+        self.assertEqual(first["condition"], "crossing-up")
+        self.assertEqual(first["frequency"], "repeating")
+        self.assertEqual(first["note"], "breakout")
+        self.assertEqual(first["timeframe"], "5m")
+        self.assertEqual(second["market"], "spot")
+        self.assertEqual(second["condition"], "crossing")
+        self.assertEqual(second["frequency"], "once")
+        self.assertEqual(second["enabled"], True)
+        self.assertTrue(third["id"].startswith("a-"))
+        self.assertEqual(third["exchange"], "okx")
+
+    def test_alerts_default_to_an_empty_list(self):
+        self.assertEqual(ws.default_store()["alerts"], [])
+        store = ws._store({"workspaces": [{"id": "w", "charts": []}]})
+        self.assertEqual(store["alerts"], [])
+
+
     def test_atomic_write_leaves_no_temp_file(self):
         ws.save_store(ws.default_store())
         leftovers = [p for p in Path(self.tmp.name).parent.glob("*.tmp*")]

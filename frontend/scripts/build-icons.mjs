@@ -14,6 +14,7 @@
 import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
+import { removeSvgComments } from "./svg-utils.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const ICON_DIR = join(ROOT, "web", "icons");
@@ -53,8 +54,7 @@ function parseSvg(file) {
   if (!match) throw new Error(`No <svg> root in ${basename(file)}`);
   const attrs = match[1];
   const viewBox = (attrs.match(/\bviewBox="([^"]+)"/i) || [])[1] || "0 0 28 28";
-  let body = match[2]
-    .replace(/<!--[\s\S]*?-->/g, "")
+  let body = removeSvgComments(match[2])
     .replace(/\s+/g, " ")
     .trim();
   if (!body) throw new Error(`Empty icon: ${basename(file)}`);

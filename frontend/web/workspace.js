@@ -42,6 +42,10 @@
     ];
     var PREFS_KEY = 'trade_panel.workspace.prefs.v1';
     var ALERT_STATE_KEY = 'trade_panel.workspace.alert_state.v1';
+    // Bundled under publicDir (`frontend/web/sounds/`), so it ships in
+    // `dist/` and works without any external file or network access.
+    var ALERT_SOUND_SRC = 'sounds/alert.mp3';
+    var ALERT_SOUND_VOLUME = 0.7;
     var ALERTS = window.TradePanelAlerts;
     var REPLAY = window.TradePanelReplay;
     var WS = {
@@ -68,10 +72,16 @@
         alertLog: [],
         alertState: Object.create(null),
         alertSaveTimer: null,
+        alertPersistBusy: false,
+        alertPersistQueued: false,
+        alertPersistErrorShown: false,
         alertWatchTimer: null,
         alertWatchBusy: false,
         alertWatchCursor: 0,
         prices: {},
+        audio: null,
+        audioUnlocked: false,
+        audioUnlockBound: false,
         modal: null,
         menu: null,
         menuAnchor: null,
@@ -441,6 +451,42 @@
         return WS.alerts;
     }
 
+    /**
+     * Alerts are store-global and must survive an app restart even when the
+     * user has not pressed the session Save button, so rule mutations use
+     * their own write path. Coalesce overlapping writes: a change made while
+     * one is in flight schedules a follow-up with the latest list.
+     */
+    function persistAlerts() {
+        if (!Bridge.ready || !Bridge.obj || typeof Bridge.obj.saveAlerts !== 'function') return;
+        if (WS.alertPersistBusy) {
+            WS.alertPersistQueued = true;
+            return;
+        }
+        var payload;
+        try { payload = JSON.stringify(alertRules()); }
+        catch (err) { return; }
+        WS.alertPersistBusy = true;
+        var finish = function () {
+            WS.alertPersistBusy = false;
+            if (WS.alertPersistQueued) {
+                WS.alertPersistQueued = false;
+                persistAlerts();
+            }
+        };
+        Bridge.call('saveAlerts', [payload]).then(function () {
+            WS.alertPersistErrorShown = false;
+            finish();
+        }, function (err) {
+            if (!WS.alertPersistErrorShown) {
+                WS.alertPersistErrorShown = true;
+                toast('Could not save alerts: ' +
+                    (err && err.message ? err.message : 'unknown error'), true);
+            }
+            finish();
+        });
+    }
+
     function loadAlertRuntime() {
         WS.alertState = Object.create(null);
         try {
@@ -453,7 +499,8 @@
                     trueState: state.trueState === true,
                     fired: state.fired === true,
                     count: Math.max(0, Math.min(1e6, Number(state.count) || 0)),
-                    lastAt: Math.max(0, Number(state.lastAt) || 0)
+                    lastAt: Math.max(0, Number(state.lastAt) || 0),
+                    indicatorTime: Math.max(0, Number(state.indicatorTime) || 0)
                 };
             });
         } catch (err) { /* storage may be unavailable */ }
@@ -484,7 +531,9 @@
 
     function alertRuntime(id) {
         if (!WS.alertState[id]) {
-            WS.alertState[id] = { trueState: false, fired: false, count: 0, lastAt: 0 };
+            WS.alertState[id] = {
+                trueState: false, fired: false, count: 0, lastAt: 0, indicatorTime: 0
+            };
         }
         return WS.alertState[id];
     }
@@ -497,15 +546,30 @@
 
     function alertsForEntry(entry) {
         if (!entry) return [];
-        return alertRules().filter(function (rule) { return ALERTS.matches(rule, entry.config); });
+        // Only price rules have a chart line; indicator rules are evaluated
+        // from the study output and have no price level to draw.
+        return alertRules().filter(function (rule) {
+            return rule.source !== 'indicator' && ALERTS.matches(rule, entry.config);
+        });
     }
 
     function chartForAlert(rule) {
         var ids = Object.keys(WS.charts);
         var focused = WS.charts[WS.focused];
+        if (rule && rule.source === 'indicator') {
+            // Prefer the exact chart instance the alert was created on.
+            var own = WS.charts[rule.chartId];
+            if (own && !own.destroyed && ALERTS.matches(rule, own.config)) return own;
+            // Then any open chart on the instrument that shows the study.
+            for (var i = 0; i < ids.length; i++) {
+                var candidate = WS.charts[ids[i]];
+                if (!candidate || candidate.destroyed || !ALERTS.matches(rule, candidate.config)) continue;
+                if (indicatorRuntimeFor(candidate, rule)) return candidate;
+            }
+        }
         if (focused && !focused.destroyed && ALERTS.matches(rule, focused.config)) return focused;
-        for (var i = 0; i < ids.length; i++) {
-            var entry = WS.charts[ids[i]];
+        for (var j = 0; j < ids.length; j++) {
+            var entry = WS.charts[ids[j]];
             if (entry && !entry.destroyed && ALERTS.matches(rule, entry.config)) return entry;
         }
         return null;
@@ -536,31 +600,43 @@
                 var chart = chartForAlert(rule);
                 var precision = alertPrecision(rule);
                 var current = priceForAlert(rule);
+                var indicator = rule.source === 'indicator';
+                var attached = !indicator || indicatorRuleAttached(rule);
                 return {
                     id: rule.id,
+                    source: indicator ? 'indicator' : 'price',
                     exchange: rule.exchange,
                     market: rule.market,
                     symbol: rule.symbol,
                     timeframe: rule.timeframe || (chart ? chart.config.timeframe : ''),
-                    price: rule.price,
-                    condition: rule.condition,
+                    price: indicator ? null : rule.price,
+                    condition: rule.condition || '',
+                    conditionId: rule.conditionId || '',
+                    conditionTitle: rule.conditionTitle || '',
+                    indicatorId: rule.indicatorId || '',
+                    indicatorName: rule.indicatorName || '',
+                    chartId: rule.chartId || '',
+                    indicatorIndex: indicator ? rule.indicatorIndex : 0,
+                    indicatorInputs: indicator ? rule.indicatorInputs : undefined,
+                    attached: attached,
                     frequency: rule.frequency,
                     note: rule.note || '',
                     enabled: rule.enabled !== false,
-                    live: alertIsLive(rule),
+                    live: alertIsLive(rule) && attached,
                     fired: !!state.fired,
                     count: state.count || 0,
                     lastAt: state.lastAt || 0,
                     precision: precision,
                     current: isFinite(current) ? current : null,
-                    distance: isFinite(current) ? ALERTS.distancePercent(rule, current) : null
+                    distance: indicator ? null
+                        : (isFinite(current) ? ALERTS.distancePercent(rule, current) : null)
                 };
             }),
             log: WS.alertLog.slice(0, 50).map(function (fire) {
                 return {
                     alertId: fire.alertId,
                     symbol: fire.symbol,
-                    message: fire.message,
+                    message: fire.message || (fire.symbol + ' alert triggered'),
                     price: fire.price,
                     precision: fire.precision == null ? 2 : fire.precision,
                     source: fire.source,
@@ -568,7 +644,9 @@
                 };
             }),
             sound: WS.prefs.alertsSound !== false,
-            activeCount: alertRules().filter(alertIsLive).length,
+            activeCount: alertRules().filter(function (rule) {
+                return alertIsLive(rule) && indicatorRuleAttached(rule);
+            }).length,
             focused: focused ? {
                 exchange: focused.config.exchange,
                 market: focused.config.market,
@@ -599,7 +677,16 @@
 
     function resetAlertRuntime(rule, price) {
         var state = alertRuntime(rule.id);
-        state.trueState = ALERTS.initialState(rule, price);
+        if (rule && rule.source === 'indicator') {
+            // Baseline at the newest signal already visible so creating or
+            // re-arming an alert never replays historical signals.
+            var times = indicatorAlertTimesForRule(rule).filter(isFinite);
+            state.indicatorTime = times.length ? Math.max.apply(null, times) : lastCandleTime(rule);
+            state.trueState = false;
+        } else {
+            state.trueState = ALERTS.initialState(rule, price);
+            state.indicatorTime = 0;
+        }
         state.fired = false;
         state.count = 0;
         state.lastAt = 0;
@@ -616,12 +703,255 @@
         WS.prices[key] = price;
         if (!isFinite(prev)) return;
         alertRules().slice().forEach(function (rule) {
-            if (!alertIsLive(rule) || ALERTS.alertKey(rule) !== key) return;
+            if (rule.source === 'indicator' || !alertIsLive(rule) || ALERTS.alertKey(rule) !== key) return;
             var state = alertRuntime(rule.id);
             var result = ALERTS.evaluate(rule, prev, price, state.trueState);
             state.trueState = result.trueState;
             if (result.fire) fireAlert(rule, price, source);
         });
+    }
+
+    /* ── Indicator alerts ─────────────────────────────────────────────────
+       The study engine reports `alerts` (declared alertcondition()s: the bar
+       times each is true) and `alertCalls` (alert() function calls). Rules
+       are bound to a chart instance and fire only while that study is on an
+       open chart, matching the app's "nothing fires while closed" policy. */
+
+    function indicatorInputSignature(inputs) {
+        if (!inputs || typeof inputs !== 'object') return '';
+        return Object.keys(inputs).sort().map(function (key) {
+            return key + '=' + String(inputs[key]);
+        }).join('|');
+    }
+
+    /** Resolve a rule to its on-chart study, tolerating reordered studies. */
+    function indicatorRuntimeFor(entry, rule) {
+        if (!entry || !rule || rule.source !== 'indicator') return null;
+        var runtimes = entry.indicatorRuntimes || [];
+        var sameId = [];
+        runtimes.forEach(function (runtime) {
+            if (runtime && runtime.id === rule.indicatorId) sameId.push(runtime);
+        });
+        if (!sameId.length) return null;
+        // Inputs identify an instance best because the on-chart position can
+        // shift when a study above it is removed.
+        var signature = indicatorInputSignature(rule.indicatorInputs);
+        if (signature) {
+            for (var i = 0; i < sameId.length; i++) {
+                if (indicatorInputSignature(sameId[i].inputs) === signature) return sameId[i];
+            }
+        }
+        var at = runtimes[rule.indicatorIndex];
+        if (at && at.id === rule.indicatorId) return at;
+        return sameId[0];
+    }
+
+    function indicatorRuleAttached(rule) {
+        if (!rule || rule.source !== 'indicator') return true;
+        var entry = chartForAlert(rule);
+        if (!entry) return false;
+        return !!indicatorRuntimeFor(entry, rule) || indicatorConfigIndex(entry, rule) >= 0;
+    }
+
+    /** Normalised `{time, message}` signals for one condition of a study. */
+    function indicatorAlertCalls(runtime, conditionId) {
+        var result = runtime && runtime.result;
+        if (!result) return [];
+        if (conditionId === ALERTS.INDICATOR_CALL) {
+            var calls = Array.isArray(result.alertCalls) ? result.alertCalls : [];
+            return calls.filter(function (call) {
+                return call && isFinite(call.time);
+            }).map(function (call) {
+                return { time: call.time, message: typeof call.message === 'string' ? call.message : '' };
+            }).sort(function (a, b) { return a.time - b.time; });
+        }
+        var list = Array.isArray(result.alerts) ? result.alerts : [];
+        for (var i = 0; i < list.length; i++) {
+            if (!list[i] || list[i].id !== conditionId) continue;
+            var times = Array.isArray(list[i].times) ? list[i].times : [];
+            return times.filter(isFinite).sort(function (a, b) { return a - b; })
+                .map(function (time) { return { time: time, message: '' }; });
+        }
+        return [];
+    }
+
+    function indicatorAlertTimesForRule(rule) {
+        var entry = WS.charts[rule.chartId] || chartForAlert(rule);
+        var runtime = entry ? indicatorRuntimeFor(entry, rule) : null;
+        return indicatorAlertCalls(runtime, rule.conditionId).map(function (call) { return call.time; });
+    }
+
+    function lastCandleTime(rule) {
+        var entry = chartForAlert(rule);
+        if (entry && entry.candles && entry.candles.length) {
+            return entry.candles[entry.candles.length - 1].time;
+        }
+        // 0 means "no baseline yet": the first evaluation arms at the newest
+        // bar-time signal, keeping the high-water mark in bar time (never the
+        // wall clock, which would be ahead of the current bar).
+        return 0;
+    }
+
+    function indicatorAlertVars(entry) {
+        var candle = entry && entry.candles && entry.candles.length
+            ? entry.candles[entry.candles.length - 1] : null;
+        return {
+            exchange: entry ? entry.config.exchange : '',
+            ticker: entry ? entry.config.symbol : '',
+            symbol: entry ? entry.config.symbol : '',
+            interval: entry ? entry.config.timeframe : '',
+            open: candle ? candle.open : '',
+            high: candle ? candle.high : '',
+            low: candle ? candle.low : '',
+            close: candle ? candle.close : '',
+            volume: candle ? candle.volume : '',
+            time: candle ? new Date(candle.time * 1000).toISOString() : ''
+        };
+    }
+
+    function fireIndicatorAlert(rule, signal, vars, source) {
+        var state = alertRuntime(rule.id);
+        state.count += 1;
+        state.lastAt = Date.now();
+        if (rule.frequency === 'once') state.fired = true;
+        var detail = signal && signal.message
+            ? ALERTS.renderPlaceholders(signal.message, vars)
+            : ALERTS.renderPlaceholders(rule.indicatorMessage || rule.conditionTitle || rule.conditionId, vars);
+        var text = rule.symbol + ' · ' + (rule.indicatorName || rule.indicatorId) +
+            ' · ' + (detail || rule.conditionId);
+        if (rule.note) text += ' — ' + rule.note;
+        var precision = alertPrecision(rule);
+        var price = priceForAlert(rule);
+        WS.alertLog.unshift(ALERTS.logEntry(rule, price, precision, text, source, state.lastAt));
+        WS.alertLog = WS.alertLog.slice(0, ALERTS.MAX_LOG);
+        saveAlertRuntime();
+        toast(text);
+        playAlertSound();
+        flashAlertCharts(rule);
+        emitAlertEvent(text, rule.symbol, price);
+        updateAlertBadgeAll();
+    }
+
+    /** Compare the study's declared signals with the last bar we consumed. */
+    function evaluateIndicatorAlerts(entry) {
+        if (!entry || entry.destroyed) return;
+        var rules = alertRules().filter(function (rule) {
+            return rule.source === 'indicator' && rule.chartId === entry.id;
+        });
+        if (!rules.length) return;
+        var vars = null;
+        var source = entry.replay && entry.replay.active ? 'replay' : 'live';
+        rules.forEach(function (rule) {
+            var runtime = indicatorRuntimeFor(entry, rule);
+            if (!runtime) return;
+            var signals = indicatorAlertCalls(runtime, rule.conditionId);
+            if (!signals.length) return;
+            var state = alertRuntime(rule.id);
+            var step = ALERTS.indicatorSignals(signals, state.indicatorTime);
+            var baseline = Number(state.indicatorTime) || 0;
+            if (!step.baseline) return;
+            if (runtime.hidden || !alertIsLive(rule)) {
+                // A hidden study keeps a stale result; advance past the
+                // current bar so unhiding cannot replay hidden signals.
+                var advanced = Math.max(baseline, step.baseline, lastCandleTime(rule));
+                if (advanced !== baseline) {
+                    state.indicatorTime = advanced;
+                    saveAlertRuntime();
+                }
+                return;
+            }
+            if (!step.fresh.length) {
+                if (step.baseline !== baseline) {
+                    state.indicatorTime = step.baseline;
+                    saveAlertRuntime();
+                }
+                return;
+            }
+            state.indicatorTime = step.baseline;
+            if (rule.frequency === 'once') {
+                fireIndicatorAlert(rule, step.fresh[step.fresh.length - 1],
+                    vars || (vars = indicatorAlertVars(entry)), source);
+                return;
+            }
+            step.fresh.slice(-5).forEach(function (signal) {
+                fireIndicatorAlert(rule, signal, vars || (vars = indicatorAlertVars(entry)), source);
+            });
+        });
+    }
+
+    /** Alert conditions declared by a study, plus its alert() function hook. */
+    function indicatorAlertConditions(meta) {
+        var out = [];
+        if (meta && Array.isArray(meta.alertConditions)) {
+            meta.alertConditions.forEach(function (condition) {
+                if (!condition || typeof condition.id !== 'string' || !condition.id) return;
+                out.push({
+                    id: condition.id.slice(0, 64),
+                    title: typeof condition.title === 'string' && condition.title
+                        ? condition.title : condition.id,
+                    message: typeof condition.message === 'string' ? condition.message : ''
+                });
+            });
+        }
+        if (meta && meta.hasAlertFunction === true) {
+            out.push({
+                id: ALERTS.INDICATOR_CALL,
+                title: 'Any alert() function call',
+                message: ''
+            });
+        }
+        return out.slice(0, 64);
+    }
+
+    /** The rule for one condition of the study instance at `index`. */
+    function indicatorAlertRuleFor(entry, index, meta, conditionId) {
+        if (!entry || !meta) return null;
+        var runtime = (entry.indicatorRuntimes || [])[index];
+        var signature = runtime ? indicatorInputSignature(runtime.inputs) : '';
+        var match = null;
+        alertRules().forEach(function (rule) {
+            if (match || rule.source !== 'indicator' || rule.chartId !== entry.id ||
+                rule.indicatorId !== meta.id || rule.conditionId !== conditionId) return;
+            if (rule.indicatorIndex === index) { match = rule; return; }
+            if (signature && indicatorInputSignature(rule.indicatorInputs) === signature) match = rule;
+        });
+        return match;
+    }
+
+    function createIndicatorAlertRule(entry, index, meta, condition) {
+        if (alertRules().length >= ALERTS.MAX_ALERTS) {
+            toast('At most ' + ALERTS.MAX_ALERTS + ' alerts are supported');
+            return null;
+        }
+        var runtime = (entry.indicatorRuntimes || [])[index];
+        var cfg = chartIndicatorAt(entry, index);
+        var inputs = runtime ? clone(runtime.inputs)
+            : (cfg ? mergeIndicatorInputs(meta, cfg.inputs) : {});
+        var rule = {
+            id: ALERTS.newId(),
+            source: 'indicator',
+            exchange: entry.config.exchange,
+            market: entry.config.market,
+            symbol: entry.config.symbol,
+            timeframe: entry.config.timeframe,
+            chartId: entry.id,
+            indicatorId: meta.id,
+            indicatorIndex: index,
+            indicatorInputs: inputs,
+            conditionId: condition.id,
+            conditionTitle: condition.title || condition.id,
+            indicatorName: meta.name || meta.shortName || meta.id,
+            indicatorMessage: condition.message || '',
+            condition: 'indicator',
+            price: null,
+            frequency: 'once',
+            note: '',
+            enabled: true,
+            createdAt: Date.now()
+        };
+        alertRules().push(rule);
+        resetAlertRuntime(rule, null);
+        return rule;
     }
 
     function startAlertWatcher() {
@@ -646,6 +976,9 @@
         var byKey = Object.create(null);
         alertRules().forEach(function (rule) {
             if (!alertIsLive(rule)) return;
+            // Indicator rules need the study on an open chart; the tick
+            // watcher below only fetches a last price.
+            if (rule.source === 'indicator') return;
             var key = ALERTS.alertKey(rule);
             if (!byKey[key]) {
                 byKey[key] = { key: key, exchange: rule.exchange, market: rule.market, symbol: rule.symbol };
@@ -688,28 +1021,58 @@
         });
     }
 
-    function alertChime() {
-        if (WS.prefs.alertsSound === false) return;
+    function alertAudioElement() {
+        if (typeof Audio !== 'function') return null;
+        if (!WS.audio) {
+            var audio = new Audio(ALERT_SOUND_SRC);
+            audio.preload = 'auto';
+            audio.volume = ALERT_SOUND_VOLUME;
+            WS.audio = audio;
+        }
+        return WS.audio;
+    }
+
+    /** A muted play on the first gesture satisfies desktop/webview policies. */
+    function unlockAlertSound() {
+        if (WS.audioUnlocked || typeof Audio !== 'function') return;
+        WS.audioUnlocked = true;
         try {
-            var Ctx = window.AudioContext || window.webkitAudioContext;
-            if (!Ctx) return;
-            if (!WS.audio) WS.audio = new Ctx();
-            if (WS.audio.state === 'suspended') WS.audio.resume();
-            var now = WS.audio.currentTime;
-            [880, 1174.66].forEach(function (frequency, index) {
-                var start = now + index * 0.12;
-                var osc = WS.audio.createOscillator();
-                var gain = WS.audio.createGain();
-                osc.type = 'sine';
-                osc.frequency.value = frequency;
-                gain.gain.setValueAtTime(0.0001, start);
-                gain.gain.exponentialRampToValueAtTime(0.10, start + 0.02);
-                gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.18);
-                osc.connect(gain);
-                gain.connect(WS.audio.destination);
-                osc.start(start);
-                osc.stop(start + 0.2);
-            });
+            // A throwaway element: priming must never mute or pause a real
+            // alert that fires while the silent probe is in flight.
+            var probe = new Audio(ALERT_SOUND_SRC);
+            probe.volume = 0;
+            var release = function () {
+                try {
+                    probe.pause();
+                    probe.removeAttribute('src');
+                    probe.load();
+                } catch (err) { /* ignore */ }
+            };
+            var played = probe.play();
+            if (played && typeof played.then === 'function') played.then(release).catch(release);
+            else release();
+        } catch (err) { /* audio is a nicety */ }
+    }
+
+    function installAlertSoundUnlock() {
+        if (WS.audioUnlockBound) return;
+        WS.audioUnlockBound = true;
+        ['pointerdown', 'keydown', 'touchstart'].forEach(function (type) {
+            document.addEventListener(type, unlockAlertSound, { once: true, capture: true });
+        });
+    }
+
+    function playAlertSound() {
+        if (WS.prefs.alertsSound === false) return;
+        var audio = alertAudioElement();
+        if (!audio) return;
+        try {
+            audio.volume = ALERT_SOUND_VOLUME;
+            try { audio.currentTime = 0; } catch (err) { /* not loaded yet */ }
+            var played = audio.play();
+            if (played && typeof played.catch === 'function') {
+                played.catch(function () { /* autoplay policy or decode error */ });
+            }
         } catch (err) { /* audio is a nicety */ }
     }
 
@@ -742,23 +1105,11 @@
         if (rule.frequency === 'once') state.fired = true;
         var precision = alertPrecision(rule);
         var text = ALERTS.message(rule, price, precision);
-        WS.alertLog.unshift({
-            alertId: rule.id,
-            symbol: rule.symbol,
-            exchange: rule.exchange,
-            market: rule.market,
-            price: price,
-            level: rule.price,
-            condition: rule.condition,
-            note: rule.note,
-            precision: precision,
-            source: source || 'live',
-            time: state.lastAt
-        });
+        WS.alertLog.unshift(ALERTS.logEntry(rule, price, precision, text, source, state.lastAt));
         WS.alertLog = WS.alertLog.slice(0, ALERTS.MAX_LOG);
         saveAlertRuntime();
         toast(text);
-        alertChime();
+        playAlertSound();
         flashAlertCharts(rule);
         emitAlertEvent(text, rule, price);
         updateAlertBadgeAll();
@@ -774,8 +1125,8 @@
             var entry = WS.charts[id];
             if (entry && entry.selectedAlert === rule.id) entry.selectedAlert = null;
         });
-        scheduleSave();
         updateAlertBadgeAll();
+        persistAlerts();
         if (!options.silent) toast('Alert removed');
     }
 
@@ -810,11 +1161,72 @@
         }
         if (!entry) { toast('Could not open a chart for ' + rule.symbol, true); return false; }
         focusChart(entry);
-        entry.selectedAlert = rule.id;
+        if (rule.source === 'indicator') {
+            var index = ensureIndicatorForRule(entry, rule);
+            if (index < 0) {
+                toast('Add ' + (rule.indicatorName || rule.indicatorId) +
+                    ' to this chart to evaluate the alert', true);
+            }
+            entry.selectedAlert = null;
+        } else {
+            entry.selectedAlert = rule.id;
+        }
         entry.selectedMeasure = false;
         entry.selectedPosition = null;
         renderDrawings(entry);
         return true;
+    }
+
+    function indicatorRuntimeIndex(entry, rule) {
+        var runtime = indicatorRuntimeFor(entry, rule);
+        return runtime && typeof runtime.index === 'number' ? runtime.index : -1;
+    }
+
+    /** Position in the chart config; works before the engine has rendered. */
+    function indicatorConfigIndex(entry, rule) {
+        var list = entry ? chartIndicators(entry) : [];
+        var same = [];
+        list.forEach(function (cfg, i) {
+            if (cfg && cfg.id === rule.indicatorId) same.push(i);
+        });
+        if (!same.length) return -1;
+        var meta = engineIndicator(rule.indicatorId);
+        var signature = indicatorInputSignature(rule.indicatorInputs);
+        if (signature && meta) {
+            for (var i = 0; i < same.length; i++) {
+                var merged = mergeIndicatorInputs(meta, list[same[i]].inputs);
+                if (indicatorInputSignature(merged) === signature) return same[i];
+            }
+        }
+        if (list[rule.indicatorIndex] && list[rule.indicatorIndex].id === rule.indicatorId) {
+            return rule.indicatorIndex;
+        }
+        return same[0];
+    }
+
+    /** Re-add the alert's study when focusing a chart that no longer has it. */
+    function ensureIndicatorForRule(entry, rule) {
+        if (!entry || !rule || rule.source !== 'indicator') return -1;
+        var index = indicatorConfigIndex(entry, rule);
+        if (index >= 0) return index;
+        var meta = engineIndicator(rule.indicatorId);
+        if (!meta) return -1;
+        addChartIndicator(entry, meta);
+        // Re-attaching a study must not replay signals it produced while gone.
+        alertRules().forEach(function (other) {
+            if (other.source === 'indicator' && other.chartId === entry.id &&
+                other.indicatorId === rule.indicatorId) {
+                resetAlertRuntime(other, null);
+            }
+        });
+        index = indicatorConfigIndex(entry, rule);
+        if (index < 0) return -1;
+        var cfg = chartIndicators(entry)[index];
+        if (cfg && rule.indicatorInputs && Object.keys(rule.indicatorInputs).length) {
+            cfg.inputs = mergeIndicatorInputs(meta, rule.indicatorInputs);
+            refreshIndicators(entry, { rebuild: true });
+        }
+        return index;
     }
 
     function editAlertById(id) {
@@ -823,6 +1235,17 @@
         if (!focusAlertById(id)) return;
         var entry = chartForAlert(rule);
         if (!entry) return;
+        if (rule.source === 'indicator') {
+            loadIndicatorEngine().then(function () {
+                if (entry.destroyed) return;
+                var index = ensureIndicatorForRule(entry, rule);
+                if (index >= 0) openIndicatorSettings(entry, index, { tab: 'alerts' });
+                else toast('The alert study is not on this chart', true);
+            }).catch(function () {
+                toast('Indicator engine unavailable', true);
+            });
+            return;
+        }
         openAlertDialog(entry, { alert: rule, onDone: updateAlertBadgeAll });
     }
 
@@ -832,7 +1255,7 @@
         rule.enabled = enabled !== false;
         resetAlertRuntime(rule, priceForAlert(rule));
         updateAlertBadgeAll();
-        scheduleSave();
+        persistAlerts();
     }
 
     function rearmAlertById(id) {
@@ -1124,8 +1547,8 @@
             }
             resetAlertRuntime(rule, last);
             if (isFinite(last)) noteAlertBaseline(ALERTS.alertKey(rule), last);
-            scheduleSave();
             updateAlertBadgeAll();
+            persistAlerts();
             closeModal();
             toast('Alert set: ' + ALERTS.message(rule, value, precision));
         }
@@ -3696,6 +4119,7 @@
         refreshIndicators(entry, { rebuild: true });
         notifyIndicatorsChanged(entry);
         scheduleSave();
+        renderAlertBadge();
         return true;
     }
 
@@ -3706,6 +4130,7 @@
         refreshIndicators(entry, { rebuild: true });
         notifyIndicatorsChanged(entry);
         scheduleSave();
+        renderAlertBadge();
         return true;
     }
 
@@ -3905,6 +4330,8 @@
             }
         });
 
+        try { evaluateIndicatorAlerts(entry); }
+        catch (err) { console.warn('indicator alerts failed', err); }
         sizeIndicatorPanes(entry, paneIndex, rebuild);
         renderLegend(entry);
     }
@@ -4242,7 +4669,8 @@
 
     /* ── Study settings dialog (Inputs / Style / Visibility) ─────────────── */
 
-    function openIndicatorSettings(entry, index) {
+    function openIndicatorSettings(entry, index, opts) {
+        opts = opts || {};
         var list = chartIndicators(entry);
         var cfg = chartIndicatorAt(entry, index);
         if (!cfg) return;
@@ -4250,7 +4678,8 @@
         var original = clone(cfg);
         var draft = clone(cfg);
         var meta = indicatorMeta(id) || { id: id, name: id, plotConfig: [], inputConfig: [], defaultInputs: {} };
-        var activeTab = 'inputs';
+        var alertConditions = indicatorAlertConditions(meta);
+        var activeTab = opts.tab === 'alerts' && alertConditions.length ? 'alerts' : 'inputs';
         var previewTimer = null;
 
         var body = el('div', 'ind-settings-dialog');
@@ -4379,21 +4808,117 @@
             pane.appendChild(box);
         }
 
+        function renderAlerts() {
+            var box = el('div', 'ind-settings');
+            if (!alertConditions.length) {
+                box.appendChild(el('div', 'ind-desc', 'This indicator does not declare alert conditions.'));
+                pane.appendChild(box);
+                return;
+            }
+            box.appendChild(el('div', 'ind-desc',
+                'Alerts fire while this chart is open. Creating or resuming one starts from the latest bar, ' +
+                'so historical signals are never replayed.'));
+            alertConditions.forEach(function (condition) {
+                var rule = indicatorAlertRuleFor(entry, index, meta, condition.id);
+                if (rule && rule.indicatorIndex !== index) rule.indicatorIndex = index;
+
+                var row = el('div', 'ind-alert-row');
+                var main = el('label', 'ind-alert-main');
+                var toggle = el('input');
+                toggle.type = 'checkbox';
+                toggle.checked = !!(rule && rule.enabled !== false);
+                toggle.setAttribute('aria-label', 'Alert for ' + condition.title);
+                main.appendChild(toggle);
+                var title = el('span', 'ind-alert-title', condition.title);
+                title.title = condition.message || condition.title;
+                main.appendChild(title);
+                row.appendChild(main);
+
+                var frequency = el('select');
+                ALERTS.FREQUENCIES.forEach(function (option) {
+                    var item = el('option', null, option.label);
+                    item.value = option.id;
+                    frequency.appendChild(item);
+                });
+                frequency.value = rule ? rule.frequency : 'once';
+                frequency.disabled = !rule;
+                frequency.title = 'Alert frequency';
+                frequency.setAttribute('aria-label', 'Frequency for ' + condition.title);
+                row.appendChild(frequency);
+
+                var remove = el('button', 'ind-icon-btn danger', '×');
+                remove.type = 'button';
+                remove.title = 'Remove this alert';
+                remove.setAttribute('aria-label', 'Remove alert for ' + condition.title);
+                remove.hidden = !rule;
+                row.appendChild(remove);
+
+                function commit() {
+                    updateAlertBadgeAll();
+                    persistAlerts();
+                }
+
+                toggle.addEventListener('change', function () {
+                    var current = indicatorAlertRuleFor(entry, index, meta, condition.id);
+                    if (toggle.checked) {
+                        if (current) {
+                            current.enabled = true;
+                            current.indicatorIndex = index;
+                            resetAlertRuntime(current, null);
+                        } else {
+                            current = createIndicatorAlertRule(entry, index, meta, condition);
+                            if (!current) { toggle.checked = false; return; }
+                        }
+                        frequency.disabled = false;
+                        remove.hidden = false;
+                    } else if (current) {
+                        current.enabled = false;
+                        resetAlertRuntime(current, null);
+                    }
+                    commit();
+                });
+
+                frequency.addEventListener('change', function () {
+                    var current = indicatorAlertRuleFor(entry, index, meta, condition.id);
+                    if (!current) return;
+                    current.frequency = frequency.value;
+                    resetAlertRuntime(current, null);
+                    commit();
+                });
+
+                remove.addEventListener('click', function () {
+                    var current = indicatorAlertRuleFor(entry, index, meta, condition.id);
+                    if (!current) return;
+                    removeAlert(current, { silent: true });
+                    toggle.checked = false;
+                    frequency.disabled = true;
+                    remove.hidden = true;
+                    commit();
+                });
+
+                box.appendChild(row);
+            });
+            pane.appendChild(box);
+        }
+
         function renderPane() {
             pane.innerHTML = '';
             if (activeTab === 'inputs') renderInputs();
             else if (activeTab === 'style') renderStyle();
+            else if (activeTab === 'alerts') renderAlerts();
             else renderVisibility();
             tabs.querySelectorAll('button').forEach(function (button) {
                 button.setAttribute('aria-pressed', String(button.dataset.tab === activeTab));
             });
         }
 
-        [
+        var settingsTabs = [
             ['inputs', 'Inputs'],
             ['style', 'Style'],
             ['visibility', 'Visibility']
-        ].forEach(function (pair) {
+        ];
+        if (alertConditions.length) settingsTabs.push(['alerts', 'Alerts']);
+        settingsTabs.forEach(function (pair) {
             var button = el('button', 'ind-settings-tab', pair[1]);
             button.type = 'button';
             button.dataset.tab = pair[0];
@@ -5760,6 +6285,7 @@
             renderGutters();
         }
         scheduleSave();
+        renderAlertBadge();
         return cfg;
     }
 
@@ -5793,6 +6319,7 @@
         renderGutters();
         renderGroupChips();
         scheduleSave();
+        renderAlertBadge();
     }
 
     function reorderCharts(fromId, toId) {
@@ -8338,7 +8865,7 @@
                 if (entry.alertDrag && entry.alertDrag.active) {
                     resetAlertRuntime(entry.alertDrag.rule, priceForAlert(entry.alertDrag.rule));
                     updateAlertBadgeAll();
-                    scheduleSave();
+                    persistAlerts();
                 }
             }
             entry.positionDrag = null;
@@ -8866,6 +9393,9 @@
         WS.dirtyShown = false;
         renderSaveState();
         setStatus('Ready');
+        // Charts now exist, so indicator alerts can report whether their study
+        // is on an open chart (the snapshot taken above ran before syncPanels).
+        renderAlertBadge();
     }
 
     function syncTopbar() {
@@ -9142,6 +9672,8 @@
     WS.boot = function () {
         hydrateIcons();
         loadPrefs();
+        installAlertSoundUnlock();
+        alertAudioElement();
         Bridge.connect(function (err) {
             if (err) {
                 document.body.innerHTML = '<div style="padding:40px;font-family:monospace;color:#F87171">' +

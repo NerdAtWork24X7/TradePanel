@@ -45,6 +45,7 @@ export interface WorkspaceStore {
   ok: boolean;
   version: number;
   active: string;
+  alerts?: unknown[];
   workspaces: unknown[];
 }
 
@@ -376,12 +377,21 @@ export interface AiEvent {
 
 export interface WorkspaceAlert {
   id: string;
+  source: "price" | "indicator";
   exchange: string;
   market: string;
   symbol: string;
   timeframe: string;
-  price: number;
+  price: number | null;
   condition: string;
+  conditionId: string;
+  conditionTitle: string;
+  indicatorId: string;
+  indicatorName: string;
+  chartId: string;
+  indicatorIndex: number;
+  indicatorInputs?: Record<string, unknown>;
+  attached: boolean;
   frequency: string;
   note: string;
   enabled: boolean;
@@ -398,7 +408,7 @@ export interface WorkspaceAlertLogEntry {
   alertId: string;
   symbol: string;
   message: string;
-  price: number;
+  price: number | null;
   precision: number;
   source: string;
   time: number;

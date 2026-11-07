@@ -97,16 +97,40 @@ function asAlertSnapshot(value: unknown): WorkspaceAlertSnapshot | null {
       const id = text(record.id, 40);
       const symbol = text(record.symbol, 32);
       if (!/^[a-z0-9_-]{1,40}$/i.test(id) || !symbol) continue;
-      const price = number(record.price);
-      if (!(price > 0)) continue;
+      const source = record.source === "indicator" ? "indicator" : "price";
+      const price = nullableNumber(record.price);
+      if (source === "price" && !(price !== null && price > 0)) continue;
+      const chartId = text(record.chartId, 40);
+      const conditionId = text(record.conditionId, 64);
+      if (source === "indicator" && (!chartId || !text(record.indicatorId, 64) || !conditionId)) continue;
+      const indicatorInputs: Record<string, unknown> = {};
+      const rawInputs = asRecord(record.indicatorInputs);
+      if (rawInputs) {
+        for (const [key, value] of Object.entries(rawInputs).slice(0, 64)) {
+          if (typeof value === "boolean" || typeof value === "number") {
+            indicatorInputs[key] = value;
+          } else if (typeof value === "string") {
+            indicatorInputs[key] = value.slice(0, 120);
+          }
+        }
+      }
       alerts.push({
         id,
+        source,
         exchange: text(record.exchange, 16),
         market: text(record.market, 12),
         symbol,
         timeframe: text(record.timeframe, 8),
         price,
         condition: text(record.condition, 20),
+        conditionId,
+        conditionTitle: text(record.conditionTitle, 120),
+        indicatorId: text(record.indicatorId, 64),
+        indicatorName: text(record.indicatorName, 120),
+        chartId,
+        indicatorIndex: Math.max(0, Math.min(64, Math.floor(number(record.indicatorIndex)))),
+        indicatorInputs,
+        attached: record.attached !== false,
         frequency: text(record.frequency, 20),
         note: text(record.note, 120),
         enabled: record.enabled !== false,
@@ -131,7 +155,7 @@ function asAlertSnapshot(value: unknown): WorkspaceAlertSnapshot | null {
         alertId: text(record.alertId, 40),
         symbol: text(record.symbol, 32),
         message,
-        price: number(record.price),
+        price: nullableNumber(record.price),
         precision: Math.max(0, Math.min(8, Math.floor(number(record.precision)))),
         source: text(record.source, 16),
         time: Math.max(0, Math.floor(number(record.time))),
@@ -424,6 +448,11 @@ export class WorkspaceHost {
       case "saveStore": {
         const raw = JSON.parse(asString(args[0]));
         return workspace.saveWorkspaceStore(raw as UnknownRecord);
+      }
+      case "saveAlerts": {
+        const alerts = JSON.parse(asString(args[0]));
+        if (!Array.isArray(alerts)) throw new Error("alerts must be a list");
+        return workspace.saveWorkspaceAlerts(alerts);
       }
       case "requestCandles":
         return marketData.getCandles(

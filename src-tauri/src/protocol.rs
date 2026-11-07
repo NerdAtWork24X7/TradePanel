@@ -247,6 +247,7 @@ pub const FRONTEND_METHODS: &[&str] = &[
     "market.search_symbols",
     "workspace.load",
     "workspace.save",
+    "workspace.save_alerts",
     "account.position",
     "account.open_orders",
     "trading.place_order",

@@ -1,3 +1,39 @@
+## 2026-11-08 — Indicator alerts from the study library
+
+- **Indicator alerts.** Studies already expose their PineScript
+  `alertcondition()` declarations and `alert()` calls; a new **Alerts** tab in
+  the indicator settings dialog lists them per chart instance, with an once /
+  every-time frequency, enable toggle and remove action. Signals reuse the
+  existing toast, chime, chart flash, session log, sidebar snapshot and shell
+  event, but are chart-bound: they evaluate only while the study is on an open
+  chart, matching the app's "nothing fires while closed" policy.
+- **No historical replay.** Each rule keeps a per-condition high-water bar time
+  (in the existing localStorage runtime state). Creating, enabling or re-arming
+  an alert baselines at the newest visible signal, and a temporarily removed or
+  hidden study cannot replay signals it produced while gone.
+- **Sidebar and store.** `source`, chart/study binding, condition title and
+  placeholder-rendered messages round-trip through `workspaces.json`; the shell
+  snapshot validator accepts nullable prices for indicator rows and labels an
+  unattached study as *Chart closed*. Price alerts keep their existing
+  crossing evaluator and off-screen watcher unchanged.
+- **Session log fixed.** Trigger entries now always carry the rendered
+  `message` (one shared builder for price and indicator alerts); previously the
+  field was missing, so the shell validator silently dropped every row and the
+  sidebar *Log* tab stayed empty.
+- **Bundled notification sound.** Alerts now play
+  `frontend/web/sounds/alert.mp3` (an MP3 placed in Vite's publicDir, so it is
+  copied into `dist/` and travels inside the packaged app) instead of the
+  synthesized two-tone WebAudio chime. Playback uses a preloaded `Audio`
+  element, restarts on each trigger, honours the sidebar sound toggle, and is
+  silently unlocked on the first pointer/key gesture for strict webviews.
+- **Alerts now persist immediately.** Alert rules are store-global, so they no
+  longer wait for the session Save button: create/edit/enable/disable/delete and
+  dragging a price level call the new `workspace.save_alerts` RPC, which rewrites
+  only the root `alerts` list and leaves unsaved chart layouts alone. Previously
+  alerts disappeared on restart unless the user had pressed Save.
+- Verified: frontend tests (110), Python workspace-store tests (17), typecheck,
+  and classic-script syntax checks for `workspace.js` / `alerts.js`.
+
 ## 2026-11-07 — Alerts sidebar, draggable levels and a single workspace toolbar
 
 - **Alerts moved into the shell sidebar.** A third sidebar tab beside *AI

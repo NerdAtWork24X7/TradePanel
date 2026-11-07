@@ -71,13 +71,21 @@ function isOnce(alert: WorkspaceAlert): boolean {
 
 function stateOf(alert: WorkspaceAlert): { label: string; tone: string } {
   if (!alert.enabled) return { label: "Paused", tone: "paused" };
+  if (alert.source === "indicator" && !alert.attached) {
+    return { label: "Chart closed", tone: "paused" };
+  }
   if (alert.fired && isOnce(alert)) return { label: "Triggered", tone: "fired" };
   return { label: "Active", tone: "live" };
 }
 
 function conditionText(alert: WorkspaceAlert): string {
+  if (alert.source === "indicator") {
+    const name = alert.indicatorName || alert.indicatorId || "Indicator";
+    const condition = alert.conditionTitle || alert.conditionId || "alert";
+    return `${name} · ${condition}`;
+  }
   const label = CONDITION_LABELS[alert.condition] || "crossing";
-  return `${label} ${money(alert.price, alert.precision)}`;
+  return `${label} ${money(alert.price ?? 0, alert.precision)}`;
 }
 
 export class AlertsSidebar {
@@ -152,8 +160,8 @@ export class AlertsSidebar {
     this.tabCount.textContent = active > 99 ? "99+" : String(active);
     this.tabCount.hidden = active === 0;
     this.tabCount.title = active
-      ? `${active} active price alert${active === 1 ? "" : "s"}`
-      : "No active price alerts";
+      ? `${active} active alert${active === 1 ? "" : "s"}`
+      : "No active alerts";
     this.tabButton.setAttribute(
       "aria-label",
       active ? `Alerts, ${active} active` : "Alerts",
@@ -195,7 +203,8 @@ export class AlertsSidebar {
       const sorted = [...alerts].sort((a, b) => {
         const rank = (alert: WorkspaceAlert) =>
           !alert.enabled ? 2 : alert.fired && isOnce(alert) ? 1 : 0;
-        return rank(a) - rank(b) || a.symbol.localeCompare(b.symbol) || a.price - b.price;
+        return rank(a) - rank(b) || a.symbol.localeCompare(b.symbol) ||
+          (a.price ?? 0) - (b.price ?? 0);
       });
       for (const alert of sorted) this.list.appendChild(this.alertRow(alert));
     }
@@ -205,10 +214,10 @@ export class AlertsSidebar {
   private renderEmptyRules(): void {
     const empty = element("div", "alerts-side-empty");
     empty.appendChild(iconSpan("dt-add-alert", 24));
-    empty.appendChild(element("b", "", "No price alerts yet"));
+    empty.appendChild(element("b", "", "No alerts yet"));
     empty.appendChild(element(
       "p", "",
-      "Place one from a chart: use the bell in the chart header, then click the price level you want to watch.",
+      "Place a price alert with the bell in a chart header, or add an indicator alert from a study's Alerts settings.",
     ));
     this.list.appendChild(empty);
   }
@@ -244,7 +253,11 @@ export class AlertsSidebar {
       meta.appendChild(element("span", "", "now "));
       meta.appendChild(element("b", "mono", money(alert.current, alert.precision)));
     } else {
-      meta.appendChild(element("span", "alert-muted", "waiting for price"));
+      meta.appendChild(element(
+        "span",
+        "alert-muted",
+        alert.source === "indicator" ? "waiting for signal" : "waiting for price",
+      ));
     }
     if (alert.distance != null) {
       const distance = alert.distance;
@@ -316,7 +329,9 @@ export class AlertsSidebar {
       const body = element("div", "alert-log-body");
       body.appendChild(element("p", "alert-log-message", fire.message));
       const meta = element("div", "alert-log-meta");
-      meta.appendChild(element("b", "mono", money(fire.price, fire.precision)));
+      if (fire.price != null) {
+        meta.appendChild(element("b", "mono", money(fire.price, fire.precision)));
+      }
       meta.appendChild(element("span", "alert-muted", fire.source === "replay" ? "replay" : "live"));
       body.appendChild(meta);
       row.appendChild(body);

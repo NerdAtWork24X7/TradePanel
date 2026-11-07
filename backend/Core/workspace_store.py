@@ -90,6 +90,7 @@ MAX_ALERTS = 200
 ALERT_CONDITIONS = ("crossing", "crossing-up", "crossing-down", "greater", "less")
 ALERT_FREQUENCIES = ("once", "repeating")
 ALERT_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+ALERT_CONDITION_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
@@ -396,35 +397,73 @@ def _drawings(value: Any) -> list[dict]:
 
 
 def _alert(raw: Any) -> dict | None:
-    """One price-alert rule; unusable targets are dropped, not defaulted."""
+    """One alert rule.
+
+    Price rules target a level; indicator rules watch one condition of a study
+    instance and therefore carry the chart binding instead of a price. Unusable
+    records are dropped, not defaulted.
+    """
     if not isinstance(raw, dict):
         return None
-    price = _num(raw.get("price"), 0.0, 0.0, 1e12)
+    source = _str(raw.get("source"), "price", 16)
+    if source not in ("price", "indicator"):
+        source = "price"
     symbol = _str(raw.get("symbol"), "", 32).upper()
     exchange = _str(raw.get("exchange"), "", 16).lower()
     market = _str(raw.get("market"), "spot", 12).lower()
-    if price <= 0 or not symbol or exchange not in EXCHANGES:
+    if not symbol or exchange not in EXCHANGES:
         return None
     if market not in ("spot", "futures"):
         market = "spot"
-    condition = _str(raw.get("condition"), "crossing", 20)
     frequency = _str(raw.get("frequency"), "once", 20)
     alert_id = _str(raw.get("id"), "", 40)
     if not ALERT_ID.match(alert_id):
         alert_id = f"a-{uuid.uuid4().hex[:10]}"
-    return {
+    base = {
         "id": alert_id,
+        "source": source,
         "exchange": exchange,
         "market": market,
         "symbol": symbol,
         "timeframe": _str(raw.get("timeframe"), "", 8),
-        "price": price,
-        "condition": condition if condition in ALERT_CONDITIONS else "crossing",
         "frequency": frequency if frequency in ALERT_FREQUENCIES else "once",
         "note": _str(raw.get("note"), "", 120),
         "enabled": _bool(raw.get("enabled"), True),
         "createdAt": _int(raw.get("createdAt"), int(time.time() * 1000), 0, 10**14),
     }
+
+    if source == "indicator":
+        chart_id = _str(raw.get("chartId"), "", 40)
+        indicator_id = _str(raw.get("indicatorId"), "", 64).lower()
+        condition_id = _str(raw.get("conditionId"), "", 64)
+        if not ALERT_ID.match(chart_id):
+            return None
+        if not INDICATOR_ID.match(indicator_id):
+            return None
+        if not ALERT_CONDITION_ID.match(condition_id):
+            return None
+        base.update({
+            "chartId": chart_id,
+            "indicatorId": indicator_id,
+            "indicatorIndex": _int(raw.get("indicatorIndex"), 0, 0, MAX_CHART_INDICATORS - 1),
+            "indicatorInputs": _indicator_inputs(raw.get("indicatorInputs")),
+            "conditionId": condition_id,
+            "condition": "indicator",
+            "conditionTitle": _str(raw.get("conditionTitle"), condition_id, 120),
+            "indicatorName": _str(raw.get("indicatorName"), indicator_id, 120),
+            "indicatorMessage": _str(raw.get("indicatorMessage"), "", 240),
+        })
+        return base
+
+    price = _num(raw.get("price"), 0.0, 0.0, 1e12)
+    if price <= 0:
+        return None
+    condition = _str(raw.get("condition"), "crossing", 20)
+    base.update({
+        "price": price,
+        "condition": condition if condition in ALERT_CONDITIONS else "crossing",
+    })
+    return base
 
 
 def _alerts(value: Any) -> list[dict]:
@@ -638,6 +677,20 @@ def save_store(raw: dict) -> dict:
                 raise
             time.sleep(0.01)
     return store
+
+
+def save_alerts(raw_alerts: Any) -> list[dict]:
+    """Persist only the root alert rules, leaving workspace layouts untouched.
+
+    Alerts are store-global and are expected to survive an app restart even
+    when the user has not pressed the session Save button, so they get their
+    own write path instead of piggy-backing on `save_store`.
+    """
+    store = load_store()
+    alerts = _alerts(raw_alerts)
+    store["alerts"] = alerts
+    save_store(store)
+    return alerts
 
 
 def delete_workspace(store: dict, workspace_id: str) -> dict:

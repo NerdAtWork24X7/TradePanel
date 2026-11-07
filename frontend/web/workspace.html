@@ -1125,6 +1125,27 @@
         .ind-style-controls select { width: 72px; }
         .ind-style-controls input[type="checkbox"] { width: 16px; height: 16px; }
         .ind-style-controls .ind-icon-btn { width: 26px; height: 26px; border: 1px solid var(--control-border); }
+        .ind-alert-row {
+            display: grid; grid-template-columns: minmax(0, 1fr) 116px 24px;
+            align-items: center; gap: 8px; padding: 7px 0;
+            border-bottom: 1px solid var(--hairline);
+        }
+        .ind-alert-row:last-child { border-bottom: 0; }
+        .ind-alert-main { display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; }
+        .ind-alert-main input[type="checkbox"] {
+            width: 16px; height: 16px; flex: none; accent-color: var(--accent);
+        }
+        .ind-alert-title {
+            font-size: var(--text-sm); color: var(--text-2);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .ind-alert-row select {
+            height: 28px; width: 100%; min-width: 0; padding: 0 8px; border-radius: 6px;
+            border: 1px solid var(--control-border); background: var(--field-bg); color: var(--text-2);
+            font-family: var(--font-mono); font-size: var(--text-sm); outline: none;
+        }
+        .ind-alert-row select:focus { border-color: var(--focus); box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.12); }
+        .ind-alert-row select:disabled { opacity: 0.45; }
 
         .switch {
             position: relative; width: 40px; height: 24px; flex: none;

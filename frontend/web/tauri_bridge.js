@@ -98,6 +98,7 @@
         meta: function (cb) { call('meta', [], cb); },
         loadStore: function (cb) { call('loadStore', [], cb); },
         saveStore: function (payload, cb) { call('saveStore', [payload], cb); },
+        saveAlerts: function (payload, cb) { call('saveAlerts', [payload], cb); },
         credentialStatus: function (cb) { call('credentialStatus', [], cb); },
         saveCredentials: function (payload, cb) { call('saveCredentials', [payload], cb); },
 

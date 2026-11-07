@@ -243,6 +243,15 @@ def _workspace_save(params: dict, ctx: Context) -> dict:
     return {"ok": True, "store": saved}
 
 
+def _workspace_save_alerts(params: dict, ctx: Context) -> dict:
+    alerts = params.get("alerts")
+    if not isinstance(alerts, list):
+        raise RpcError(INVALID_PARAMS, "alerts must be a list")
+    with ctx.state_lock:
+        saved = workspace_store.save_alerts(alerts)
+    return {"ok": True, "alerts": saved}
+
+
 def _account_position(params: dict, ctx: Context) -> dict:
     exchange, market = _venue(params)
     coin = _text(params, "coin", max_len=48)
@@ -371,6 +380,7 @@ METHODS: dict[str, MethodSpec] = {
     "market.search_symbols": MethodSpec(_search_symbols),
     "workspace.load": MethodSpec(_workspace_load),
     "workspace.save": MethodSpec(_workspace_save),
+    "workspace.save_alerts": MethodSpec(_workspace_save_alerts),
     "account.position": MethodSpec(_account_position),
     "account.open_orders": MethodSpec(_account_open_orders),
     "trading.place_order": MethodSpec(_place_order, serialized=True),

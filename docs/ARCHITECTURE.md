@@ -100,8 +100,16 @@ imports and no network requests.
 
 Price alerts are evaluated in the workspace, not the sidecar: chart ticks feed the
 crossing evaluator, a 20-second watcher polls up to 12 off-screen symbols per round,
-and replay feeds one close per bar. A trigger plays a chime, writes the session log,
-and emits `onAlertTriggered` so the shell can toast it. The shell's third sidebar
+and replay feeds one close per bar. Alert rules are store-global and are written
+immediately through `workspace.save_alerts`, so they survive a restart without
+waiting for the explicit session Save used by chart layouts (and a full
+`workspace.save` still carries them as part of the store). A trigger plays the
+bundled notification sound, writes the session log, and emits `onAlertTriggered`
+so the shell can toast it. Indicator alerts reuse the
+same trigger pipeline but are chart-bound: the study's own `alertConditions` /
+`alertCalls` output is compared against a per-condition high-water bar time, so a
+signal fires once while that chart is open and nothing is replayed on creation,
+re-arm or restart. The shell's third sidebar
 tab (`Alerts`) is a view over the same store: the workspace publishes a bounded
 `alertsChanged` snapshot and accepts `createAlert`, `focusAlert`, `editAlert`,
 `setAlertEnabled`, `rearmAlert`, `deleteAlert`, `setAlertsSound`,

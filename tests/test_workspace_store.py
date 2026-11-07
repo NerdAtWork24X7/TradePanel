@@ -276,6 +276,91 @@ class StoreTests(unittest.TestCase):
         self.assertTrue(third["id"].startswith("a-"))
         self.assertEqual(third["exchange"], "okx")
 
+    def test_indicator_alerts_are_validated(self):
+        payload = {
+            "version": 1,
+            "active": "w1",
+            "alerts": [
+                {"id": "a-10", "source": "indicator", "exchange": "binance",
+                 "market": "spot", "symbol": "btc/usdt", "timeframe": "5m",
+                 "chartId": "c1", "indicatorId": "SUPERTREND", "indicatorIndex": 2,
+                 "indicatorInputs": {"factor": 3, "atrPeriod": 10, "junk": [1]},
+                 "conditionId": "alert0", "conditionTitle": "Downtrend to Uptrend",
+                 "indicatorName": "Supertrend", "condition": "indicator",
+                 "frequency": "repeating", "note": "  watch  ", "enabled": True,
+                 "createdAt": 1700000000000},
+                # Indicator rules need no price level.
+                {"id": "a-11", "source": "indicator", "exchange": "binance",
+                 "symbol": "ETH/USDT", "chartId": "c1", "indicatorId": "rsi",
+                 "conditionId": "alert0", "price": 10},
+                # Missing chart / bad study id / missing condition are dropped.
+                {"id": "a-12", "source": "indicator", "exchange": "binance",
+                 "symbol": "ETH/USDT", "chartId": "", "indicatorId": "rsi",
+                 "conditionId": "alert0"},
+                {"id": "a-13", "source": "indicator", "exchange": "binance",
+                 "symbol": "ETH/USDT", "chartId": "c1", "indicatorId": "bad id!",
+                 "conditionId": "alert0"},
+                {"id": "a-14", "source": "indicator", "exchange": "binance",
+                 "symbol": "ETH/USDT", "chartId": "c1", "indicatorId": "rsi",
+                 "conditionId": ""},
+            ],
+            "workspaces": [{"id": "w1", "name": "One", "charts": []}],
+        }
+        saved = ws.save_store(payload)
+        loaded = ws.load_store()
+        self.assertEqual(saved, loaded)
+        alerts = loaded["alerts"]
+        self.assertEqual(len(alerts), 2)
+        first, second = alerts
+        self.assertEqual(first["source"], "indicator")
+        self.assertEqual(first["chartId"], "c1")
+        self.assertEqual(first["indicatorId"], "supertrend")
+        self.assertEqual(first["indicatorIndex"], 2)
+        self.assertEqual(first["conditionId"], "alert0")
+        self.assertEqual(first["condition"], "indicator")
+        self.assertEqual(first["conditionTitle"], "Downtrend to Uptrend")
+        self.assertEqual(first["indicatorName"], "Supertrend")
+        self.assertEqual(first["indicatorInputs"], {"factor": 3, "atrPeriod": 10})
+        self.assertEqual(first["note"], "watch")
+        self.assertNotIn("price", first)
+        self.assertEqual(second["source"], "indicator")
+        self.assertNotIn("price", second)
+
+    def test_price_alerts_still_require_a_level(self):
+        store = ws._store({
+            "alerts": [
+                {"id": "a-1", "exchange": "binance", "symbol": "BTC/USDT"},
+            ],
+            "workspaces": [{"id": "w", "charts": []}],
+        })
+        self.assertEqual(store["alerts"], [])
+
+    def test_save_alerts_persists_without_touching_workspaces(self):
+        base = {
+            "version": 1,
+            "active": "w1",
+            "alerts": [],
+            "workspaces": [{
+                "id": "w1", "name": "Keep me", "charts": [
+                    {"id": "c1", "exchange": "binance", "symbol": "BTC/USDT",
+                     "timeframe": "5m"},
+                ],
+            }],
+        }
+        ws.save_store(base)
+        saved = ws.save_alerts([
+            {"id": "a-1", "exchange": "binance", "market": "spot",
+             "symbol": "btc/usdt", "price": 69000, "condition": "crossing"},
+            {"id": "a-2", "source": "indicator", "exchange": "binance",
+             "symbol": "ETH/USDT", "chartId": "c1", "indicatorId": "rsi",
+             "conditionId": "alert0", "conditionTitle": "Bullish divergence"},
+        ])
+        self.assertEqual(len(saved), 2)
+        loaded = ws.load_store()
+        self.assertEqual(loaded["alerts"], saved)
+        self.assertEqual(loaded["workspaces"][0]["name"], "Keep me")
+        self.assertEqual(loaded["workspaces"][0]["charts"][0]["symbol"], "BTC/USDT")
+
     def test_alerts_default_to_an_empty_list(self):
         self.assertEqual(ws.default_store()["alerts"], [])
         store = ws._store({"workspaces": [{"id": "w", "charts": []}]})

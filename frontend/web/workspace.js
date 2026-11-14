@@ -4006,9 +4006,11 @@
     // pickers. Both are built by `npm run indicators` (frontend/scripts).
     var INDICATOR_ENGINE_SRC = 'indicators/engine.js';
     var INDICATOR_CATALOG_SRC = 'indicators/catalog.json';
+    var INDICATOR_MANIFEST_SRC = 'indicators/manifest.json';
     var MAX_CHART_INDICATORS = 20;
     var INDICATOR_SOURCES = ['close', 'open', 'high', 'low', 'hl2', 'hlc3', 'ohlc4', 'hlcc4', 'volume'];
     var INDICATOR_GROUPS = [
+        { id: 'custom', label: 'Custom' },
         { id: 'standard', label: 'Technical' },
         { id: 'community', label: 'Community' },
         { id: 'candlestick', label: 'Patterns' }
@@ -4017,10 +4019,25 @@
     var INDICATORS = {
         enginePromise: null,
         catalogPromise: null,
+        manifestPromise: null,
         catalog: null,
         catalogById: null,
         lookup: null
     };
+
+    /** Content hash written by `npm run indicators`; '' when unavailable. */
+    function loadIndicatorManifest() {
+        if (INDICATORS.manifestPromise) return INDICATORS.manifestPromise;
+        INDICATORS.manifestPromise = fetch(INDICATOR_MANIFEST_SRC, { cache: 'no-store' })
+            .then(function (response) {
+                return response.ok ? response.json() : null;
+            })
+            .then(function (manifest) {
+                return manifest && manifest.version ? String(manifest.version) : '';
+            })
+            .catch(function () { return ''; });
+        return INDICATORS.manifestPromise;
+    }
 
     function loadIndicatorEngine() {
         if (window.TradePanelIndicators) return Promise.resolve(window.TradePanelIndicators);
@@ -4028,20 +4045,22 @@
             return Promise.reject(new Error('Lightweight Charts is not loaded'));
         }
         if (INDICATORS.enginePromise) return INDICATORS.enginePromise;
-        INDICATORS.enginePromise = new Promise(function (resolve, reject) {
-            var script = document.createElement('script');
-            script.src = INDICATOR_ENGINE_SRC;
-            script.async = true;
-            script.onload = function () {
-                if (window.TradePanelIndicators) resolve(window.TradePanelIndicators);
-                else reject(new Error('the indicator engine loaded without a registry'));
-            };
-            script.onerror = function () {
-                INDICATORS.enginePromise = null;
-                script.remove();
-                reject(new Error('could not load ' + INDICATOR_ENGINE_SRC));
-            };
-            document.head.appendChild(script);
+        INDICATORS.enginePromise = loadIndicatorManifest().then(function (version) {
+            return new Promise(function (resolve, reject) {
+                var script = document.createElement('script');
+                script.src = INDICATOR_ENGINE_SRC + (version ? '?v=' + encodeURIComponent(version) : '');
+                script.async = true;
+                script.onload = function () {
+                    if (window.TradePanelIndicators) resolve(window.TradePanelIndicators);
+                    else reject(new Error('the indicator engine loaded without a registry'));
+                };
+                script.onerror = function () {
+                    INDICATORS.enginePromise = null;
+                    script.remove();
+                    reject(new Error('could not load ' + INDICATOR_ENGINE_SRC));
+                };
+                document.head.appendChild(script);
+            });
         });
         return INDICATORS.enginePromise;
     }
@@ -4049,7 +4068,7 @@
     function loadIndicatorCatalog() {
         if (INDICATORS.catalog) return Promise.resolve(INDICATORS.catalog);
         if (INDICATORS.catalogPromise) return INDICATORS.catalogPromise;
-        INDICATORS.catalogPromise = fetch(INDICATOR_CATALOG_SRC, { cache: 'force-cache' })
+        INDICATORS.catalogPromise = fetch(INDICATOR_CATALOG_SRC, { cache: 'no-store' })
             .then(function (response) {
                 if (!response.ok) throw new Error('indicator catalog unavailable (HTTP ' + response.status + ')');
                 return response.json();
@@ -4295,7 +4314,11 @@
     }
 
     function indicatorChartContext(entry) {
-        var context = { timeframe: engineTimeframe(entry.config.timeframe), lastBarConfirmed: true };
+        var context = {
+            timeframe: engineTimeframe(entry.config.timeframe),
+            lastBarConfirmed: true,
+            mintick: entry.minMove > 0 ? entry.minMove : undefined
+        };
         try {
             var range = entry.chart.timeScale().getVisibleRange();
             if (range) {
@@ -4459,7 +4482,11 @@
             if (!Array.isArray(values) || !values.length) return;
             if (plot.display === 'none') return;
             if (plot.visible === false) return;
-            if (typeof plot.visible === 'string' && runtime.inputs[plot.visible] === false) return;
+            if (typeof plot.visible === 'string') {
+                if (runtime.inputs[plot.visible] === false) return;
+                var visibility = runtime.result && runtime.result.visibility;
+                if (visibility && visibility[plot.visible] === false) return;
+            }
             out.push({ id: plot.id, title: plot.title || plot.id, color: plot.color || '', values: values });
         });
         runtime.plots = out;
@@ -5128,7 +5155,7 @@
         var status = el('div', 'ind-status', 'Loading indicator catalog…');
         wrap.appendChild(status);
 
-        var state = { query: '', group: 'standard' };
+        var state = { query: '', group: 'custom' };
 
         /** How many instances of each study are on the chart right now. */
         function appliedCounts() {
@@ -5260,6 +5287,9 @@
         updateCount();
         loadIndicatorCatalog().then(function () {
             status.remove();
+            if (!(INDICATORS.catalog || []).some(function (item) { return item.group === 'custom'; })) {
+                state.group = 'standard';
+            }
             render();
             // Warm the engine so added studies render (and show their real
             // plot colours) without a visible delay.
@@ -6561,6 +6591,7 @@
        (percentage / indexed modes remap prices), so the integration projects
        at the boundary and reprojects when the reference price moves. */
     var ChartDrawings = window.ChartDrawings;
+    var DrawingSettings = window.DrawingSettings;
 
     function drawPriceSpace(entry) {
         return {
@@ -7044,6 +7075,12 @@
         bar.appendChild(dashes);
 
         bar.appendChild(el('span', 'dsb-sep'));
+        var settings = styleButton(bar, '', 'Drawing settings', function () {
+            openDrawingSettings(entry, primary);
+        });
+        settings.classList.add('dsb-icon');
+        settings.appendChild(panelIcon('dt-settings'));
+        bar.appendChild(el('span', 'dsb-sep'));
         var locked = !!primary.locked;
         var lock = styleButton(bar, '', locked ? 'Unlock drawing' : 'Lock drawing', function () {
             selected.forEach(function (drawing) {
@@ -7069,6 +7106,340 @@
         });
         close.classList.add('dsb-icon');
         close.appendChild(panelIcon('tab-close'));
+    }
+
+    /* ── Per-tool drawing settings ───────────────────────────────────────
+       The drawing library exposes one flat style object; DrawingSettings
+       maps each tool kind to only the fields that tool uses (levels for a
+       Fib, font/border for a Text, sizing for a Position, profile inputs for
+       a Volume Profile, and so on). Every change previews live on the chart;
+       Cancel restores the drawing exactly as it was. */
+
+    function drawingStyleDefaults(kind) {
+        var DW = window.LightweightChartsDrawing;
+        if (DW && typeof DW.factoryStyleFor === 'function') {
+            try { return DW.factoryStyleFor(kind) || {}; } catch (err) { /* fall through */ }
+        }
+        return {};
+    }
+
+    function styleValue(style, defaults, key) {
+        var value = DrawingSettings.get(style || {}, key);
+        return value === undefined ? DrawingSettings.get(defaults || {}, key) : value;
+    }
+
+    function openDrawingSettings(entry, drawing) {
+        if (!entry || !entry.drawMgr || !drawing) return;
+        var kind = drawing.kind;
+        var label = ChartDrawings.kindLabel(kind) || kind;
+        var id = drawing.id;
+        var original = clone(drawing);
+        var draft = clone(drawing);
+        var defaults = drawingStyleDefaults(kind);
+        var sections = DrawingSettings.sections(kind);
+        var previewTimer = null;
+        var settled = false;
+
+        function current() {
+            return entry.drawMgr && entry.drawMgr.get(id);
+        }
+
+        function writeStyle(key, value) {
+            draft.style = DrawingSettings.set(draft.style || {}, key, value);
+        }
+
+        function preview() {
+            var live = current();
+            if (!live || entry.destroyed) return;
+            entry.drawSyncing = true;
+            try {
+                entry.drawMgr.update(Object.assign({}, live, {
+                    style: clone(draft.style || {}),
+                    text: draft.text,
+                    glyph: draft.glyph
+                }));
+            } finally {
+                entry.drawSyncing = false;
+            }
+        }
+
+        function schedulePreview() {
+            clearTimeout(previewTimer);
+            previewTimer = setTimeout(function () {
+                previewTimer = null;
+                if (!entry.destroyed) preview();
+            }, 120);
+        }
+
+        function restore() {
+            clearTimeout(previewTimer);
+            previewTimer = null;
+            var live = current();
+            if (!live || entry.destroyed) return;
+            entry.drawSyncing = true;
+            try {
+                entry.drawMgr.update(original);
+            } finally {
+                entry.drawSyncing = false;
+            }
+            commitDrawings(entry);
+            updateDrawStyleBar(entry);
+        }
+
+        function commit() {
+            clearTimeout(previewTimer);
+            previewTimer = null;
+            commitDrawings(entry);
+            scheduleSave();
+            updateDrawStyleBar(entry);
+        }
+
+        var body = el('div', 'ind-settings-dialog');
+        var pane = el('div', 'ind-settings-pane');
+        body.appendChild(pane);
+
+        function controlFor(field) {
+            var value;
+            if (field.key === '@text') value = draft.text == null ? '' : draft.text;
+            else if (field.key === '@glyph') value = draft.glyph == null ? '' : draft.glyph;
+            else value = styleValue(draft.style, defaults, field.key);
+
+            if (field.type === 'toggle') {
+                var toggle = el('input');
+                toggle.type = 'checkbox';
+                toggle.checked = value === true;
+                toggle.addEventListener('change', function () {
+                    writeStyle(field.key, toggle.checked);
+                    schedulePreview();
+                });
+                return toggle;
+            }
+            if (field.type === 'select') {
+                var select = el('select');
+                (field.options || []).forEach(function (option) {
+                    var item = el('option', null, option.label);
+                    item.value = String(option.value);
+                    select.appendChild(item);
+                });
+                select.value = value == null ? '' : String(value);
+                select.addEventListener('change', function () {
+                    var selected = (field.options || []).filter(function (option) {
+                        return String(option.value) === select.value;
+                    })[0];
+                    writeStyle(field.key, selected ? selected.value : select.value);
+                    schedulePreview();
+                });
+                return select;
+            }
+            if (field.type === 'color') {
+                var color = el('input');
+                var text = typeof value === 'string' ? value : '';
+                color.type = /^#[0-9a-fA-F]{3,8}$/.test(text) ? 'color' : 'text';
+                color.value = text;
+                color.title = 'Hex or CSS colour';
+                color.addEventListener('input', function () {
+                    if (color.type !== 'color' && !/^(#[0-9a-fA-F]{3,8}|rgba?\(|transparent$)/.test(color.value)) return;
+                    writeStyle(field.key, color.value);
+                    schedulePreview();
+                });
+                return color;
+            }
+            if (field.type === 'number') {
+                var number = el('input');
+                number.type = 'number';
+                if (field.min != null) number.min = String(field.min);
+                if (field.max != null) number.max = String(field.max);
+                number.step = String(field.step == null ? 1 : field.step);
+                number.value = value == null || !isFinite(Number(value)) ? '' : String(value);
+                number.addEventListener('input', function () {
+                    var parsed = Number(number.value);
+                    if (number.value === '' || !isFinite(parsed)) return;
+                    writeStyle(field.key, parsed);
+                    schedulePreview();
+                });
+                return number;
+            }
+            if (field.type === 'textarea') {
+                var area = el('textarea');
+                area.rows = 3;
+                area.value = value == null ? '' : String(value);
+                area.addEventListener('input', function () {
+                    if (field.key === '@text') draft.text = area.value;
+                    else if (field.key === '@glyph') draft.glyph = area.value;
+                    schedulePreview();
+                });
+                return area;
+            }
+            var input = el('input');
+            input.type = 'text';
+            input.value = value == null ? '' : String(value);
+            input.addEventListener('input', function () {
+                if (field.key === '@text') draft.text = input.value;
+                else if (field.key === '@glyph') draft.glyph = input.value;
+                else writeStyle(field.key, input.value);
+                schedulePreview();
+            });
+            return input;
+        }
+
+        function renderLevels(field) {
+            var box = el('div', 'dset-levels');
+            if (!Array.isArray(draft.style.levels)) {
+                var seed = DrawingSettings.get(defaults, 'levels');
+                draft.style.levels = Array.isArray(seed) ? clone(seed) : [];
+            }
+            var levels = draft.style.levels;
+
+            function commitLevels() {
+                draft.style.levels = levels;
+                schedulePreview();
+            }
+
+            function addRow(level, index) {
+                var row = el('div', 'dset-level-row');
+                var show = el('input');
+                show.type = 'checkbox';
+                show.checked = level.visible !== false;
+                show.title = 'Show level';
+                show.setAttribute('aria-label', 'Show level ' + index);
+                show.addEventListener('change', function () {
+                    levels[index] = Object.assign({}, levels[index], { visible: show.checked });
+                    commitLevels();
+                });
+                row.appendChild(show);
+
+                var coeff = el('input', 'dset-level-coeff');
+                coeff.type = 'number';
+                coeff.step = '0.001';
+                coeff.value = String(level.coeff);
+                coeff.title = 'Level value';
+                coeff.setAttribute('aria-label', 'Level ' + index + ' value');
+                coeff.addEventListener('input', function () {
+                    var parsed = Number(coeff.value);
+                    if (coeff.value === '' || !isFinite(parsed)) return;
+                    levels[index] = Object.assign({}, levels[index], { coeff: parsed });
+                    commitLevels();
+                });
+                row.appendChild(coeff);
+
+                var swatch = el('input', 'dset-level-color');
+                var levelColor = typeof level.color === 'string' ? level.color : '';
+                swatch.type = /^#[0-9a-fA-F]{3,8}$/.test(levelColor) ? 'color' : 'text';
+                swatch.value = levelColor;
+                swatch.title = 'Level colour';
+                swatch.setAttribute('aria-label', 'Level ' + index + ' colour');
+                swatch.addEventListener('input', function () {
+                    levels[index] = Object.assign({}, levels[index], { color: swatch.value });
+                    commitLevels();
+                });
+                row.appendChild(swatch);
+
+                var remove = el('button', 'ind-icon-btn danger', '×');
+                remove.type = 'button';
+                remove.title = 'Remove level';
+                remove.setAttribute('aria-label', 'Remove level ' + index);
+                remove.addEventListener('click', function () {
+                    levels.splice(index, 1);
+                    commitLevels();
+                    renderPane();
+                });
+                row.appendChild(remove);
+                box.appendChild(row);
+            }
+
+            var head = el('div', 'dset-levels-head');
+            head.appendChild(el('span', '', ''));
+            head.appendChild(el('span', '', 'Value'));
+            head.appendChild(el('span', '', 'Colour'));
+            head.appendChild(el('span', '', ''));
+            box.appendChild(head);
+            levels.forEach(addRow);
+
+            var add = el('button', 'btn-ghost dset-add-level', '+ Add level');
+            add.type = 'button';
+            add.addEventListener('click', function () {
+                var last = levels[levels.length - 1];
+                var coeff = last && isFinite(last.coeff) ? Number(last.coeff) + 0.1 : 0;
+                levels.push({
+                    coeff: Math.round(coeff * 1000) / 1000,
+                    color: (styleValue(draft.style, defaults, 'color') || '#2962ff'),
+                    visible: true
+                });
+                commitLevels();
+                renderPane();
+            });
+            box.appendChild(add);
+            return box;
+        }
+
+        function renderField(field) {
+            if (field.type === 'levels') {
+                var levelsRow = el('div', 'dset-field-wide');
+                levelsRow.appendChild(el('span', 'ind-field-label', field.label));
+                levelsRow.appendChild(renderLevels(field));
+                return levelsRow;
+            }
+            var row = el('label', 'ind-field');
+            row.appendChild(el('span', 'ind-field-label', field.label));
+            row.appendChild(controlFor(field));
+            return row;
+        }
+
+        function renderPane() {
+            pane.innerHTML = '';
+            sections.forEach(function (group) {
+                var box = el('div', 'ind-settings');
+                if (sections.length > 1) {
+                    box.appendChild(el('div', 'ind-group-title', group.label));
+                }
+                var list = el('div', 'ind-group');
+                group.fields.forEach(function (field) {
+                    list.appendChild(renderField(field));
+                });
+                box.appendChild(list);
+                pane.appendChild(box);
+            });
+        }
+
+        var defaultsButton = el('button', 'btn-ghost', 'Reset');
+        defaultsButton.type = 'button';
+        defaultsButton.title = 'Restore the factory style of this tool';
+        defaultsButton.addEventListener('click', function () {
+            draft.style = clone(defaults);
+            preview();
+            renderPane();
+        });
+        var cancel = el('button', 'btn-ghost', 'Cancel');
+        cancel.addEventListener('click', function () {
+            settled = true;
+            restore();
+            closeModal();
+        });
+        var apply = el('button', 'btn-ghost primary', 'Apply');
+        apply.addEventListener('click', function () {
+            settled = true;
+            preview();
+            commit();
+            closeModal();
+        });
+        var foot = el('div');
+        foot.style.display = 'flex';
+        foot.style.gap = '8px';
+        foot.style.marginLeft = 'auto';
+        foot.append(defaultsButton, cancel, apply);
+
+        openModal({
+            title: label + ' settings',
+            sub: entry.config.symbol + ' · ' + entry.config.timeframe,
+            body: body,
+            foot: foot,
+            onClose: function () {
+                if (settled) return;
+                settled = true;
+                restore();
+            }
+        });
+        renderPane();
     }
 
     /* ── Tool palette ───────────────────────────────────────────────────── */

@@ -1123,6 +1123,21 @@
         .ind-style-controls { display: flex; align-items: center; gap: 8px; }
         .ind-style-controls input[type="color"] { width: 30px; height: 28px; padding: 2px; cursor: pointer; }
         .ind-style-controls select { width: 72px; }
+        .ind-settings-pane textarea {
+            width: 100%; min-height: 64px; padding: 6px 8px; resize: vertical; border-radius: 6px;
+            border: 1px solid var(--control-border); background: var(--field-bg); color: var(--text-2);
+            font-family: var(--font-mono); font-size: var(--text-sm); outline: none;
+        }
+        .ind-settings-pane textarea:focus { border-color: var(--focus); box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.12); }
+        .dset-field-wide { display: flex; flex-direction: column; gap: 6px; }
+        .dset-levels { display: flex; flex-direction: column; gap: 4px; }
+        .dset-levels-head { display: grid; grid-template-columns: 18px 1fr 46px 24px; gap: 8px; padding: 0 2px; font-size: var(--text-xs); color: var(--text-3); font-family: var(--font-mono); }
+        .dset-level-row { display: grid; grid-template-columns: 18px 1fr 46px 24px; gap: 8px; align-items: center; }
+        .dset-level-row input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+        .dset-level-row input[type="number"], .dset-level-row input[type="text"] { height: 26px; width: 100%; padding: 0 6px; }
+        .dset-level-row input[type="color"] { width: 46px; height: 26px; padding: 2px; cursor: pointer; }
+        .dset-level-row .ind-icon-btn { width: 24px; height: 26px; }
+        .dset-add-level { align-self: flex-start; margin-top: 2px; font-size: var(--text-xs); padding: 3px 8px; }
         .ind-style-controls input[type="checkbox"] { width: 16px; height: 16px; }
         .ind-style-controls .ind-icon-btn { width: 26px; height: 26px; border: 1px solid var(--control-border); }
         .ind-alert-row {
@@ -1584,6 +1599,7 @@
     <script src="icons.js"></script>
     <script src="lightweight-charts-drawing.js"></script>
     <script src="chart_drawings.js"></script>
+    <script src="drawing_settings.js"></script>
     <script src="chart_sync.js"></script>
     <script src="position_tool.js"></script>
     <script src="alerts.js"></script>

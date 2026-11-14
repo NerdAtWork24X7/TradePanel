@@ -95,6 +95,7 @@ export interface IndicatorComputation {
 
 const ENGINE_SRC = "/indicators/engine.js";
 const CATALOG_SRC = "/indicators/catalog.json";
+const MANIFEST_SRC = "/indicators/manifest.json";
 const CHARTS_SRC = "/lightweight-charts.standalone.production.js";
 
 declare global {
@@ -107,7 +108,19 @@ declare global {
 let enginePromise: Promise<IndicatorEngine> | null = null;
 let chartsPromise: Promise<void> | null = null;
 let catalogPromise: Promise<IndicatorCatalogEntry[]> | null = null;
+let manifestPromise: Promise<string> | null = null;
 let lookup: Map<string, RegistryEntry> | null = null;
+
+/** Content hash written by the indicator build; "" when unavailable. */
+function loadIndicatorVersion(): Promise<string> {
+  if (manifestPromise) return manifestPromise;
+  manifestPromise = fetch(MANIFEST_SRC, { cache: "no-store" })
+    .then((response) => (response.ok ? response.json() : null))
+    .then((manifest: { version?: unknown } | null) =>
+      typeof manifest?.version === "string" ? manifest.version : "")
+    .catch(() => "");
+  return manifestPromise;
+}
 
 /** The engine's renderer resolves its series classes from the LWC global. */
 function loadChartsRuntime(): Promise<void> {
@@ -136,28 +149,31 @@ export async function loadIndicatorEngine(): Promise<IndicatorEngine> {
   await loadChartsRuntime();
   if (window.TradePanelIndicators) return window.TradePanelIndicators;
   if (enginePromise) return enginePromise;
-  enginePromise = new Promise<IndicatorEngine>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = ENGINE_SRC;
-    script.async = true;
-    script.dataset.indicatorEngine = "1";
-    script.onload = () => {
-      if (window.TradePanelIndicators) resolve(window.TradePanelIndicators);
-      else reject(new Error("The indicator engine loaded without a registry."));
-    };
-    script.onerror = () => {
-      enginePromise = null;
-      script.remove();
-      reject(new Error(`Could not load ${ENGINE_SRC}.`));
-    };
-    document.head.appendChild(script);
-  });
+  enginePromise = (async () => {
+    const version = await loadIndicatorVersion();
+    return new Promise<IndicatorEngine>((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = ENGINE_SRC + (version ? `?v=${encodeURIComponent(version)}` : "");
+      script.async = true;
+      script.dataset.indicatorEngine = "1";
+      script.onload = () => {
+        if (window.TradePanelIndicators) resolve(window.TradePanelIndicators);
+        else reject(new Error("The indicator engine loaded without a registry."));
+      };
+      script.onerror = () => {
+        enginePromise = null;
+        script.remove();
+        reject(new Error(`Could not load ${ENGINE_SRC}.`));
+      };
+      document.head.appendChild(script);
+    });
+  })();
   return enginePromise;
 }
 
 export function loadIndicatorCatalog(): Promise<IndicatorCatalogEntry[]> {
   if (catalogPromise) return catalogPromise;
-  catalogPromise = fetch(CATALOG_SRC, { cache: "force-cache" })
+  catalogPromise = fetch(CATALOG_SRC, { cache: "no-store" })
     .then((response) => {
       if (!response.ok) throw new Error(`Indicator catalog unavailable (HTTP ${response.status}).`);
       return response.json() as Promise<IndicatorCatalogEntry[]>;

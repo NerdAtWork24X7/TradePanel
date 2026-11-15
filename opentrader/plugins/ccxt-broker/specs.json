@@ -1,0 +1,87 @@
+{
+  "version": "0.1.0",
+  "publisher": "TradePanel",
+  "homepage": "https://github.com/NerdAtWork24X7/TradePanel",
+  "venues": [
+    {
+      "id": "binance",
+      "code": "BINANCE",
+      "name": "Binance",
+      "markets": { "futures": "binanceusdm", "spot": "binance" },
+      "networks": ["testnet", "live"],
+      "passphrase": false,
+      "description": "Your Binance account in OpenTrader: spot and USD-M futures balances, positions, orders and trading from the charts.",
+      "setup": "In Binance > API Management, create an API key with Enable Reading and Enable Futures (or Enable Spot & Margin Trading) ticked, and withdrawals left off. Restrict it to this computer's IP, then paste the key and secret above. Paper orders on Binance testnet need a key created on testnet.binance.vision with Enable Futures."
+    },
+    {
+      "id": "bybit",
+      "code": "BYBIT",
+      "name": "Bybit",
+      "markets": { "futures": "bybit", "spot": "bybit" },
+      "networks": ["testnet", "live"],
+      "passphrase": false,
+      "description": "Your Bybit account in OpenTrader: spot and perpetual balances, positions, orders and trading from the charts.",
+      "setup": "In Bybit > API, create an API key with Read-Write and Contract Trading (or Spot Trading) permission, no withdrawal permission, and this computer's IP in the whitelist. Paste the key and secret above. Testnet keys come from testnet.bybit.com."
+    },
+    {
+      "id": "okx",
+      "code": "OKX",
+      "name": "OKX",
+      "markets": { "futures": "okx", "spot": "okx" },
+      "networks": ["testnet", "live"],
+      "passphrase": true,
+      "description": "Your OKX account in OpenTrader: spot and perpetual balances, positions, orders and trading from the charts.",
+      "setup": "In OKX > API, create an API key with Read and Trade permissions (not Withdraw), set a passphrase and bind this computer's IP. Paste the key, secret and passphrase above. Demo trading keys come from the demo trading section of the OKX website."
+    },
+    {
+      "id": "gate",
+      "code": "GATEIO",
+      "name": "Gate.io",
+      "markets": { "futures": "gate", "spot": "gate" },
+      "networks": ["testnet", "live"],
+      "passphrase": false,
+      "description": "Your Gate.io account in OpenTrader: spot and USDT-margined perpetual balances, positions, orders and trading from the charts.",
+      "setup": "In Gate.io > API Keys, create a key with Spot/Futures Trading and Read permissions, no withdrawal permission, and this computer's IP bound. Paste the key and secret above. Testnet keys come from the futures testnet site."
+    },
+    {
+      "id": "bitget",
+      "code": "BITGET",
+      "name": "Bitget",
+      "markets": { "futures": "bitget", "spot": "bitget" },
+      "networks": ["testnet", "live"],
+      "passphrase": true,
+      "description": "Your Bitget account in OpenTrader: spot and USDT-margined futures balances, positions, orders and trading from the charts.",
+      "setup": "In Bitget > API Management, create an API key with Read and Trade permissions (not Withdraw), set a passphrase and bind this computer's IP. Paste the key, secret and passphrase above. Demo trading uses the same key with the demo switch on Bitget's website."
+    },
+    {
+      "id": "kucoin",
+      "code": "KUCOIN",
+      "name": "KuCoin",
+      "markets": { "futures": "kucoinfutures", "spot": "kucoin" },
+      "networks": ["live"],
+      "passphrase": true,
+      "description": "Your KuCoin account in OpenTrader: spot and futures balances, positions, orders and trading from the charts.",
+      "setup": "In KuCoin > API Management, create an API key with General and Futures (or Spot) Trading permissions, no transfer permission, set a passphrase and bind this computer's IP. Paste the key, secret and passphrase above. KuCoin futures uses a separate futures account: move funds there on KuCoin before trading."
+    },
+    {
+      "id": "coinbase",
+      "code": "COINBASE",
+      "name": "Coinbase",
+      "markets": { "spot": "coinbase" },
+      "networks": ["live"],
+      "passphrase": false,
+      "description": "Your Coinbase Advanced Trade account in OpenTrader: spot balances, orders and trading from the charts.",
+      "setup": "In Coinbase Developer Platform > API keys, create a key for the Advanced Trade API with View and Trade permissions, no transfer permission, and this computer's IP in the allowlist. Paste the key name and private key above (the private key is the long secret shown once). Coinbase has no perpetual futures here: the broker trades spot."
+    },
+    {
+      "id": "kraken",
+      "code": "KRAKEN",
+      "name": "Kraken",
+      "markets": { "spot": "kraken" },
+      "networks": ["live"],
+      "passphrase": false,
+      "description": "Your Kraken account in OpenTrader: spot balances, orders and trading from the charts.",
+      "setup": "In Kraken > API, create a key with Query Funds, Query Open Orders & Trades, Create & Modify Orders and Cancel/Close Orders, and no withdrawal permission. Paste the key and private key above. Kraken exposes spot here: perpetual trading is not part of its public API for this plugin."
+    }
+  ]
+}

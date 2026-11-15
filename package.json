@@ -11,6 +11,7 @@
     "ot:install": "npm --prefix opentrader ci",
     "ot:test": "npm --prefix opentrader test",
     "ot:crypto": "node opentrader/scripts/install-crypto-plugin.mjs",
+    "ot:brokers": "node opentrader/scripts/install-broker-plugins.mjs",
     "ot:frontend:build": "npm --prefix opentrader run build"
   }
 }

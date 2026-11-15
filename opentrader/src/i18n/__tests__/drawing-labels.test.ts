@@ -4,13 +4,33 @@ import { drawingLabelFormatter } from "../drawing-labels";
 import { setDictionary } from "../translator";
 import { translatedPlotConfig, translatedStudyResult } from "../study-text";
 import type { IndicatorResult } from "oakscriptjs";
-import zhHans from "../zh-Hans.json";
 import { libraryMonthRule } from "../format";
 
 const ctx = { kind: "long-position", drawingId: "d1" };
 const fmt = (l: { id: DrawingLabel["id"]; text: string; [field: string]: unknown }) => {
   const f = drawingLabelFormatter();
   return f ? f({ ...l, ...ctx } as DrawingLabel) : "(none)";
+};
+
+/** The words these labels carry, translated as a fixture (no language ships but English). */
+const DICT = {
+  "Head": "头部",
+  "Add text": "添加文本",
+  "{0} bars": "{0} 根K线",
+  "{0}d": "{0}天",
+  "{0}h": "{0}小时",
+  "{0}m": "{0}分",
+  "distance: {0} px": "距离：{0} 像素",
+  "Vol {0}": "成交量 {0}",
+  "Target": "目标",
+  "Amount": "金额",
+  "Open PnL": "未平仓盈亏",
+  "Qty": "数量",
+  "Risk/reward ratio": "风险回报比",
+  "{0} in {1}": "{0}，用时 {1}",
+  "Strong": "强烈",
+  "Buy": "买入",
+  "Upper Band #1": "上轨 #1",
 };
 
 afterEach(() => setDictionary({}));
@@ -21,7 +41,7 @@ describe("drawing labels in the interface language (#190)", () => {
   });
 
   it("words, values kept", () => {
-    setDictionary(zhHans);
+    setDictionary(DICT);
     expect(fmt({ id: "caption", text: "Head" })).toBe("头部");
     expect(fmt({ id: "caption", text: "Add text" })).toBe("添加文本");
     expect(fmt({ id: "bars-range", text: "15 bars", bars: 15 })).toBe("15 根K线");
@@ -53,7 +73,7 @@ describe("study text in the interface language (#190)", () => {
   });
 
   it("labels, shapes and tables; what the dictionary lacks stays", () => {
-    setDictionary(zhHans, [libraryMonthRule("zh-CN")]);
+    setDictionary(DICT, [libraryMonthRule("zh-CN")]);
     const r = translatedStudyResult(result);
     expect(r.markers?.[0].text).toBe("强烈\n买入");
     expect(r.labels?.[0]).toBe(result.labels?.[0]);

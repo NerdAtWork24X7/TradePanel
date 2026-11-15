@@ -148,15 +148,51 @@ export const pluginBroker = createRoot(() => {
   const tradabilityOf = (paneId: number | null): Tradability => {
     version();
     const s = status();
-    if (!s?.active) return { ok: false, reason: "launch", title: translate("Connect a broker"), text: translate("Connect a broker plugin from the Trade menu to trade.") };
+    if (!HAS_TAURI)
+      return {
+        ok: false,
+        reason: "launch",
+        title: translate("Trading needs the desktop app"),
+        text: translate("Broker plugins run in the desktop app, not in a browser tab."),
+        fix: "desktop",
+      };
+    if (!s?.active) {
+      return {
+        ok: false,
+        reason: "launch",
+        title: translate("Connect a broker"),
+        text: translate("Connect a broker plugin from the Trade menu to trade."),
+        fix: (s?.brokers.length ?? 0) > 0 ? "connect" : "install",
+      };
+    }
     if (!s.pluginConnected || !s.state?.connected)
-      return { ok: false, reason: "launch", title: translate("Broker not connected"), text: translate("The broker plugin is not connected. Check it in Settings > Plugins.") };
+      return {
+        ok: false,
+        reason: "launch",
+        title: translate("Broker not connected"),
+        text: translate("The broker plugin is not connected. Connect it in the Exchanges tab under the chart."),
+        fix: "exchanges",
+      };
     const sym = symbolOf(paneId);
     if (!sym) return { ok: false, reason: "launch", title: "", text: translate("Select a chart to trade its symbol.") };
     const t = tickerOf(sym);
     if (t === undefined) return { ok: false, reason: "loading", title: "", text: "" };
-    if (t === null) return { ok: false, reason: "symbol", title: "", text: translate("This broker does not trade the chart's symbol. Map it in Settings > Plugins.") };
-    if (!s.tradingEnabled) return { ok: false, reason: "symbol", title: translate("Trading is off"), text: translate("Turn trading on in the Trade menu to place orders.") };
+    if (t === null)
+      return {
+        ok: false,
+        reason: "symbol",
+        title: "",
+        text: translate("This broker does not trade the chart's symbol. Map it in the Exchanges tab under the chart."),
+        fix: "exchanges",
+      };
+    if (!s.tradingEnabled)
+      return {
+        ok: false,
+        reason: "symbol",
+        title: translate("Trading is off"),
+        text: translate("Turn trading on in the Trade menu, or in the broker's card in the Exchanges tab."),
+        fix: "exchanges",
+      };
     return { ok: true, reason: "ok", title: "", text: "" };
   };
 

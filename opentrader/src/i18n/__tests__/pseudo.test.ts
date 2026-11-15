@@ -44,10 +44,8 @@ describe("the pseudo-language (#289)", () => {
     expect(translateWith("{0} of {1}", 2, 9)).toBe(pseudo("{0} of {1}").replace("{0}", "2").replace("{1}", "9"));
   });
 
-  it("is registered without a dictionary file, in the menu of a development build", () => {
-    const l = languageEntry("en-XA");
-    expect(l?.pseudo).toBe(true);
-    expect(l?.partial).toBeUndefined();
-    expect(menuLanguages().some((x) => x.id === "en-XA")).toBe(import.meta.env.DEV);
+  it("ships no other interface language", () => {
+    expect(languageEntry("en-XA")).toBeUndefined();
+    expect(menuLanguages().map((l) => l.id)).toEqual(["en"]);
   });
 });

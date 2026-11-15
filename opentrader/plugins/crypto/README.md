@@ -20,13 +20,18 @@ TradePanel's crypto side, as an OpenTrader data + broker plugin (Plugin API 2):
 node scripts/install-crypto-plugin.mjs          # copies the plugin, builds its .venv, enables it
 ```
 
-Close OpenTrader first: it rewrites `plugins.json` on exit. Start the app; the plugin
-appears under **Settings > Plugins** and its exchanges in the symbol search. To install it
-by hand instead, package it (`python3 plugins/crypto/build.py`) and use **Settings >
-Plugins > Install from file**; the plugin then needs Python 3.10+ with the packages in
-`requirements.txt` (the app prefers a `.venv` inside the plugin's folder).
+Close OpenTrader first: it rewrites `plugins.json` on exit. Start the app; the plugin's
+exchanges and the Hyperliquid broker appear in the **Exchanges** tab under the chart (its
+settings too), and its exchanges in the symbol search. To install it by hand instead,
+package it (`python3 plugins/crypto/build.py`) and use **Settings > Plugins > Install from
+file**; the plugin then needs Python 3.10+ with the packages in `requirements.txt` (the app
+prefers a `.venv` inside the plugin's folder).
 
 ## Settings
+
+The fields below are in the **Exchanges** tab under the chart: choose **Hyperliquid**, then
+fill them in and press **Apply**. (Settings > Plugins leaves the plugin out: it is a venue
+plugin, configured there.)
 
 | Key | Meaning |
 |---|---|
@@ -55,5 +60,6 @@ connection file (`--connection-file`), which is what the `external` runtime in
 ## Limits
 
 - Hyperliquid **perpetuals** trade; spot trading is not wired (market data includes HL spot).
+  The other eight venues trade through their own broker plugins, `opentrader/plugins/ccxt-broker`.
 - The broker shows the account's perp balance in USDC, one account per wallet.
 - `data.bars` paginates ccxt history at 1000 bars per request (80 pages at most).

@@ -62,3 +62,8 @@ BACKLOG.md
 docs/PERFORMANCE.md
 plugins/*/dist/
 plugins/dist/
+
+# Staged AI runtime (npm run ai:runtime): build artifact
+src-tauri/ai-runtime/*
+!src-tauri/ai-runtime/README.md
+ai-runtime/node_modules/

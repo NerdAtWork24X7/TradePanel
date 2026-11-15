@@ -31,8 +31,19 @@ import { ALL_CAPABILITIES, type TradingCapabilities } from "./capabilities";
 import { DEFAULT_REPLAY_SETTINGS, ReplayAccount, type ReplayAccountSnapshot, type ReplaySettings } from "./replay-account";
 import type { OrderRequest, TradingEvent, TradingExecution, TradingOrder, TradingPosition, TradingQuote } from "./types";
 
+/** The one place that settles an untradable ticket: a broker plugin to install or connect, the Exchanges tab
+ *  (the broker's card: keys, Connect, trading switch, symbol map), or the desktop app, where plugins run. */
+export type TicketFix = "desktop" | "install" | "connect" | "exchanges";
+
 /** What the order ticket shows instead of the form when trading is off. */
-export type Tradability = { ok: boolean; reason: "ok" | "launch" | "symbol" | "loading"; title: string; text: string };
+export type Tradability = {
+  ok: boolean;
+  reason: "ok" | "launch" | "symbol" | "loading";
+  title: string;
+  text: string;
+  /** The ticket's empty state offers this; nothing when there is nothing to click (no chart, still loading). */
+  fix?: TicketFix;
+};
 
 /** End of a session with trades: the "Congrats, trader!" / "Keep training" dialog. */
 export type SessionResult = {

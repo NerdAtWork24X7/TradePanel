@@ -795,3 +795,225 @@
   align-items: center;
   gap: 8px;
 }
+
+/* Analyze chart: the agent's tool steps and its validated trade card. */
+.asst-steps {
+  /* Long/short colours with an AA contrast on the panel background in both themes. */
+  --plan-up: var(--color-content-primary-positive, #089981);
+  --plan-down: var(--color-content-primary-danger, #f23645);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.asst-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--color-divider, var(--color-cold-gray-800));
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.asst-step .asst-step-dot {
+  flex: 0 0 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--color-brand, #2962ff);
+  animation: asst-blink 1.2s infinite ease-in-out;
+}
+.asst-step.is-done .asst-step-dot {
+  background-color: var(--plan-up);
+  animation: none;
+}
+.asst-step.is-failed {
+  border-color: var(--plan-down);
+  color: var(--plan-down);
+}
+.asst-step.is-failed .asst-step-dot {
+  background-color: var(--plan-down);
+  animation: none;
+}
+.asst-plan {
+  --plan-up: var(--color-content-primary-positive, #089981);
+  --plan-down: var(--color-content-primary-danger, #f23645);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--plan-up) 45%, transparent);
+  border-inline-start-width: 3px;
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--plan-up) 10%, transparent), transparent 70%),
+    var(--color-bg-highlight);
+}
+/* The light theme's danger red is too light for text: the bold step keeps AA. */
+html.theme-light .asst-plan,
+html.theme-light .asst-steps {
+  --plan-down: var(--color-content-primary-danger-bold, #b22833);
+}
+.asst-plan.is-short {
+  border-color: color-mix(in srgb, var(--plan-down) 45%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--plan-down) 10%, transparent), transparent 70%),
+    var(--color-bg-highlight);
+}
+.asst-plan-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.asst-plan-side {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--plan-up);
+}
+.asst-plan.is-short .asst-plan-side {
+  color: var(--plan-down);
+}
+.asst-plan-prob {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+.asst-plan-prob b {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+.asst-plan-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+}
+.asst-plan-rows > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.asst-plan-rows dt {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--color-text-secondary);
+}
+.asst-plan-rows dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.asst-plan-rows dd.is-target {
+  color: var(--plan-up);
+}
+.asst-plan-rows dd.is-risk {
+  color: var(--plan-down);
+}
+.asst-plan-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--color-text-secondary);
+}
+.asst-plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.asst-plan-basis {
+  margin-inline-start: auto;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--color-bg-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+/* Analyze chart: the runtime badge, callouts and the one-press start. */
+.asst-analyst-heading {
+  min-width: 0;
+}
+.asst-runtime {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+.asst-runtime-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--color-content-primary-positive, #089981);
+}
+.asst-runtime.is-busy .asst-runtime-dot {
+  background-color: var(--color-brand, #2962ff);
+  animation: asst-blink 1.2s infinite ease-in-out;
+}
+.asst-runtime.is-error .asst-runtime-dot {
+  background-color: var(--color-content-primary-danger, #f23645);
+}
+.asst-analyst-sep {
+  color: var(--color-cold-gray-450);
+}
+.asst-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-divider, var(--color-cold-gray-800));
+  border-radius: 8px;
+  background: var(--color-bg-highlight);
+}
+.asst-callout p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-text-secondary);
+}
+.asst-callout.is-error {
+  border-color: color-mix(in srgb, var(--color-content-primary-danger, #f23645) 45%, transparent);
+}
+.asst-callout.is-error p {
+  color: var(--color-content-primary-danger, #f23645);
+}
+.asst-form-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.asst-runtime-note {
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+.asst-analyst-start .asst-primary {
+  flex: 1 1 auto;
+  min-height: 32px;
+}
+/* The light theme's danger red is too light for 12 px text (AA): use its bold step. */
+html.theme-light .asst-callout.is-error {
+  border-color: color-mix(in srgb, var(--color-content-primary-danger-bold, #b22833) 45%, transparent);
+}
+html.theme-light .asst-callout.is-error p {
+  color: var(--color-content-primary-danger-bold, #b22833);
+}

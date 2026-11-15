@@ -34,6 +34,7 @@ import type { OrderType } from "../../data/trading/types";
 import { fmtPrice, tickerOf } from "./format";
 import { describeTicket } from "./ticket";
 import { createTicketModel } from "./ticket-model";
+import { TicketEmpty } from "./TicketEmpty";
 import { ExitInput, PriceInput, QtyInput } from "./TicketFields";
 import { ExitsSection, FieldTip, TicketSettingsMenu } from "./TicketSettingsMenu";
 import { CloseIcon } from "./icons";
@@ -177,14 +178,7 @@ function DomShell() {
       <TicketTabs />
       <Show
         when={state().ok || state().reason === "loading"}
-        fallback={
-          <div class="trd-tk-empty">
-            <Show when={state().title}>
-              <div class="trd-tk-empty-title">{state().title}</div>
-            </Show>
-            <div class="trd-tk-empty-text">{state().text}</div>
-          </div>
-        }
+        fallback={<TicketEmpty state={state()} />}
       >
         <DomPanel />
       </Show>
@@ -248,14 +242,7 @@ function TicketBody(props: { floating: boolean }) {
 
       <Show
         when={state().ok || state().reason === "loading"}
-        fallback={
-          <div class="trd-tk-empty">
-            <Show when={state().title}>
-              <div class="trd-tk-empty-title">{state().title}</div>
-            </Show>
-            <div class="trd-tk-empty-text">{state().text}</div>
-          </div>
-        }
+        fallback={<TicketEmpty state={state()} />}
       >
         <div class="trd-tk-scroll">
           <Show when={!d().editing}>

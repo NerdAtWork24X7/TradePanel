@@ -349,6 +349,9 @@ fn apply(app: &AppHandle) {
         stop_process(app, &id);
     }
     changed(app);
+    // The broker list (every installed broker plugin, on or off, and the exchange each serves) goes out
+    // with the next broker tick.
+    broker::changed(app);
 }
 
 fn stop_process(app: &AppHandle, id: &str) {

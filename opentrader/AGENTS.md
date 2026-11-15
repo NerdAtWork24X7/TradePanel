@@ -27,14 +27,23 @@ each ships its own agent guide in `skills/`.
 ## TradePanel additions
 
 - `plugins/crypto/` — the bundled crypto data + Hyperliquid broker plugin (Python, Plugin API 2).
+- `plugins/ccxt-broker/` — one broker-only plugin per exchange (Binance, Bybit, OKX, Gate.io,
+  Bitget, KuCoin, Coinbase, Kraken) over ccxt. `specs.json` is the venue catalog;
+  `manifests.py --write` generates `manifests.json` (the installer and `build.py` read it);
+  `scripts/install-broker-plugins.mjs` installs all of them with one shared venv. Tickers are
+  whole OpenTrader symbols, the same the crypto datafeed serves.
   `python3 -m unittest discover -s plugins/crypto/tests` (Windows: `python`) runs its offline
   protocol and mapping tests. A manifest setting of type `secret` is stored in the OS
   credential store (`plugins::read_secret` / `store_secret`) and only sent to the plugin in
   `plugin.configure`. A `process` runtime entry ending in `.py` runs under the plugin's
   `.venv` when one is present (`plugins::plugin_command`).
-- `src-tauri/src/analyst.rs` + `src/window/assistant/ChartAnalyst.tsx` — the chart analyst.
-  The window renders the layout with `layoutSnapshot`; Rust holds the provider URL/model/key
-  and streams the OpenAI-compatible answer. Never accept a plain-HTTP remote base URL.
+- `src-tauri/src/pi/` + `src/window/assistant/ChartAnalyst.tsx` — the chart analyst runs the
+  bundled Pi coding agent (`ai-runtime/`, staged by `npm run ai:runtime`) as a read-only RPC
+  child: five `panel_*` tools, a version-1 snapshot, no built-in tools. The window renders the
+  layout with `layoutSnapshot` and sends the snapshot; Rust validates it, owns the provider
+  key and streams the events. Base URLs are normalized to the API base (`/chat/completions`
+  is appended by Pi) and only HTTPS or loopback HTTP is accepted. `npm run test:ai` runs the
+  staged runtime against a mock provider.
 - `src/window/trading/plan.ts` + `TradePlanCard.tsx` — the ticket's projections; keep the
   math in `plan.ts` (tested) and the view free of it.
 
@@ -45,6 +54,8 @@ npm ci
 npm test                         # vitest (tests in __tests__/ next to the code)
 npx tsc --noEmit -p tsconfig.json
 cd src-tauri && cargo test --lib # Rust tests; also regenerates src/bindings.ts
+npm run ai:runtime               # stage Node + Pi into src-tauri/ai-runtime (before a release)
+npm run test:ai                  # the staged Pi runtime against a mock provider
 npm run tauri dev                # the app with hot reload (first Rust build: minutes)
 ```
 
@@ -65,35 +76,25 @@ too, put its body in `opentrader_core::commands`, add its name to `SERVED` there
 
 ## Languages
 
-The components keep their English text; `src/i18n/translator.ts` translates the page as it appears from a dictionary
-keyed by the English text (`src/i18n/<lang>.json`). `src/i18n/catalog.json` lists every text to translate, generated
-from the code, the built-in studies and `src/i18n/tools/run-time-texts.ts`.
+The interface ships in **English only**. The catalog and the page translator stay in place, because they are what
+keeps the text whole and greppable, and adding a language later is one entry plus one dictionary:
 
+- `src/i18n/catalog.json` lists every text to translate, generated from the code, the built-in studies and
+  `src/i18n/tools/run-time-texts.ts` (`npm run i18n:extract`; a test fails when it is out of date).
 - A text: write it whole. Values go through `translateWith("{0} bars of {1}", n, sym)`, counts through
   `translatePlural(n, { one: "{0} bar", other: "{0} bars" })`, dates and numbers through `src/i18n/format.ts`; never
   join words to values (`"Undo " + name`, a test fails). A word with two meanings takes a sense (`data-i18n-sense`,
-  `translateAs`). Then `npm run i18n:extract` and add the new entries to each dictionary.
+  `translateAs`).
 - Not interface text: data (tickers, company and script names, exchanges, hotkeys, what the user wrote, legal notices
-  kept verbatim) is shown in an element with `data-no-translate`; a text the code already wrote in the language (words
-  translated one by one and joined with values, dates of `format.ts`) goes through `formatted()`. Neither is looked
-  up, so neither is reported as left in English.
-- A language: one entry in `src/i18n/languages.ts` (name, plural locale, formats, direction, `partial` while it is
-  being translated) and its `<lang>.json`; `src/i18n/glossary/<lang>.json` holds its terms.
-- `npm run i18n:report` gives each language's coverage; `npm run i18n:missing -- <lang>` writes the missing texts with
-  their context and glossary terms to `.tmp/i18n/<lang>-missing.json`, `npm run i18n:merge -- <lang> <file>` merges
-  the filled file back (checked); `npm run i18n:prune` removes the entries the catalog lost. In the dev build,
-  `window.__i18nMisses()` lists the texts left in English on screen.
-- The pseudo-language "Pseudo" (`en-XA`, dev builds' language menu, `src/i18n/pseudo.ts`) shows every catalog text
-  accented, a third longer and between markers ⟦…⟧: text without them is left in English. With the dev app running
-  with CDP, `npm run i18n:walk -- 9231` walks its screens, menus, dialogs and panels in it and writes the English left
-  on screen, the cut text and the misses to `.tmp/i18n-walk/` (report.md, screenshots), then puts the app back.
-  `--language=en-XB` or `--language=fr` walks another language (`.tmp/i18n-walk/<lang>/`), `--all-shots` keeps a
-  screenshot of every state to check by eye.
-- Right to left: the page's `dir` is the language's. CSS uses start/end (`margin-inline-start`, `inset-inline-end`,
-  `text-align: start`); left/right only for what keeps its side: the panels' places and their outer edges and resize
-  handles, the chart and what sits over it (`src/styles/rtl.css` holds those rules). Code that places a menu or
-  popover uses `src/components/reading-direction.ts` (`fitToWindow` and `createPopover` already do). An icon that
-  points along the reading direction (back, submenu chevron, expander) takes `ot-flip-rtl`; undo/redo, replay, logos
-  and drawing tools don't. A value shown inside text (price, percent, volume, time) is isolated: the `ot-value`
-  class (`src/styles/rtl.css`). Check with the dev build's pseudo-language "English, right to left (test)"
-  (`en-XB`, `src/i18n/pseudo-rtl.ts`): the English words in right-to-left order inside ⟦ ⟧.
+  kept verbatim) is shown in an element with `data-no-translate`; a text the code already wrote in English (words
+  translated one by one and joined with values, dates of `format.ts`) goes through `formatted()`.
+- A language would be one entry in `src/i18n/languages.ts` (name, plural locale, formats, direction, `partial` while
+  it is being translated) and its `<lang>.json`; the language menu row appears only when more than one exists
+  (`profileMenu` hides it otherwise). `npm run i18n:report` gives coverage, `npm run i18n:missing -- <lang>` writes
+  the missing texts with their context, `npm run i18n:merge -- <lang> <file>` merges the filled file back (checked).
+  The pseudo-language utilities (`src/i18n/pseudo.ts`, `pseudo-rtl.ts`) stay for testing the translator, unregistered.
+- `src/i18n/__tests__/translator.test.ts`, `format.test.ts` and `drawing-labels.test.ts` carry their own small
+  dictionaries as fixtures: they test the translator and the drawing labels, not a shipped language.
+- Right to left stays wired (`src/styles/rtl.css`, `ot-flip-rtl`, `reading-direction.ts`) so a right-to-left language
+  can be added without touching the layout: the page's `dir` is the language's, and a menu or popover places itself
+  through `fitToWindow`/`createPopover`. English is left to right, so nothing exercises it today.

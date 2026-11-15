@@ -160,6 +160,13 @@
 .st-footer-btn:hover {
   color: var(--ot-text-max);
 }
+.st-footer-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.st-footer-btn:disabled:hover {
+  color: var(--color-text-primary);
+}
 
 /* ─── Report ─── */
 .st-report {

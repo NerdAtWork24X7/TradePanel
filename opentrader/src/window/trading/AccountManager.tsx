@@ -137,7 +137,9 @@ const DownloadIcon = () => (
   </svg>
 );
 
-export function AccountManager(props: { onSymbol: (symbol: string) => void; height: number }) {
+/** The broker's account, a page of the bottom panel. `fill`: the parent sizes it (a flex child, the Exchanges tab)
+ *  instead of `height`. */
+export function AccountManager(props: { onSymbol: (symbol: string) => void; height: number; fill?: boolean }) {
   const [page, setPage] = createSignal<Page>("positions");
   const [exporting, setExporting] = createSignal(false);
   const [filter, setFilter] = createSignal<Filter>("all");
@@ -163,7 +165,7 @@ export function AccountManager(props: { onSymbol: (symbol: string) => void; heig
     ["rejected", () => translate("Rejected")],
   ];
   return (
-    <div class="trd-am" style={{ height: Number.isFinite(props.height) ? `${props.height}px` : "100%" }} data-name="account-manager">
+    <div class="trd-am" style={props.fill ? undefined : { height: Number.isFinite(props.height) ? `${props.height}px` : "100%" }} data-name="account-manager">
       <Show
         when={pluginBroker.connected()}
         fallback={
@@ -172,7 +174,7 @@ export function AccountManager(props: { onSymbol: (symbol: string) => void; heig
             <div class="trd-empty-text">
               {pluginBroker.status()?.pluginConnected
                 ? translate("The plugin is not connected to its broker.")
-                : translate("The broker plugin is not connected. Check it in Settings > Plugins.")}
+                : translate("The broker plugin is not connected. Check it in the Exchanges tab under the chart.")}
             </div>
           </div>
         }
@@ -590,23 +592,5 @@ function NotificationsTable() {
       rowKey={(n) => `${n.timeMs}:${n.message}`}
       empty={translate("There is no trading data here yet")}
     />
-  );
-}
-
-/** The bottom panel's tab: the broker's name, then DEMO or LIVE once the account is known. */
-export function AccountTabTitle() {
-  const s = () => pluginBroker.status();
-  const a = () => s()?.state?.account ?? null;
-  return (
-    <>
-      <span data-no-translate>{s()?.activeName ?? ""}</span>
-      <Show when={a()}>
-        {(acc) => (
-          <span class="trd-account-kind" classList={{ "is-live": !acc().isDemo }}>
-            {acc().isDemo ? translate("DEMO") : translate("LIVE")}
-          </span>
-        )}
-      </Show>
-    </>
   );
 }

@@ -366,6 +366,25 @@ html.theme-light {
   color: var(--color-text-secondary);
   font: 400 14px/20px var(--trd-font);
 }
+/* The one way out of an empty ticket: the broker's card (Exchanges) or Settings > Plugins. */
+.trd-tk-empty-action {
+  margin-top: 4px;
+  padding: 6px 14px;
+  border: 1px solid var(--trd-input-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font: 500 13px/18px var(--trd-font);
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+.trd-tk-empty-action:hover {
+  background: var(--trd-side-hover);
+}
+.trd-tk-empty-action:focus-visible {
+  outline: 2px solid var(--trd-buy-selected-text);
+  outline-offset: 2px;
+}
 .trd-switch {
   position: relative;
   width: 34px;
@@ -1252,6 +1271,13 @@ html.theme-light {
   background: var(--color-container-fill-primary-neutral-extra-light);
   border-color: var(--color-container-fill-primary-neutral-extra-light);
 }
+/* A broker plugin still off: one click turns it on, so it reads as a card, quieter. */
+.trd-broker-card.is-off {
+  opacity: 0.62;
+}
+.trd-broker-card.is-off:hover {
+  opacity: 1;
+}
 .trd-broker-card .trd-broker-mark {
   margin-bottom: 16px;
 }
@@ -1295,6 +1321,11 @@ html.theme-light {
   margin-bottom: 16px;
   font-size: 18px;
   background: #2962ff;
+}
+.trd-broker-card-mark.is-logo {
+  background: none;
+  object-fit: contain;
+  padding: 6px;
 }
 .trd-broker-card.is-active {
   border-color: #2962ff;

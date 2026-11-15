@@ -28,7 +28,12 @@ const NOTICES: usize = 200;
 pub struct BrokerPlugin {
     pub id: String,
     pub name: String,
+    /// The exchange its manifest names: the venue the Exchanges tab and the picker list it under.
+    pub exchange: Option<String>,
     pub connected: bool,
+    /// Enabled: its program runs, so it can be connected. A disabled one is listed all the same, so the
+    /// user finds every venue's broker and turns on the one they trade.
+    pub enabled: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, specta::Type)]
@@ -121,12 +126,17 @@ fn active(app: &AppHandle) -> Option<String> {
 
 pub fn status(app: &AppHandle) -> BrokerStatus {
     let plugins = app.state::<Plugins>();
-    let enabled: Vec<String> = plugins.config.locked().plugins.iter().filter(|(_, p)| p.enabled).map(|(id, _)| id.clone()).collect();
-    let brokers: Vec<BrokerPlugin> = enabled
-        .iter()
-        .filter_map(|id| installed_manifest(app, id))
+    // Every broker plugin installed, enabled or not: the picker lists them all and enables the chosen one.
+    let enabled: HashMap<String, bool> = plugins.config.locked().plugins.iter().map(|(id, p)| (id.clone(), p.enabled)).collect();
+    let brokers: Vec<BrokerPlugin> = super::installed(app)
+        .into_iter()
         .filter(|m| m.provides(Capability::Broker) && m.supported_here())
-        .map(|m| BrokerPlugin { connected: plugins.hub.connected(&m.id).is_some(), id: m.id, name: m.name })
+        .filter_map(|m| {
+            // A folder without a `plugins.json` entry is not a plugin of this app (yet): leave it out, as before.
+            let enabled = *enabled.get(&m.id)?;
+            let connected = plugins.hub.connected(&m.id).is_some();
+            Some(BrokerPlugin { id: m.id.clone(), name: m.name.clone(), exchange: m.exchange.clone(), connected, enabled })
+        })
         .collect();
     let active = active(app).filter(|id| brokers.iter().any(|b| &b.id == id));
     let manifest = active.as_deref().and_then(|id| installed_manifest(app, id));

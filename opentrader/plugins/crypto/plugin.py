@@ -32,7 +32,7 @@ from hyperliquid_broker import HyperliquidBroker
 
 PLUGIN_ID = "crypto"
 API = 2
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 HELLO_TIMEOUT = 12.0
 
 

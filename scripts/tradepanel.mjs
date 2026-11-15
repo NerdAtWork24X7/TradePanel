@@ -219,6 +219,18 @@ if (!noInstall) {
     });
     if (crypto.status !== 0) warn("crypto plugin install failed; run `npm run ot:crypto` manually.");
   }
+  // One broker plugin per venue, installed off: every broker is a card in Exchanges > Brokers and in
+  // Trade > Connect broker, and enabling the one the user trades starts its process.
+  const brokerScript = join(APP, "scripts", "install-broker-plugins.mjs");
+  if (existsSync(brokerScript)) {
+    say("ensuring the broker plugins are installed (npm run ot:brokers)");
+    const brokers = spawnSync(process.execPath, [brokerScript, "--if-needed", "--disabled"], {
+      cwd: APP,
+      stdio: "inherit",
+      shell: WIN,
+    });
+    if (brokers.status !== 0) warn("broker plugin install failed; run `npm run ot:brokers` manually.");
+  }
 }
 
 // ── Port ─────────────────────────────────────────────────────────────────────

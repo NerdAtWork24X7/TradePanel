@@ -31,6 +31,14 @@ app's own seams (no fork of the charting core):
   delay above does not apply to them. Install with `node scripts/install-crypto-plugin.mjs`
   (or `npm run ot:crypto` from the workspace root). See
   [plugins/crypto/README.md](plugins/crypto/README.md).
+- **Eight more brokers, one per exchange** — `plugins/ccxt-broker/` packages Binance, Bybit,
+  OKX, Gate.io, Bitget, KuCoin, Coinbase and Kraken as broker-only plugins over ccxt: spot
+  and perpetual futures, brackets, partial closes and order modification, one broker
+  connected at a time. Every installed broker is a card in **Exchanges > Brokers** and in
+  **Trade > Connect broker**, so a venue is one click from the chart. Install with
+  `node scripts/install-broker-plugins.mjs` (or `npm run ot:brokers`); the launcher installs
+  them **off** (`--disabled`) so no broker runs until it is enabled; one shared venv holds
+  ccxt for all of them. See [plugins/ccxt-broker/README.md](plugins/ccxt-broker/README.md).
 - **Secrets in the OS credential store** — a plugin manifest setting of type `secret` is
   read/written through `keyring` and never written to `plugins.json` or the webview.
 - **AI chart analyst** — *AI assistant > Analyze chart* renders the visible charts, sends

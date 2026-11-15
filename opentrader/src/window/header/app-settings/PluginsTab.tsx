@@ -2,11 +2,17 @@
  * Settings > Plugins (#313): the plugins installed on this computer (from the catalog or a file), their settings, the
  * files their installation copies into another application, and the local Plugin API they connect to
  * (src-tauri/src/plugins, plugins/PROTOCOL.md).
+ *
+ * A venue plugin — one serving a list of exchanges, the crypto markets — is configured in the Exchanges tab under the
+ * charts instead (window/trading/ExchangesPanel.tsx): its card is left out here, and a note leads there.
  */
 import { createSignal, For, onCleanup, Show } from "solid-js";
 import { CheckField, SelectControl } from "../../../components/form";
 import type { CatalogEntry, InstallStep, PackagePreview, PluginInfo, PluginsStatus, SettingField } from "../../../bindings";
+import { tradingUi } from "../../../data/trading/trading-ui";
+import { isVenuePlugin } from "../../../data/venues";
 import { translate, translateWith } from "../../../i18n/translator";
+import { setAppSettingsTab } from "../../shell/app-dialogs";
 import { openLink, plugins, type Result } from "./io";
 import { ConfirmButton, Section } from "./parts";
 
@@ -72,7 +78,30 @@ export function PluginsTab() {
       <Show when={st()}>
         {(s) => (
           <>
-            <For each={s().plugins} fallback={<div class="app-settings-note app-settings-local-note">No plugin installed.</div>}>
+            <Show when={s().plugins.some(isVenuePlugin)}>
+              <div class="app-settings-venue-note" data-name="plugins-exchanges-note">
+                <span>{translate("Crypto venues are configured in the Exchanges tab under the chart.")}</span>
+                <button
+                  type="button"
+                  class="app-settings-btn"
+                  data-name="plugins-open-exchanges"
+                  onClick={() => {
+                    setAppSettingsTab(null);
+                    tradingUi.showExchanges();
+                  }}
+                >
+                  Open Exchanges
+                </button>
+              </div>
+            </Show>
+            <For
+              each={s().plugins.filter((p) => !isVenuePlugin(p))}
+              fallback={
+                s().plugins.length === 0 ? (
+                  <div class="app-settings-note app-settings-local-note">No plugin installed.</div>
+                ) : null
+              }
+            >
               {(p) => <PluginCard plugin={p} busy={busy()} take={take} />}
             </For>
             <div class="app-settings-local-add">
@@ -360,8 +389,9 @@ function InstallStepRow(props: { plugin: PluginInfo; step: InstallStep; index: n
   );
 }
 
-/** The plugin's own settings form (its manifest's fields); saved and sent to the plugin with Apply. */
-function PluginSettings(props: { plugin: PluginInfo; take: (what: string, p: Promise<Result<PluginsStatus>>) => Promise<boolean> }) {
+/** The plugin's own settings form (its manifest's fields); saved and sent to the plugin with Apply (also in the
+ *  Exchanges tab under the chart). */
+export function PluginSettings(props: { plugin: PluginInfo; take: (what: string, p: Promise<Result<PluginsStatus>>) => Promise<boolean> }) {
   const m = () => props.plugin.manifest;
   const initial = () => {
     const v: Record<string, string> = {};
@@ -454,7 +484,7 @@ function PluginSettings(props: { plugin: PluginInfo; take: (what: string, p: Pro
 const EXAMPLE = ["NASDAQ:AAPL", "AAPL.US"] as const;
 
 /** A broker plugin's tickers for chart symbols the plugin does not find by itself ("NASDAQ:AAPL" → "AAPL.US"). */
-function SymbolMap(props: { plugin: PluginInfo; take: (what: string, p: Promise<Result<PluginsStatus>>) => Promise<boolean> }) {
+export function SymbolMap(props: { plugin: PluginInfo; take: (what: string, p: Promise<Result<PluginsStatus>>) => Promise<boolean> }) {
   const id = () => props.plugin.manifest.id;
   const initial = () => Object.entries(props.plugin.symbolMap ?? {}).map(([symbol, ticker]) => ({ symbol, ticker: ticker ?? "" }));
   const [rows, setRows] = createSignal<{ symbol: string; ticker: string }[]>(initial());

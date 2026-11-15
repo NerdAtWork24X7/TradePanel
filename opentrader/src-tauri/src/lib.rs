@@ -1,7 +1,6 @@
 mod agent;
 mod alerts;
 mod app_menu;
-mod analyst;
 mod assistant;
 mod local_model;
 mod app_update;
@@ -11,6 +10,7 @@ mod credentials;
 mod deep_link;
 mod host;
 mod network;
+mod pi;
 mod plugins;
 mod window_session;
 
@@ -111,11 +111,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
             agent::agent_ready,
             assistant::assistant_chat,
             assistant::assistant_cancel,
-            analyst::analyst_settings,
-            analyst::analyst_set_settings,
-            analyst::analyst_clear_key,
-            analyst::analyst_analyze,
-            analyst::analyst_cancel,
+            pi::commands::pi_status,
+            pi::commands::pi_set_settings,
+            pi::commands::pi_clear_key,
+            pi::commands::pi_analyze,
+            pi::commands::pi_abort,
+            pi::commands::pi_new_session,
             local_model::local_model_info,
             local_model::local_model_install,
             local_model::local_model_cancel,
@@ -273,6 +274,9 @@ pub fn run() {
             agent::init(app.handle());
             // Settings > Plugins (the Plugin API listens while a plugin is enabled).
             plugins::init(app.handle());
+            // Analyze chart: the bundled, read-only Pi runtime (lazy: no child
+            // until the first analysis).
+            app.manage(pi::PiManager::new(app.handle().clone()));
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -283,6 +287,10 @@ pub fn run() {
                 app_update::on_exit(app);
                 // The AI assistant's model server would outlive the app.
                 local_model::shutdown();
+                // The Pi analysis child must not outlive the window either.
+                if let Some(manager) = app.try_state::<std::sync::Arc<pi::PiManager>>() {
+                    tauri::async_runtime::block_on(manager.shutdown());
+                }
                 // The plugin programs the app started.
                 plugins::shutdown(app);
             }

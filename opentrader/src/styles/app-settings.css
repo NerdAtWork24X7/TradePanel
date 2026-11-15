@@ -640,3 +640,21 @@
 .app-settings-plugin-entry .app-settings-btn { flex: none; white-space: nowrap; }
 .app-settings-plugin-map-row { display: flex; align-items: center; gap: 8px; }
 .app-settings-plugin-map-row .app-settings-input { flex: 1; min-width: 0; }
+
+/* A venue plugin (the crypto markets) lives in the Exchanges tab under the charts, not here: the note leads there. */
+.app-settings-venue-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-divider);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-content-secondary-neutral);
+  font-size: 12px;
+  line-height: 17px;
+}
+.app-settings-venue-note .app-settings-btn {
+  flex: none;
+  margin-inline-start: auto;
+}

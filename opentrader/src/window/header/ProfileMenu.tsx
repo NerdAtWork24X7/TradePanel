@@ -46,7 +46,10 @@ function rows(): Row[] {
   const out: Row[] = [SETTINGS_ROW];
   if (isTauri()) out.push(ONBOARDING_ROW);
   out.push(DRAWINGS_ROW);
-  out.push({ type: "item", label: "Language", icon: "profile-language", value: currentLanguageLabel(), submenu: true, action: "language" });
+  // One interface language: no picker to open.
+  if (menuLanguages().length > 1) {
+    out.push({ type: "item", label: "Language", icon: "profile-language", value: currentLanguageLabel(), submenu: true, action: "language" });
+  }
   out.push(SHORTCUTS_ROW);
   return out;
 }

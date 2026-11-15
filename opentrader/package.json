@@ -24,7 +24,12 @@
     "i18n:merge": "node scripts/i18n.mjs merge",
     "i18n:walk": "node scripts/i18n-walk.mjs",
     "plugin:crypto": "node scripts/install-crypto-plugin.mjs",
-    "test:plugin-install": "node --test scripts/__tests__/plugin-install.test.mjs"
+    "plugin:brokers": "node scripts/install-broker-plugins.mjs",
+    "test:plugin-install": "node --test scripts/__tests__/plugin-install.test.mjs",
+    "test:broker-install": "node --test scripts/__tests__/broker-install.test.mjs",
+    "ai:runtime": "node scripts/build-ai-runtime.mjs",
+    "ai:runtime:dev": "node scripts/build-ai-runtime.mjs --dev",
+    "test:ai": "node tests/analyst-rpc-smoke.mjs"
   },
   "license": "MIT",
   "author": "OpenTrader contributors",

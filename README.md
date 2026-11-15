@@ -11,14 +11,21 @@ adds:
   Gate.io, Bitget and Hyperliquid, spot and perpetuals, through a Python Plugin API 2
   datafeed. The venues' public endpoints are used directly, so the 15-minute gateway delay
   does not apply to crypto feeds.
-- **Hyperliquid execution** — positions, orders, executions, brackets, partial closes and
-  order modification through the official SDK. **Testnet by default.** A live account is
+- **Trading on nine venues** — Hyperliquid through its official SDK, and Binance, Bybit,
+  OKX, Gate.io, Bitget, KuCoin, Coinbase and Kraken as one ccxt broker plugin per exchange
+  (`opentrader/plugins/ccxt-broker`). Positions, orders, executions, brackets, partial closes
+  and order modification, spot and perpetual futures, one broker connected at a time from
+  **Exchanges → Brokers**. **Testnet by default** where the venue has one; a live account is
   used only after an explicit choice, and OpenTrader's trading switch and live-order
-  confirmation remain the gate.
-- **AI chart analyst** — *AI assistant → Analyze chart* sends the visible charts plus a data
-  sheet (symbol, interval, studies, position, ticket) to an OpenAI-compatible vision
-  provider and streams a read-only analysis. Only HTTPS or loopback HTTP is accepted; the
-  API key is stored in the OS credential store, not in settings JSON.
+  confirmation remain the gate. An order ticket that cannot trade links straight to the
+  broker's card or to the plugin catalog, so the settings it needs are one click away.
+- **AI chart analyst** — *AI assistant → Analyze chart* runs the bundled
+  [Pi coding agent](https://github.com/earendil-works/pi) as a supervised, read-only process
+  (`opentrader/ai-runtime`). The panel renders the visible charts, sends them with a numeric
+  snapshot (1d/4h/5m studies, structural levels, position, ticket), and streams the answer plus
+  a validated long/short trade card the user can copy into the ticket. The agent has five
+  `panel_*` tools and cannot trade; only HTTPS or loopback HTTP providers are accepted, and the
+  API key stays in the OS credential store.
 - **Trade plan projections** — the order ticket shows entry, stop and target, risk and
   reward in account currency and % of balance, R:R, and the balance after either level.
 - **Secrets in the OS keyring** — plugin settings marked `secret` are read and written
@@ -49,19 +56,23 @@ The drawing core is a sibling checkout, already present in this workspace as
 ## Run
 
 ```bash
-npm start              # desktop app: checks the toolchain, installs missing deps, starts `tauri dev`
-npm run ot:crypto      # optional: install the Python crypto plugin (app closed)
+npm start              # desktop app: checks the toolchain, installs missing deps and plugins, starts `tauri dev`
+npm run ot:crypto      # the Python crypto plugin alone (app closed)
+npm run ot:brokers     # the Binance…Kraken broker plugins alone, enabled (app closed)
 npm run dev            # the same as npm start, without the checks
 ```
 
 `npm start` starts the **OpenTrader** window with hot reload. It needs Node.js 22+, Rust
 stable and the Tauri system dependencies above; it installs `opentrader/node_modules` itself
-(skip that with `--no-install`, or `TRADEPANEL_NO_INSTALL=1`). Outside npm, run
-`./tradepanel` (Linux, macOS, Git Bash) or `tradepanel.cmd` (Windows); arguments go to the
-launcher, and everything after `--` goes to `tauri dev`. On a Linux machine that has only the
-WebKitGTK runtime libraries, `TRADEPANEL_ENV=<snippet>` sources a shell script that sets
-`PKG_CONFIG_PATH` and the linker paths before building (this workspace uses `tmp/linux-env.sh`
-automatically; without it the launcher stops before compiling):
+(skip that with `--no-install`, or `TRADEPANEL_NO_INSTALL=1`). It installs both plugin sets
+too: the crypto plugin on, and the eight ccxt brokers **off** (no Python process until you
+enable one), so every venue is a card in **Exchanges → Brokers** and in **Trade → Connect
+broker**. Outside npm, run `./tradepanel` (Linux, macOS, Git Bash) or `tradepanel.cmd`
+(Windows); arguments go to the launcher, and everything after `--` goes to `tauri dev`. On
+a Linux machine that has only the WebKitGTK runtime libraries, `TRADEPANEL_ENV=<snippet>`
+sources a shell script that sets `PKG_CONFIG_PATH` and the linker paths before building
+(this workspace uses `tmp/linux-env.sh` automatically; without it the launcher stops before
+compiling):
 
 ```bash
 ./tradepanel -- --no-watch      # start without the file watcher
@@ -98,12 +109,14 @@ cargo test --lib
 
 cd ../..
 python -m unittest discover -s opentrader/plugins/crypto/tests
+python -m unittest discover -s opentrader/plugins/ccxt-broker/tests
 ```
 
-The Python crypto tests need the plugin requirements:
+The Python plugin tests need their requirements:
 
 ```bash
 python -m pip install -r opentrader/plugins/crypto/requirements.txt
+python -m pip install -r opentrader/plugins/ccxt-broker/requirements.txt
 ```
 
 ## Layout
@@ -111,6 +124,7 @@ python -m pip install -r opentrader/plugins/crypto/requirements.txt
 ```
 opentrader/                  OpenTrader (SolidJS + Tauri 2)
 opentrader/plugins/crypto/   Python Plugin API 2 datafeed + Hyperliquid broker
+opentrader/plugins/ccxt-broker/  one ccxt broker plugin per exchange (Binance…Kraken)
 lightweight-charts-drawing/  chart drawing core (sibling dependency)
 ```
 

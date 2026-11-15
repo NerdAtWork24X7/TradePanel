@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { inEnglish, lookUp, setDictionary, translate, translateAs, translateDrawn, translatePlural, translateWith } from "../translator";
-import { languageEntry } from "../languages";
 import { libraryMonthRule } from "../format";
-import zhHans from "../zh-Hans.json";
 
 const D = { Save: "保存", "Open…": "打开…" };
-const ZH = languageEntry("zh-Hans")!;
+const ZH = { dateLocale: "zh-CN" };
 
 afterEach(() => setDictionary({}));
 
@@ -65,7 +63,7 @@ describe("text with values from the code (#190)", () => {
     expect(translateWith("{0} bars", 2)).toBe("2 根K线");
   });
   it("translateDrawn: each line; a library's month name in the language's", () => {
-    setDictionary({ Strong: "强烈", Buy: "买入" }, [libraryMonthRule(ZH.formats.dateLocale)]);
+    setDictionary({ Strong: "强烈", Buy: "买入" }, [libraryMonthRule(ZH.dateLocale)]);
     expect(translateDrawn("Strong\nBuy")).toBe("强烈\n买入");
     expect(translateDrawn("Jan")).toBe("1月");
     expect(translateDrawn("HH")).toBe("HH");
@@ -101,8 +99,9 @@ describe("counted text (#288)", () => {
   it("the page reads a counted entry by its other form", () => {
     expect(translate("{0} bars", { "{0} bars": { one: "{0} barre", other: "{0} barres" } })).toBe("{0} barres");
   });
-  it("Chinese has the dictionary's forms", () => {
-    setDictionary(zhHans, [], "zh");
+  it("a language with one plural form reads it for every count", () => {
+    setDictionary({ "{0} drawings": "{0} 个绘图" }, [], "zh");
     expect(translatePlural(1, { one: "{0} drawing", other: "{0} drawings" })).toBe("1 个绘图");
+    expect(translatePlural(5, { one: "{0} drawing", other: "{0} drawings" })).toBe("5 个绘图");
   });
 });

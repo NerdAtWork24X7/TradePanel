@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import catalogJson from "../catalog.json";
-import { languageEntry } from "../languages";
 import { pseudoRtl, pseudoRtlDictionary } from "../pseudo-rtl";
 import type { Catalog } from "../tools/catalog";
 import { valuesOf } from "../tools/catalog";
@@ -9,13 +8,6 @@ const RLM = String.fromCharCode(0x200f);
 const plain = (s: string) => s.split(RLM).join("");
 
 describe("the right-to-left pseudo-language en-XB (#290)", () => {
-  it("is registered in the development build, right to left, English formats", () => {
-    const l = languageEntry("en-XB")!;
-    expect(l.direction).toBe("rtl");
-    expect(l.pseudo).toBe(true);
-    expect(l.formats).toEqual(languageEntry("en")!.formats);
-  });
-
   it("keeps the words and the values, each word followed by a right-to-left mark, inside ⟦ ⟧", () => {
     expect(pseudoRtl("Add alert")).toBe(`${RLM}⟦Add${RLM} alert${RLM}⟧${RLM}`);
     expect(plain(pseudoRtl("{0} bars of {1}"))).toBe("⟦{0} bars of {1}⟧");

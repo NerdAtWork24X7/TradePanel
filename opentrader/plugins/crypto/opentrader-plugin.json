@@ -1,7 +1,7 @@
 {
   "id": "crypto",
   "name": "Crypto markets & Hyperliquid",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "publisher": "TradePanel",
   "description": "Binance, Bybit, OKX, Coinbase, Kraken, KuCoin, Gate.io, Bitget and Hyperliquid market data, with a Hyperliquid perpetuals account for the order ticket. Hyperliquid starts on testnet.",
   "api": 2,
@@ -9,6 +9,7 @@
     "datafeed",
     "broker"
   ],
+  "exchange": "HYPERLIQUID",
   "exchanges": [
     "BINANCE",
     "BYBIT",
@@ -72,7 +73,7 @@
       "help": "How often live quotes and the account are refreshed when a venue has no WebSocket (the plugin streams over WebSockets when it can)."
     }
   ],
-  "setup": "Market data works at once. To trade, open Settings > Plugins > Crypto markets & Hyperliquid > Settings, choose the network and paste the Hyperliquid wallet private key. Then open Trade > Connect broker and turn trading on.",
+  "setup": "Market data works at once. To trade, open the Exchanges tab under the chart, choose Hyperliquid, pick the network and paste the Hyperliquid wallet private key. Then connect the broker and turn trading on.",
   "homepage": "https://github.com/deepentropy/opentrader",
   "platforms": []
 }

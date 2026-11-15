@@ -1,0 +1,469 @@
+/*
+ * Exchanges — the bottom panel's tab (window/trading/ExchangesPanel.tsx): the crypto venues and the broker
+ * plugins as cards, and the picked one's configuration beside them (below in a narrow panel).
+ * The report area is the panel's own background: cards sit on the primary colour, one accent on the selection.
+ */
+.ex-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color-bg-secondary);
+  container-type: inline-size;
+}
+
+/* ─── Head ─── */
+.ex-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px 8px;
+}
+.ex-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.ex-head-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--ot-strong);
+}
+.ex-head-sub {
+  overflow: hidden;
+  color: var(--color-content-secondary-neutral);
+  font-size: 11.5px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ex-head-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.ex-account-name {
+  overflow: hidden;
+  max-width: 200px;
+  color: var(--ot-strong);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Body: the cards, the detail ─── */
+.ex-body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 380px);
+  min-height: 0;
+}
+.ex-loading {
+  grid-column: 1 / -1;
+  align-self: center;
+  justify-self: center;
+  color: var(--color-content-secondary-neutral);
+  font-size: 12px;
+}
+.ex-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 14px 12px 16px;
+}
+.ex-group-title {
+  margin-bottom: 6px;
+  color: var(--color-content-secondary-neutral);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+.ex-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  gap: 8px;
+}
+.ex-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--color-divider);
+  border-radius: 8px;
+  background: var(--color-bg-primary);
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.ex-card:hover {
+  background: var(--color-bg-primary-hover);
+}
+.ex-card.is-selected {
+  border-color: var(--color-brand);
+  box-shadow: inset 0 0 0 1px var(--color-brand);
+}
+.ex-card:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 1px;
+}
+.ex-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.ex-card-name {
+  overflow: hidden;
+  color: var(--ot-strong);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ex-card-sub {
+  overflow: hidden;
+  color: var(--color-content-secondary-neutral);
+  font-size: 11px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ex-card-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  color: var(--color-content-secondary-neutral);
+  font-size: 11px;
+  line-height: 15px;
+}
+.ex-card-state.is-on {
+  color: var(--color-iguana-green-500);
+}
+.ex-card-state.is-warn {
+  color: var(--color-tan-orange-500);
+}
+
+/* The venue's mark; a broker without a bundled one shows its initials. */
+.ex-logo {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 4px;
+  object-fit: contain;
+}
+.ex-logo.is-large {
+  width: 40px;
+  height: 40px;
+}
+.ex-logo-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-container-fill-primary-neutral-light);
+  color: var(--ot-strong);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.ex-logo-mark.is-large {
+  font-size: 14px;
+}
+
+.ex-note {
+  grid-column: 1 / -1;
+  color: var(--color-content-secondary-neutral);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+/* ─── Detail pane ─── */
+.ex-detail {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 16px 14px;
+  border-inline-start: 1px solid var(--color-divider);
+}
+.ex-detail-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ex-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ex-detail-id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ex-detail-name {
+  overflow: hidden;
+  color: var(--ot-strong);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 21px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ex-detail-code {
+  color: var(--color-content-secondary-neutral);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  line-height: 15px;
+}
+.ex-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ex-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--color-container-fill-primary-neutral-light);
+  color: var(--ot-strong);
+  font-size: 11px;
+  line-height: 16px;
+}
+.ex-chip.is-quiet {
+  border: 1px solid var(--color-divider);
+  background: transparent;
+  color: var(--color-content-secondary-neutral);
+}
+.ex-detail-text {
+  margin: 0;
+  color: var(--color-content-secondary-neutral);
+  font-size: 12px;
+  line-height: 17px;
+}
+.ex-detail-text.is-warn {
+  color: var(--color-tan-orange-500);
+}
+.ex-symbol {
+  align-self: flex-start;
+  padding: 3px 8px;
+  border: 1px solid var(--color-divider);
+  border-radius: 4px;
+  background: var(--color-bg-primary);
+  color: var(--color-content-primary-neutral-semi-bold);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 15px;
+}
+.ex-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.ex-plugin-name {
+  margin-inline-start: auto;
+  overflow: hidden;
+  color: var(--color-content-secondary-neutral);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ex-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--color-content-secondary-neutral);
+}
+.ex-dot.is-on {
+  background: var(--color-iguana-green-500);
+}
+.ex-dot.is-warn {
+  background: var(--color-tan-orange-500);
+}
+.ex-dot.is-off {
+  background: var(--color-content-secondary-neutral);
+  opacity: 0.6;
+}
+
+/* ─── Actions ─── */
+.ex-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ex-primary {
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--color-brand);
+  color: var(--color-white);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ex-primary:hover {
+  background: var(--color-brand-hover);
+}
+.ex-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ex-btn {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--color-divider);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ot-strong);
+  font-size: 13px;
+  cursor: pointer;
+}
+.ex-btn:hover {
+  background: var(--color-bg-primary-hover);
+}
+.ex-trading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.ex-section-title {
+  margin-top: 4px;
+  color: var(--color-content-secondary-neutral);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+.ex-setup {
+  padding: 8px 10px;
+  border: 1px solid var(--color-divider);
+  border-radius: 6px;
+  background: var(--color-bg-primary);
+  color: var(--color-content-secondary-neutral);
+  font-size: 11.5px;
+  line-height: 17px;
+  white-space: pre-line;
+}
+.ex-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.ex-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-brand);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ex-link:hover {
+  text-decoration: underline;
+}
+.ex-links .app-settings-btn {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.ex-log {
+  max-height: 150px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--color-divider);
+  border-radius: 6px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 15px;
+  white-space: pre-wrap;
+}
+.ex-error {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--color-bg-primary);
+  color: var(--color-ripe-red-500);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+/* The Settings form is the app's (app-settings.css); it takes the pane's width. */
+.ex-detail .app-settings-input {
+  max-width: none;
+}
+
+/* ─── Account manager, filling the tab ─── */
+.ex-account {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.ex-account-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--color-divider);
+  background: var(--color-bg-primary);
+}
+.ex-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px 0 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ot-strong);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ex-back:hover {
+  background: var(--color-bg-primary-hover);
+}
+.ex-account-bar .trd-account-kind {
+  margin-inline-start: auto;
+}
+.ex-account .trd-am {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* A narrow panel (the right rail open on a small window): the detail goes under the cards. */
+@container (max-width: 680px) {
+  .ex-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 44%) minmax(0, 1fr);
+  }
+  .ex-detail {
+    border-top: 1px solid var(--color-divider);
+    border-inline-start: 0;
+  }
+  .ex-cards {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+}

@@ -1,13 +1,19 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { formatChartTime, formatTickMark } from "../../window/chart/time-format";
 import { dateText, durationText, largestUnitText, monthName, numberText } from "../format";
-import { ENGLISH, languageEntry } from "../languages";
+import { ENGLISH, LANGUAGES, type Formats } from "../languages";
 import { inEnglish, setDictionary } from "../translator";
 
-const as = (id: string) => {
-  const l = languageEntry(id)!;
-  setDictionary({}, [], l.pluralLocale, l.formats);
+/** Formats of a language that is not shipped: the fixtures here check `format.ts`, not the language list. */
+const ZH: Formats = {
+  dateLocale: "zh-CN",
+  numberLocale: "en-US",
+  chartDate: "{yyyy}年{M}月{d}日",
+  chartWeekdayDate: "{yyyy}年{M}月{d}日 {wd}",
+  listSeparator: "、",
 };
+const ZH_HANT: Formats = { ...ZH, dateLocale: "zh-TW" };
+const as = (formats: Formats, pluralLocale = "zh") => setDictionary({}, [], pluralLocale, formats);
 afterEach(() => setDictionary({}));
 
 // Mon 26 Oct 2026 14:30 UTC.
@@ -29,25 +35,25 @@ describe("formats of the interface language (#288)", () => {
   });
 
   it("Chinese writes its dates as the text rules did", () => {
-    as("zh-Hans");
+    as(ZH);
     expect(formatChartTime(SEC, "UTC", true, false)).toBe("2026年10月26日 周一   14:30");
     expect(formatChartTime(SEC, "UTC", false, false, { dayOfWeek: false })).toBe("2026年10月26日");
     expect(formatTickMark(SEC, "Month", "UTC")).toBe("10月");
     expect(dateText(Date.UTC(2003, 8, 10), { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })).toBe("2003年9月10日");
     expect(dateText(Date.UTC(2026, 10, 1), { month: "long", year: "numeric", timeZone: "UTC" })).toBe("2026年11月");
     expect(numberText(1250.5)).toBe("1,250.5");
-    as("zh-Hant");
+    as(ZH_HANT);
     expect(formatChartTime(SEC + 86400, "UTC", false, false)).toBe("2026年10月27日 週二");
   });
 
   it("inEnglish formats in English", () => {
-    as("zh-Hans");
+    as(ZH);
     expect(inEnglish(() => formatTickMark(SEC, "Month", "UTC"))).toBe("Oct");
     expect(formatTickMark(SEC, "Month", "UTC")).toBe("10月");
   });
 
-  it("each language has its formats and a direction", () => {
+  it("English is the only interface language, and it reads left to right", () => {
     expect(ENGLISH.direction).toBe("ltr");
-    for (const id of ["zh-Hans", "zh-Hant"]) expect(languageEntry(id)?.direction).toBe("ltr");
+    expect(LANGUAGES.map((l) => l.id)).toEqual(["en"]);
   });
 });

@@ -170,7 +170,9 @@ export const tradingUi = createRoot(() => {
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   /** Bumped to bring the Replay Trading tab forward (open, selected). */
   const [reportRequest, setReportRequest] = createSignal(0);
-  /** Bumped to bring the broker's account manager tab forward (Trade menu). */
+  /** Bumped to bring the Exchanges tab forward (Settings > Plugins, to configure a venue plugin). */
+  const [exchangesRequest, setExchangesRequest] = createSignal(0);
+  /** Bumped to bring the Exchanges tab forward on the broker's account manager (Trade menu). */
   const [accountRequest, setAccountRequest] = createSignal(0);
   /** The broker picker ("Connect broker…"). */
   const [brokerPicker, setBrokerPicker] = createSignal(false);
@@ -395,6 +397,9 @@ export const tradingUi = createRoot(() => {
     },
     reportView,
     setReportView,
+    exchangesRequest,
+    /** Open the Exchanges tab under the chart. */
+    showExchanges: () => setExchangesRequest((n) => n + 1),
     accountRequest,
     showAccountManager: () => setAccountRequest((n) => n + 1),
     brokerPicker,

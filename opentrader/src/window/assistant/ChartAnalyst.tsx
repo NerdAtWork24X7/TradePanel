@@ -1,33 +1,41 @@
 /*
- * "Analyze chart": the analyst sees the charts the user sees.
+ * "Analyze chart": the bundled Pi coding agent reads the user's charts.
  *
- * The shown layout is rendered by chartSnapshot/layoutSnapshot (the same render as Take a
- * snapshot), the active chart's symbol, interval, studies and the account's position and
- * order ticket go with it as text, and the answer streams in below the picture. Read-only:
- * the provider gets no tool that can trade.
+ * The run is the reference `ai/runtime` design: the shown layout is rendered
+ * by layoutSnapshot (the same render as Take a snapshot), the focused chart's
+ * symbol, interval, studies, position and ticket travel as a versioned
+ * snapshot, and the answer streams in below the picture. The agent's only
+ * tools are the five read-only `panel_*` tools; its final plan is validated in
+ * the extension and rendered as a card the user can copy into the ticket.
+ *
+ * The first analysis is one press ("Start analysis"): the agent asks its own
+ * questions of the tools. Later messages are follow-ups about the same run;
+ * each rebuilds the snapshot, so the tools never read stale data, and only a
+ * fresh analysis attaches the picture again.
  */
-import { Show, createSignal, onMount } from "solid-js";
-import { commands } from "../../bindings";
+import { For, Show, createSignal, onMount } from "solid-js";
+import { commands, type PiStatus } from "../../bindings";
 import { AnswerText } from "./AnswerText";
 import { exportableCharts, type ChartExportSource } from "../chart/chart-export";
 import { layoutSnapshot, snapshotTheme } from "../chart/layout-snapshot";
-import { indicatorLegendFor } from "../../data/chart-state-registry";
+import { chartBars, indicatorLegendFor } from "../../data/chart-state-registry";
 import { pluginBroker } from "../../data/trading/plugin-broker";
 import { tradingUi } from "../../data/trading/trading-ui";
-import { analystSettings, analyzeChart, clearAnalystKey, loadAnalystSettings, saveAnalystSettings, stopAnalysis } from "../../data/analyst";
-import { translate } from "../../i18n/translator";
+import {
+  analyze,
+  clearAnalystKey,
+  loadRuntimeStatus,
+  newAnalystSession,
+  saveAnalystSettings,
+  stopAnalysis,
+  type AnalystPlan,
+  type ToolStep,
+} from "../../data/analyst";
+import { buildAnalystSnapshot, type AnalystPortfolio, type AnalystSnapshot, type AnalystStudy, type AnalystTicket } from "../../data/analyst-context";
+import { translate, translateWith } from "../../i18n/translator";
 import * as kv from "../../data/kv";
 
 const LAST_KEY = "ot:analyst:last";
-const DEFAULT_ASK = "Analyze this chart: the trend, the key levels, and two scenarios with their invalidation.";
-const SYSTEM = [
-  "You are a market analyst inside a desktop charting terminal.",
-  "You receive a rendered screenshot of the user's visible charts and a short data sheet.",
-  "Describe only what the image and data show; say when something is not visible.",
-  "Structure the answer: trend and structure, key levels, momentum, two scenarios with invalidation. Be concise (under 300 words) unless asked for more.",
-  "You cannot place, change or cancel orders and must not claim to. This is not financial advice.",
-  "Dates are dd/mm/yyyy. Quote prices with the instrument's precision.",
-].join(" ");
 
 type Last = { symbol: string; interval: string; text: string; at: number };
 
@@ -48,6 +56,33 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 function titleParts(title: string): { symbol: string; interval: string } {
   const at = title.lastIndexOf(", ");
   return at < 0 ? { symbol: title, interval: "" } : { symbol: title.slice(0, at), interval: title.slice(at + 2) };
+}
+
+/** The tool names, as a reader knows them. */
+function toolLabel(name: string): string {
+  switch (name) {
+    case "panel_market_context":
+      return translate("Market context");
+    case "panel_indicators":
+      return translate("Indicators");
+    case "panel_portfolio":
+      return translate("Portfolio");
+    case "panel_order_ticket":
+      return translate("Order ticket");
+    case "panel_submit_trade_plan":
+      return translate("Trade plan");
+    default:
+      return name;
+  }
+}
+
+/** "opencode.ai/inference/go/openai/v1" → "opencode.ai": what fits beside the model. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 /** The active chart, its grid, and the picture of the layout. */
@@ -77,100 +112,146 @@ function analystImage(canvas: HTMLCanvasElement): string {
   return out.toDataURL("image/jpeg", 0.86);
 }
 
-/** The data sheet sent with the picture: what the image cannot say (exact numbers, account). */
-function dataSheet(source: ChartExportSource): string {
-  const { symbol, interval } = titleParts(source.title());
-  const lines = [`Instrument: ${symbol}${interval ? ` · ${interval}` : ""}`];
-  try {
-    const { times, columns } = source.data();
-    const close = columns.find((c) => c.title.toLowerCase() === "close") ?? columns[0];
-    const last = times.length ? close?.values.get(times[times.length - 1]) : undefined;
-    if (last != null) lines.push(`Last close: ${priceNum(last)}`);
-    if (times.length > 1) {
-      const from = Math.max(0, times.length - 100);
-      const window = times.slice(from).map((t) => close?.values.get(t)).filter((v): v is number => v != null && Number.isFinite(v));
-      if (window.length > 1 && window[0] !== 0) {
-        const change = ((window[window.length - 1] - window[0]) / window[0]) * 100;
-        lines.push(`Last ${window.length} bars: ${change >= 0 ? "+" : ""}${change.toFixed(2)}%`);
-      }
-    }
-    if (times.length) lines.push(`Bars loaded: ${times.length}`);
-  } catch {
-    /* a chart still loading has no columns yet */
-  }
-  const studies = indicatorLegendFor(symbol)
-    .filter((r) => !r.hidden && !r.offInterval)
+/** The focused chart's visible studies, as the extension reports them. */
+function studiesOf(symbol: string): AnalystStudy[] {
+  return indicatorLegendFor(symbol)
+    .filter((row) => !row.hidden && !row.offInterval && !row.compare)
     .slice(0, 24)
-    .map((r) => {
-      const values = r.plots
-        .filter((p) => p.value != null && Number.isFinite(p.value))
-        .map((p) => num(p.value, 4));
-      return `- ${r.title}${r.inputs ? ` (${r.inputs})` : ""}${values.length ? `: ${values.join(", ")}` : ""}`;
-    });
-  if (studies.length) lines.push("Indicators:", ...studies);
+    .map((row) => ({
+      title: row.title,
+      ...(row.inputs ? { inputs: row.inputs } : {}),
+      plots: row.plots
+        .filter((plot) => plot.value != null && Number.isFinite(plot.value))
+        .map((plot) => ({ plot: plot.index, value: Number(plot.value) })),
+    }));
+}
 
+/** The account context the agent may read (only when the user enabled it). */
+function portfolioOf(symbol: string): AnalystPortfolio | null {
   const state = pluginBroker.status()?.state;
-  if (state?.account) {
-    const a = state.account;
-    lines.push(
-      `Account: ${a.isDemo ? "demo/testnet" : "LIVE"} · balance ${num(a.balance)} ${a.currency} · equity ${num(a.equity)}` +
-        (a.unrealizedPnl != null ? ` · open P/L ${num(a.unrealizedPnl)}` : ""),
-    );
-  }
-  const positions = (state?.positions ?? []).filter((p) => p.ticker === symbol || p.ticker.startsWith(`${symbol.split(":")[0]}:`));
-  for (const p of positions) {
-    lines.push(`Position: ${p.side} ${num(p.qty, 8)} ${symbol.split(":")[1]?.split("/")[0] ?? ""} @ ${priceNum(p.avgPrice)} · P/L ${num(p.unrealizedPnl)}`);
-  }
+  if (!state) return null;
+  const base = symbol.split(":")[1]?.split("/")[0] ?? "";
+  const account = state.account;
+  const positions = (state.positions ?? []).filter((p) => p.ticker === symbol || (p.ticker ? p.ticker.startsWith(`${base}/`) || p.ticker === base : false));
+  const orders = (state.orders ?? []).filter((o) => o.ticker === symbol || (o.ticker ? o.ticker.startsWith(`${base}/`) || o.ticker === base : false));
+  return {
+    enabled: true,
+    position: positions.length
+      ? {
+          side: positions[0].side,
+          qty: positions[0].qty,
+          avgPrice: positions[0].avgPrice,
+          unrealizedPnl: positions[0].unrealizedPnl ?? null,
+          takeProfit: positions[0].takeProfit ?? null,
+          stopLoss: positions[0].stopLoss ?? null,
+        }
+      : null,
+    openOrders: orders.slice(0, 20).map((o) => ({
+      side: o.side,
+      type: o.type,
+      qty: o.qty,
+      limitPrice: o.limitPrice ?? null,
+      stopPrice: o.stopPrice ?? null,
+      takeProfit: o.takeProfit ?? null,
+      stopLoss: o.stopLoss ?? null,
+    })),
+    balance: account
+      ? { currency: account.currency ?? null, balance: account.balance ?? null, equity: account.equity ?? null, unrealizedPnl: account.unrealizedPnl ?? null, isDemo: account.isDemo === true }
+      : null,
+  };
+}
+
+/** The order ticket's unsent values for this symbol (read-only). */
+function ticketOf(symbol: string): AnalystTicket | null {
   const draft = tradingUi.draft();
-  if (draft && draft.symbol === symbol) {
-    const parts = [`Ticket: ${draft.side} ${draft.qty || "?"} ${draft.orderType}`];
-    if (draft.limitPrice) parts.push(`limit ${draft.limitPrice}`);
-    if (draft.takeProfit) parts.push(`TP ${draft.takeProfit}`);
-    if (draft.stopLoss) parts.push(`SL ${draft.stopLoss}`);
-    lines.push(parts.join(" · "));
-  }
-  return lines.join("\n");
+  if (!draft || draft.symbol !== symbol) return null;
+  const risk = draft.risk != null && draft.risk !== "" ? Number(draft.risk) : null;
+  const price = (value: string) => {
+    const parsed = Number(value);
+    return value && Number.isFinite(parsed) ? parsed : null;
+  };
+  return {
+    side: draft.side,
+    qty: price(draft.qty),
+    orderType: draft.orderType,
+    risk: risk != null && Number.isFinite(risk) ? risk : null,
+    limitPrice: price(draft.limitPrice),
+    takeProfit: draft.tpOn ? price(draft.takeProfit) : null,
+    stopLoss: draft.slOn ? price(draft.stopLoss) : null,
+    editing: draft.editing,
+  };
+}
+
+/** A one-line data sheet for the caption under the picture. */
+function sheetLine(snapshot: AnalystSnapshot): string {
+  const parts = [snapshot.instrument.symbol, snapshot.instrument.timeframe];
+  const five = snapshot.indicators.perTimeframe["5m"];
+  const close = snapshot.instrument.price ?? five?.close ?? null;
+  if (close != null) parts.push(priceNum(close));
+  const rsi = five?.rsi14;
+  if (rsi != null) parts.push(`RSI ${num(rsi, 1)}`);
+  parts.push(snapshot.indicators.summary.alignment);
+  return parts.join(" · ");
 }
 
 export function ChartAnalyst(props: { ticker: string }) {
+  const [runtime, setRuntime] = createSignal<PiStatus | null>(null);
+  const [loaded, setLoaded] = createSignal(false);
   const [base, setBase] = createSignal("");
   const [model, setModel] = createSignal("");
   const [key, setKey] = createSignal("");
+  const [hasKey, setHasKey] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
   const [setupOpen, setSetupOpen] = createSignal(false);
   const [shot, setShot] = createSignal<string | null>(null);
   const [sheet, setSheet] = createSignal("");
-  const [question, setQuestion] = createSignal(DEFAULT_ASK);
+  const [question, setQuestion] = createSignal("");
   const [answer, setAnswer] = createSignal("");
+  const [plan, setPlan] = createSignal<AnalystPlan | null>(null);
+  const [tools, setTools] = createSignal<ToolStep[]>([]);
   const [history, setHistory] = createSignal<{ q: string; a: string }[]>([]);
   const [busy, setBusy] = createSignal(false);
   const [stopped, setStopped] = createSignal(false);
   const [error, setError] = createSignal("");
+  const [copied, setCopied] = createSignal(false);
 
-  const configured = () => {
-    const s = analystSettings();
-    // A local model server (plain HTTP on this computer) may take no key.
-    return !!s.baseUrl && !!s.model && (s.hasKey || s.baseUrl.trim().startsWith("http://"));
+  const configured = () => runtime()?.configured ?? (!!base().trim() && !!model().trim() && (hasKey() || base().trim().startsWith("http://")));
+  const hasResult = () => !!answer().trim() || history().length > 0;
+  const provider = () => `${model() || translate("No model")} · ${hostOf(base()) || translate("No endpoint")}`;
+  /** The runtime itself could not be found: a staged-runtime problem, not a provider one. */
+  const runtimeError = () => {
+    const status = runtime();
+    return status && !status.runtimeRoot ? (status.error ?? translate("The AI runtime is not staged.")) : null;
   };
-  const provider = () => `${analystSettings().model || translate("No model")} · ${analystSettings().baseUrl || translate("No endpoint")}`;
-  /** The full symbol of the last picture ("BINANCE:BTC/USDT"), for the answer's ticker links. */
-  const instrument = () => sheet().match(/^Instrument: (\S+)/)?.[1] ?? props.ticker;
+  const runtimeLabel = () => {
+    const status = runtime();
+    if (!status) return translate("AI runtime unavailable");
+    return status.piVersion ? translateWith("Pi {0}", status.piVersion) : translate("AI runtime");
+  };
+  /** The full symbol of the last picture ("BINANCE:BTC/USDT"), for ticker links. */
+  const instrument = () => sheet().split(" · ")[0] || props.ticker;
+
+  const refresh = async () => {
+    const status = await loadRuntimeStatus();
+    setRuntime(status);
+    if (status) {
+      setBase(status.baseUrl);
+      setModel(status.model);
+      setHasKey(status.hasKey);
+    }
+    setLoaded(true);
+    return status;
+  };
 
   onMount(() => {
-    void loadAnalystSettings().then((s) => {
-      if (!s) return;
-      setBase(s.baseUrl);
-      setModel(s.model);
-      // A local HTTP model server may take no key.
-      setSetupOpen(!s.baseUrl || !s.model || (!s.hasKey && !s.baseUrl.trim().startsWith("http://")));
-    });
+    void refresh();
     const saved = kv.getItem(LAST_KEY);
     if (!saved) return;
     try {
       const last = JSON.parse(saved) as Last;
       if (last.symbol && last.text) {
         setAnswer(last.text);
-        setHistory([{ q: "", a: last.text }]);
+        setHistory([{ q: translate("Analyze chart"), a: last.text }]);
       }
     } catch {
       /* an old or broken entry: start clean */
@@ -183,6 +264,10 @@ export function ChartAnalyst(props: { ticker: string }) {
     const r = await saveAnalystSettings(base(), model(), key() || undefined);
     setSaving(false);
     if (r.status === "error") return setError(r.error);
+    setRuntime(r.data);
+    setBase(r.data.baseUrl);
+    setModel(r.data.model);
+    setHasKey(r.data.hasKey);
     setKey("");
     setSetupOpen(false);
   };
@@ -190,54 +275,75 @@ export function ChartAnalyst(props: { ticker: string }) {
   const forgetKey = async () => {
     const r = await clearAnalystKey();
     if (r.status === "error") setError(r.error);
-    else setSetupOpen(true);
+    else {
+      setRuntime(r.data);
+      setHasKey(r.data.hasKey);
+      setSetupOpen(true);
+    }
   };
 
-  /** What "Analyze again" asks when the box is empty after a first answer. */
-  const askNow = () => question().trim() || (history().length ? DEFAULT_ASK : "");
-  const run = async (ask = askNow()) => {
+  /**
+   * `fresh` runs the standard analysis: the picture is attached and the agent
+   * decides what to ask. Otherwise the message is a follow-up about the same
+   * conversation; the snapshot is rebuilt without the picture.
+   */
+  const run = async (fresh: boolean) => {
     if (busy()) return;
-    const text = ask.trim();
-    if (!text) return;
+    if (!configured()) {
+      setSetupOpen(true);
+      setError(translate("Set the analyst's provider first."));
+      return;
+    }
+    const followUp = question().trim();
+    if (!fresh && !followUp) return;
     setError("");
     setAnswer("");
+    setPlan(null);
+    setTools([]);
+    setCopied(false);
     setStopped(false);
     setBusy(true);
     let source: ChartExportSource | null = null;
     try {
       const picture = await capture();
       source = picture.source;
-      const sheetText = dataSheet(source);
+      const { symbol, interval } = titleParts(source.title());
+      const exchange = symbol.includes(":") ? symbol.split(":")[0] : undefined;
+      const chart = chartBars(symbol, interval);
+      const snapshot = await buildAnalystSnapshot({
+        symbol,
+        ...(exchange ? { exchange } : {}),
+        timeframe: interval,
+        price: snapshotPrice(source),
+        studies: studiesOf(symbol),
+        portfolio: portfolioOf(symbol),
+        ticket: ticketOf(symbol),
+        ...(chart && chart.length ? { chartBars: { interval, bars: chart } } : {}),
+      });
       setShot(picture.image);
-      setSheet(sheetText);
-      // The picture is fresh each time; the earlier questions and answers keep the thread.
-      // An answer restored from the last session has no question of its own: it is shown,
-      // not replayed into the model.
-      const turns = history().filter((t) => t.q.trim());
-      const first = turns[0]?.q || text;
-      const messages: Parameters<typeof analyzeChart>[0] = [
-        { role: "system", content: SYSTEM },
-        {
-          role: "user",
-          content: [
-            { type: "image_url", image_url: { url: picture.image } },
-            { type: "text", text: `${sheetText}\n\n${first}` },
-          ],
-        },
-      ];
-      for (let i = 0; i < turns.length; i++) {
-        messages.push({ role: "assistant", content: turns[i].a });
-        messages.push({ role: "user", content: i + 1 < turns.length ? turns[i + 1].q : text });
-      }
-      const result = await analyzeChart(messages, setAnswer);
+      setSheet(sheetLine(snapshot));
+      const prompt = fresh ? `Analyze ${symbol} on the ${interval} chart.` : followUp;
+      const outcome = await analyze(snapshot, fresh ? [picture.image] : [], prompt, {
+        onText: setAnswer,
+        onTool: setTools,
+        onPlan: setPlan,
+      });
       if (stopped()) return;
-      if (result.trim()) {
-        const next = [...history(), { q: text, a: result }];
-        setHistory(next);
-        const parts = titleParts(source.title());
-        kv.setItem(LAST_KEY, JSON.stringify({ symbol: parts.symbol, interval: parts.interval, text: result, at: Date.now() } satisfies Last));
-        setQuestion("");
+      if (outcome.error && !outcome.aborted) setError(outcome.error);
+      if (!outcome.text.trim() && !plan() && !outcome.error && !outcome.aborted) {
+        setError(translate("The agent did not return a plan. Try again."));
       }
+      if (outcome.text.trim()) {
+        setHistory([...history(), { q: prompt, a: outcome.text }]);
+        if (fresh) {
+          const parts = titleParts(source.title());
+          kv.setItem(LAST_KEY, JSON.stringify({ symbol: parts.symbol, interval: parts.interval, text: outcome.text, at: Date.now() } satisfies Last));
+        }
+      } else if (fresh) {
+        setHistory([...history(), { q: prompt, a: "" }]);
+      }
+      setQuestion("");
+      void refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -245,26 +351,108 @@ export function ChartAnalyst(props: { ticker: string }) {
     }
   };
 
+  /** The last close of the chart as sent: the extension validates levels against it. */
+  function snapshotPrice(source: ChartExportSource): number | null {
+    try {
+      const { times, columns } = source.data();
+      const close = columns.find((c) => c.title.toLowerCase() === "close") ?? columns[0];
+      const value = times.length && close ? close.values.get(times[times.length - 1]) : undefined;
+      return value != null && Number.isFinite(value) ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
   const stop = () => {
     setStopped(true);
     stopAnalysis();
     setBusy(false);
   };
 
+  /** The plan's levels into the order ticket (never submits). */
+  const fillTicket = () => {
+    const p = plan();
+    if (!p) return;
+    const symbol = p.symbol ?? instrument();
+    tradingUi.openOrderTicket({ symbol, side: p.action === "long" ? "buy" : "sell" });
+    tradingUi.patchDraft({
+      limitPrice: String(p.entry),
+      orderType: "limit",
+      tpOn: true,
+      takeProfit: String(p.takeProfit),
+      slOn: true,
+      stopLoss: String(p.stopLoss),
+      ...(p.qty != null && p.qty > 0 ? { qty: String(p.qty) } : {}),
+    });
+  };
+
+  const copyLevels = () => {
+    const p = plan();
+    if (!p) return;
+    const symbol = p.symbol ?? instrument();
+    const line = `${p.action.toUpperCase()} ${symbol} entry=${p.entry} tp=${p.takeProfit} sl=${p.stopLoss} probability=${p.probability}%`;
+    void navigator.clipboard.writeText(line).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const clear = () => {
+    setAnswer("");
+    setHistory([]);
+    setShot(null);
+    setSheet("");
+    setPlan(null);
+    setTools([]);
+    setQuestion("");
+    setError("");
+    kv.removeItem(LAST_KEY);
+    newAnalystSession();
+  };
+
   return (
     <div class="asst-analyst" aria-busy={busy()}>
       <div class="asst-analyst-head">
-        <div>
-          <div class="asst-analyst-title">{translate("The analyst sees these charts")}</div>
-          <div class="asst-analyst-meta" data-no-translate>{provider()}</div>
+        <div class="asst-analyst-heading">
+          <div class="asst-analyst-title">{translate("Chart analyst")}</div>
+          <div class="asst-analyst-meta">
+            <span class="asst-runtime" classList={{ "is-busy": busy(), "is-error": !!runtimeError() }}>
+              <span class="asst-runtime-dot" aria-hidden="true" />
+              <span data-no-translate>{runtimeLabel()}</span>
+            </span>
+            <span class="asst-analyst-sep" aria-hidden="true">·</span>
+            <span data-no-translate>{provider()}</span>
+          </div>
         </div>
         <button type="button" class="asst-link" onClick={() => setSetupOpen(!setupOpen())}>
-          {configured() ? translate("Provider…") : translate("Set up")}
+          {setupOpen() ? translate("Close") : translate("Settings")}
         </button>
       </div>
 
+      <Show when={runtimeError()}>
+        {(message) => (
+          <div class="asst-callout is-error" role="alert">
+            <p>{message()}</p>
+            <div class="asst-analyst-actions">
+              <button type="button" class="asst-link" onClick={() => void refresh()}>
+                {translate("Check again")}
+              </button>
+            </div>
+          </div>
+        )}
+      </Show>
+
       <Show when={setupOpen()}>
         <div class="asst-analyst-form">
+          <div class="asst-form-head">
+            <span>{translate("Provider")}</span>
+            <span class="asst-runtime-note">
+              {runtime()?.piVersion ? translateWith("Pi {0}", runtime()!.piVersion ?? "") : translate("AI runtime")}
+              <Show when={runtime()?.target}>
+                {(target) => <span data-no-translate> · {target()}</span>}
+              </Show>
+            </span>
+          </div>
           <label class="asst-analyst-field">
             <span>{translate("API base URL")}</span>
             <input
@@ -286,19 +474,19 @@ export function ChartAnalyst(props: { ticker: string }) {
               class="asst-analyst-input"
               type="password"
               autocomplete="off"
-              placeholder={analystSettings().hasKey ? translate("Stored — type to replace") : ""}
+              placeholder={hasKey() ? translate("Stored — type to replace") : ""}
               value={key()}
               onInput={(e) => setKey(e.currentTarget.value)}
             />
           </label>
           <p class="asst-analyst-note">
-            {translate("The key is kept in your operating system's credential store and never reaches the window. HTTPS is required, or HTTP on 127.0.0.1 for a local model.")}
+            {translate("The Pi agent appends /chat/completions to this base URL. The key is kept in your operating system's credential store and never reaches the window. HTTPS is required, or HTTP on 127.0.0.1 for a local model.")}
           </p>
           <div class="asst-analyst-actions">
             <button type="button" class="asst-primary" disabled={saving()} onClick={() => void save()}>
-              {saving() ? translate("Saving…") : translate("Save")}
+              {saving() ? translate("Saving...") : translate("Save")}
             </button>
-            <Show when={analystSettings().hasKey}>
+            <Show when={hasKey()}>
               <button type="button" class="asst-link" onClick={() => void forgetKey()}>
                 {translate("Forget the key")}
               </button>
@@ -310,8 +498,13 @@ export function ChartAnalyst(props: { ticker: string }) {
         </div>
       </Show>
 
-      <Show when={!configured() && !setupOpen()}>
-        <p class="asst-analyst-note">{translate("Add a vision provider to analyze your charts.")}</p>
+      <Show when={loaded() && !configured() && !setupOpen()}>
+        <div class="asst-callout">
+          <p>{translate("Add a vision provider to analyze your charts.")}</p>
+          <button type="button" class="asst-link" onClick={() => setSetupOpen(true)}>
+            {translate("Set up")}
+          </button>
+        </div>
       </Show>
 
       <Show when={shot()}>
@@ -319,7 +512,7 @@ export function ChartAnalyst(props: { ticker: string }) {
           <figure class="asst-analyst-figure">
             <img class="asst-analyst-image" src={src()} alt={translate("The charts sent to the analyst")} />
             <figcaption class="asst-analyst-note">
-              {sheet()}
+              <span data-no-translate>{sheet()}</span>
               <button
                 type="button"
                 class="asst-link"
@@ -335,46 +528,62 @@ export function ChartAnalyst(props: { ticker: string }) {
         )}
       </Show>
 
-      <div class="asst-analyst-ask">
-        <textarea
-          class="asst-input"
-          rows={2}
-          value={question()}
-          placeholder={translate("What should the analyst look at?")}
-          onInput={(e) => setQuestion(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              void run();
-            }
-          }}
-        />
-        <div class="asst-analyst-actions">
-          <button type="button" class="asst-primary" disabled={busy() || !configured() || !askNow()} onClick={() => void run()}>
-            {busy() ? translate("Analyzing…") : history().length && !question().trim() ? translate("Analyze again") : translate("Analyze chart")}
+      <Show when={!hasResult()}>
+        <p class="asst-analyst-note">
+          {translate("The agent reads this chart and a 1d, 4h and 5m indicator snapshot, then returns a 5m trade plan. It cannot trade.")}
+        </p>
+      </Show>
+
+      <div class="asst-analyst-actions asst-analyst-start">
+        <button type="button" class="asst-primary" disabled={busy() || !configured() || !!runtimeError()} onClick={() => void run(true)}>
+          {busy()
+            ? translate("Analyzing...")
+            : hasResult()
+              ? translate("Analyze again")
+              : translate("Start analysis")}
+        </button>
+        <Show when={busy()}>
+          <button type="button" class="asst-link" onClick={stop}>
+            {translate("Stop")}
           </button>
-          <Show when={busy()}>
-            <button type="button" class="asst-link" onClick={stop}>
-              {translate("Stop")}
-            </button>
-          </Show>
-          <Show when={answer() || history().length}>
-            <button
-              type="button"
-              class="asst-link"
-              onClick={() => {
-                setAnswer("");
-                setHistory([]);
-                setShot(null);
-                setSheet("");
-                kv.removeItem(LAST_KEY);
-              }}
-            >
-              {translate("Clear")}
-            </button>
-          </Show>
-        </div>
+        </Show>
+        <Show when={hasResult() && !busy()}>
+          <button type="button" class="asst-link" onClick={clear}>
+            {translate("New analysis")}
+          </button>
+        </Show>
       </div>
+
+      <Show when={hasResult()}>
+        <div class="asst-analyst-ask">
+          <textarea
+            class="asst-input"
+            rows={2}
+            value={question()}
+            placeholder={translate("Ask about this analysis…")}
+            onInput={(e) => setQuestion(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                void run(false);
+              }
+            }}
+          />
+          <div class="asst-analyst-actions">
+            <button type="button" class="asst-primary" disabled={busy() || !question().trim() || !!runtimeError()} onClick={() => void run(false)}>
+              {translate("Send")}
+            </button>
+            <Show when={busy()}>
+              <button type="button" class="asst-link" onClick={stop}>
+                {translate("Stop")}
+              </button>
+            </Show>
+            <button type="button" class="asst-link" onClick={clear}>
+              {translate("New analysis")}
+            </button>
+          </div>
+        </div>
+      </Show>
 
       <Show when={error()}>
         <p class="asst-error" role="alert">{error()}</p>
@@ -382,6 +591,69 @@ export function ChartAnalyst(props: { ticker: string }) {
 
       <Show when={busy() && !answer()}>
         <div class="asst-thinking" aria-hidden="true"><span /><span /><span /></div>
+      </Show>
+
+      <Show when={tools().length}>
+        <ul class="asst-steps" aria-label={translate("Reading the charts")}>
+          <For each={tools()}>
+            {(step) => (
+              <li class="asst-step" classList={{ "is-failed": step.state === "failed" }}>
+                <span class="asst-step-dot" aria-hidden="true" />
+                {toolLabel(step.name)}
+              </li>
+            )}
+          </For>
+        </ul>
+      </Show>
+
+      <Show when={plan()}>
+        {(p) => (
+          <section class="asst-plan" classList={{ "is-short": p().action === "short" }} aria-label={translate("Trade plan")} aria-live="polite">
+            <header class="asst-plan-head">
+              <span class="asst-plan-side">{p().action === "long" ? translate("Long") : translate("Short")}</span>
+              <span class="asst-plan-prob" title={translate("Probability")}>
+                <b>{p().probability}%</b>
+                <span>{translate("Probability")}</span>
+              </span>
+            </header>
+            <dl class="asst-plan-rows">
+              <div>
+                <dt>{translate("Entry")}</dt>
+                <dd data-no-translate>{priceNum(p().entry)}</dd>
+              </div>
+              <div>
+                <dt>{translate("Take profit")}</dt>
+                <dd class="is-target" data-no-translate>{priceNum(p().takeProfit)}</dd>
+              </div>
+              <div>
+                <dt>{translate("Stop loss")}</dt>
+                <dd class="is-risk" data-no-translate>{priceNum(p().stopLoss)}</dd>
+              </div>
+              <div>
+                <dt>{translate("Risk/reward")}</dt>
+                <dd data-no-translate>{num(p().riskReward, 2)}</dd>
+              </div>
+              <Show when={p().qty != null}>
+                <div>
+                  <dt>{translate("Quantity")}</dt>
+                  <dd data-no-translate>{num(p().qty, 6)}</dd>
+                </div>
+              </Show>
+            </dl>
+            <Show when={p().rationale}>
+              <p class="asst-plan-note">{p().rationale}</p>
+            </Show>
+            <div class="asst-plan-actions">
+              <button type="button" class="asst-primary" onClick={fillTicket}>
+                {translate("Fill ticket")}
+              </button>
+              <button type="button" class="asst-link" onClick={copyLevels}>
+                {copied() ? translate("Copied") : translate("Copy levels")}
+              </button>
+              <span class="asst-plan-basis" data-no-translate>{p().basisTimeframe}</span>
+            </div>
+          </section>
+        )}
       </Show>
 
       <Show when={answer()}>

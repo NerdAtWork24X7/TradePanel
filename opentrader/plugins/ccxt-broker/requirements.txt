@@ -1,0 +1,2 @@
+# One venue per package, through ccxt (also installed by the crypto data plugin).
+ccxt>=4.4,<5

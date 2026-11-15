@@ -28,6 +28,7 @@ import { Portal } from "solid-js/web";
 import { Icon } from "../../components/Icon";
 import { Tooltip } from "../../components/Tooltip";
 import { broker, brokerOf } from "../../data/trading/broker";
+import { paperBroker } from "../../data/trading/paper-broker";
 import { pluginBroker } from "../../data/trading/plugin-broker";
 import { tradingUi } from "../../data/trading/trading-ui";
 import type { OrderType } from "../../data/trading/types";
@@ -42,7 +43,7 @@ import { FavoritePresets, OrderPresetsButton } from "./OrderPresets";
 import { DomPanel } from "./DomPanel";
 import { TradePlanCard } from "./TradePlanCard";
 import { orderSummary, positionSummary } from "../chart/trading-lines-model";
-import { translateAs, translateWith } from "../../i18n/translator";
+import { translate, translateAs, translateWith } from "../../i18n/translator";
 
 /** Order / DOM switch: tab, title, tooltip and its Shift hotkey. */
 const TABS: ["order" | "dom", string, string, string][] = [
@@ -79,6 +80,9 @@ export function OrderTicket() {
 /** Ticket header: broker mark, `title`, `extra` buttons, ⋯ and close. A
  *  floating ticket is dragged by it. */
 function TicketHead(p: { title: JSX.Element; extra?: JSX.Element; onClose: () => void; onDrag?: (e: MouseEvent) => void }) {
+  /** The broker the ticket trades through, by name: the paper account, or the connected plugin. */
+  const brokerName = () =>
+    brokerOf() === paperBroker ? translate("Paper trading") : brokerOf() === pluginBroker ? pluginBroker.status()?.activeName : null;
   return (
     <div
       class="trd-tk-header"
@@ -88,7 +92,7 @@ function TicketHead(p: { title: JSX.Element; extra?: JSX.Element; onClose: () =>
       }}
     >
       <Show
-        when={brokerOf() === pluginBroker && pluginBroker.status()?.activeName}
+        when={brokerName()}
         fallback={
           <Tooltip text="Replay Broker" side="bottom">
             <span class="trd-tk-mark">

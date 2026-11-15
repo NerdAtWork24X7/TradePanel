@@ -1,7 +1,7 @@
 /*
- * The AI assistant panel at the window's right, as the reference app's: an overlay over the charts (the default) or a
- * split view the charts shrink for ("Move overlay to split-view"), its width dragged on its left edge, and "Collapse
- * panel" (it closes, the rail button keeps a dot). Kept in kv, but whether it shows starts closed.
+ * The AI assistant panel at the window's right: a split view the charts shrink for (the default — an overlay would
+ * cover the price axis), or an overlay over the charts ("Move split-view to overlay"), its width dragged on its left
+ * edge, and "Collapse panel" (it closes, the rail button keeps a dot). Kept in kv, but whether it shows starts closed.
  */
 import { createRoot, createSignal } from "solid-js";
 import * as kv from "../kv";
@@ -15,7 +15,7 @@ const WIDTH_KEY = "ot:assistant:width";
 const panel = createRoot(() => {
   const [open, setOpen] = createSignal(false);
   const [collapsed, setCollapsed] = createSignal(false);
-  const [mode, setMode] = createSignal<AssistantMode>(kv.getItem(MODE_KEY) === "split" ? "split" : "overlay");
+  const [mode, setMode] = createSignal<AssistantMode>(kv.getItem(MODE_KEY) === "overlay" ? "overlay" : "split");
   const w = Number(kv.getItem(WIDTH_KEY));
   const [width, setWidth] = createSignal<number | null>(Number.isFinite(w) && w >= ASSISTANT_MIN_WIDTH ? w : null);
   return { open, setOpen, collapsed, setCollapsed, mode, setMode, width, setWidth };

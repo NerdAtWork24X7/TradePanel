@@ -1,22 +1,26 @@
 /*
- * The broker the trading UI talks to: the replay broker on a chart in Bar Replay (paper trading), else the broker
+ * The broker the trading UI talks to: the replay broker on a chart in Bar Replay (paper trading), else the paper
+ * account the user connected (built in, trading the chart's live prices with simulated money), else the broker
  * plugin the user connected (#315). The order ticket, the DOM and the toasts follow the focused chart; the chart
  * trading lines ask for their own chart (`paneId`).
  */
 import { isPaneInReplay, replayActivePane, replayEnabled, setReplayActivePane } from "../replay";
 import { strategyTester } from "../strategy-tester-store";
+import { paperBroker } from "./paper-broker";
 import { pluginBroker } from "./plugin-broker";
 import { replayBroker } from "./replay-broker";
 import type { OrderRequest, TradingEvent } from "./types";
 
-/** The broker of a chart (none given: of the focused one). */
+/** The broker of a chart (none given: of the focused one): its replay account, the paper account when it is
+ *  connected, else the broker plugin. */
 export function brokerOf(paneId?: number | null) {
-  if (paneId != null) return isPaneInReplay(paneId) ? replayBroker : pluginBroker;
-  return replayEnabled() && replayActivePane() !== null ? replayBroker : pluginBroker;
+  if (paneId != null) return isPaneInReplay(paneId) ? replayBroker : paperBroker.active() ? paperBroker : pluginBroker;
+  return replayEnabled() && replayActivePane() !== null ? replayBroker : paperBroker.active() ? paperBroker : pluginBroker;
 }
 
-/** A chart shows trading (its lines, the Buy / Sell buttons): in replay, or traded through the connected broker. */
-export const tradesOn = (paneId: number) => isPaneInReplay(paneId) || pluginBroker.trades(paneId);
+/** A chart shows trading (its lines, the Buy / Sell buttons): in replay, through the paper account (a symbol with
+ *  live data), or through the connected broker plugin. */
+export const tradesOn = (paneId: number) => isPaneInReplay(paneId) || paperBroker.trades(paneId) || pluginBroker.trades(paneId);
 
 /** Make a chart the focused one of its broker (its Buy / Sell buttons clicked). */
 export function focusPane(paneId: number) {
@@ -26,7 +30,7 @@ export function focusPane(paneId: number) {
 
 /** The current broker, read through: every call goes to `brokerOf` its chart. */
 export const broker = {
-  version: () => replayBroker.version() + pluginBroker.version(),
+  version: () => replayBroker.version() + paperBroker.version() + pluginBroker.version(),
   activePane: () => brokerOf().activePane(),
   tradability: () => brokerOf().tradability(),
   /** What the broker of a chart (none given: of the focused one) supports. */
@@ -50,9 +54,11 @@ export const broker = {
   setPositionBrackets: (tp: number | null, sl: number | null, paneId?: number) => brokerOf(paneId).setPositionBrackets(tp, sl, paneId),
   onEvent(fn: (e: TradingEvent) => void): () => void {
     const offReplay = replayBroker.onEvent(fn);
+    const offPaper = paperBroker.onEvent(fn);
     const offPlugin = pluginBroker.onEvent(fn);
     return () => {
       offReplay();
+      offPaper();
       offPlugin();
     };
   },

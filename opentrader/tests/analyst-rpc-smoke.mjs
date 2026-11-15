@@ -286,8 +286,12 @@ child.stdin.write(
   JSON.stringify({
     id: "p1",
     type: "prompt",
-    message: "Analyze BINANCE:BTC/USDT on the 5m chart.",
-    images: [{ type: "image", data: png, mimeType: "image/png" }],
+    message: "Analyze BINANCE:BTC/USDT on the 5m chart. The three attached images are its 1d, 4h and 5m charts.",
+    images: [
+      { type: "image", data: png, mimeType: "image/png" },
+      { type: "image", data: png, mimeType: "image/png" },
+      { type: "image", data: png, mimeType: "image/png" },
+    ],
   }) + "\n",
 );
 
@@ -315,7 +319,7 @@ const indicators = toolResults.find((r) => r.name === "panel_indicators")?.text 
 expect(indicators.includes('"chartStudies"'), "panel_indicators did not report the chart's studies");
 expect(indicators.includes("RSI"), "the chart's study values did not reach the tool output");
 expect(indicators.includes('"perTimeframe"'), "panel_indicators did not report the per-timeframe values");
-expect(PROMPT_LOGS[0]?.images === true, "the chart image never reached the provider");
+expect(PROMPT_LOGS[0]?.images === true, "the chart images never reached the provider");
 expect(PROMPT_LOGS.every((log) => log.model === "mock-model"), "the provider model was not used");
 expect(text.includes("Long while the 5m structure holds"), `the final text did not stream: ${text}`);
 // Pi may warn on stderr; only its exit code and the documented records matter.

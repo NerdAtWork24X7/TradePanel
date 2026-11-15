@@ -253,7 +253,8 @@ export function createNavigation(cx: ChartCx): NavigationApi {
   /** Time-scale reset available: bar spacing or right offset off default. */
   const timeScaleOffDefault = () => {
     if (!cx.chart) return false;
-    if (cx.pastWindowEnd !== null || !cx.sliceAtEnd()) return true;
+    // Bar Replay is at the end of the replayed bars (bar-slice.ts does not slice there).
+    if (cx.pastWindowEnd !== null || (!cx.replayActive && !cx.sliceAtEnd())) return true;
     const bs = liveBarSpacing(cx.chart);
     // Derived from width/span, so sub-pixel drift is expected; 0.05px of bar
     // spacing is far below anything a user could set deliberately.
@@ -352,7 +353,9 @@ export function createNavigation(cx: ChartCx): NavigationApi {
       }
       setGotoShown(
         canShow(behavior, nearGoto) &&
-          (cx.pastWindowEnd !== null || !cx.sliceAtEnd() || cx.chart.timeScale().scrollPosition() + projectionBars(cx.chart, cx.mainLastIndex()) < 0),
+          (cx.pastWindowEnd !== null ||
+            (!cx.replayActive && !cx.sliceAtEnd()) ||
+            cx.chart.timeScale().scrollPosition() + projectionBars(cx.chart, cx.mainLastIndex()) < 0),
       );
       setBarShown(canShow(behavior, nearBar));
       setResetAvailable(scalesOffDefault());

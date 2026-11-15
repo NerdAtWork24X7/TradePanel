@@ -1,12 +1,14 @@
 /*
- * "Trade with your broker" (#315): every installed broker plugin as a card — the nine crypto venues, or a broker
- * of another market — in the venue catalog's order; a click enables the plugin when it is off and connects the
- * window's trading to it, so a venue is one click away whether its plugin was installed enabled or not.
+ * "Trade with your broker" (#315): the built-in paper account, then every installed broker plugin as a card — the
+ * nine crypto venues, or a broker of another market — in the venue catalog's order; a click enables the plugin when
+ * it is off and connects the window's trading to it, so a venue is one click away whether its plugin was installed
+ * enabled or not. The paper account needs nothing installed: it trades the charts' live prices with simulated money.
  */
 import { createSignal, For, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { createDialogKeys } from "../../components/Dialog";
 import { exchangeLogoSrc } from "../../data/exchange-logos";
+import { paperBroker } from "../../data/trading/paper-broker";
 import { pluginBroker } from "../../data/trading/plugin-broker";
 import { tradingUi } from "../../data/trading/trading-ui";
 import { brokerCard, sortBrokerCards } from "../../data/venues";
@@ -32,8 +34,17 @@ export function BrokerPicker() {
   const close = () => tradingUi.setBrokerPicker(false);
   createDialogKeys({ onEscape: close });
   const active = () => pluginBroker.status()?.active ?? null;
+  const paper = () => paperBroker.active();
   const brokers = () => sortBrokerCards(pluginBroker.status()?.brokers ?? []);
   const [busy, setBusy] = createSignal<string | null>(null);
+
+  /** The paper account needs no plugin: connecting it takes the place of the broker plugin. */
+  const choosePaper = () => {
+    if (busy()) return;
+    paperBroker.connect();
+    close();
+    tradingUi.showAccountManager();
+  };
 
   /** What a card says under its name. */
   const note = (b: { id: string; connected: boolean; enabled: boolean }) =>
@@ -73,14 +84,31 @@ export function BrokerPicker() {
             <h2 class="trd-select-title">Trade with your broker</h2>
           </div>
           <div class="trd-select-grid">
+            <Show when={paperBroker.available}>
+              <button
+                type="button"
+                class="trd-broker-card"
+                classList={{ "is-active": paper() }}
+                data-broker="paper"
+                onClick={choosePaper}
+              >
+                <span class="trd-broker-mark trd-broker-card-mark" data-no-translate>
+                  {initials(translate("Paper trading"))}
+                </span>
+                <span class="trd-broker-card-name">{translate("Paper trading")}</span>
+                <span class="trd-broker-card-note">{paper() ? translate("Connected") : translate("Connect")}</span>
+              </button>
+            </Show>
             <For
               each={brokers()}
               fallback={
-                <div class="trd-select-empty">
-                  {isTauri()
-                    ? translate("No broker plugin is installed. Install one in Settings > Plugins: Binance, Bybit, OKX, Gate.io, Bitget, KuCoin, Coinbase, Kraken, or a broker of your own.")
-                    : translate("Broker plugins run in the desktop app. Open OpenTrader itself to trade.")}
-                </div>
+                <Show when={!paperBroker.available}>
+                  <div class="trd-select-empty">
+                    {isTauri()
+                      ? translate("No broker plugin is installed. Install one in Settings > Plugins: Binance, Bybit, OKX, Gate.io, Bitget, KuCoin, Coinbase, Kraken, or a broker of your own.")
+                      : translate("Broker plugins run in the desktop app. Open OpenTrader itself to trade.")}
+                  </div>
+                </Show>
               }
             >
               {(b) => {
@@ -115,7 +143,7 @@ export function BrokerPicker() {
             </For>
           </div>
           <div class="trd-select-foot">
-            <span>Brokers are plugins that run on this computer.</span>
+            <span>Paper trading is built in. Other brokers are plugins that run on this computer.</span>
             <Show when={isTauri()}>
               <button
                 type="button"
@@ -140,13 +168,14 @@ export function BrokerPicker() {
               Configure exchanges…
             </button>
           </div>
-          <Show when={pluginBroker.status()?.active}>
+          <Show when={pluginBroker.status()?.active || paper()}>
             <div class="trd-select-foot">
               <button
                 type="button"
                 class="trd-select-link"
                 onClick={() => {
-                  void pluginBroker.setActive(null);
+                  if (paper()) paperBroker.disconnect();
+                  else void pluginBroker.setActive(null);
                   close();
                 }}
               >

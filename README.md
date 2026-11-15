@@ -19,13 +19,21 @@ adds:
   used only after an explicit choice, and OpenTrader's trading switch and live-order
   confirmation remain the gate. An order ticket that cannot trade links straight to the
   broker's card or to the plugin catalog, so the settings it needs are one click away.
+- **Paper trading** — a simulated account built into the app, listed with the brokers in
+  **Exchanges → Brokers** and *Trade → Connect broker…*: it fills orders at the chart's
+  live price with no plugin, account or API key. Market, limit, stop and stop-limit orders
+  with take profit / stop loss, partial closes, reversals and order modification, a
+  starting balance of your choosing, and an account manager with balance, equity, margin
+  and P&L; positions and orders are kept on the computer and fill while the app is open.
 - **AI chart analyst** — *AI assistant → Analyze chart* runs the bundled
   [Pi coding agent](https://github.com/earendil-works/pi) as a supervised, read-only process
-  (`opentrader/ai-runtime`). The panel renders the visible charts, sends them with a numeric
-  snapshot (1d/4h/5m studies, structural levels, position, ticket), and streams the answer plus
-  a validated long/short trade card the user can copy into the ticket. The agent has five
-  `panel_*` tools and cannot trade; only HTTPS or loopback HTTP providers are accepted, and the
-  API key stays in the OS credential store.
+  (`opentrader/ai-runtime`). A short-lived hidden Tauri window renders the selected symbol at 1d, 4h
+  and 5m with the studies the user shows; those three pictures travel with a numeric snapshot
+  (1d/4h/5m studies, structural levels, position, ticket). The answer streams with a validated
+  long/short trade card (BP, SL, qty, TP, probability) whose levels can be shown on the chart or
+  filled into the ticket, and every run is kept in an analysis log that can be loaded again. The
+  agent has five `panel_*` tools and cannot trade; only HTTPS or loopback HTTP providers are
+  accepted, and the API key stays in the OS credential store.
 - **Trade plan projections** — the order ticket shows entry, stop and target, risk and
   reward in account currency and % of balance, R:R, and the balance after either level.
 - **Secrets in the OS keyring** — plugin settings marked `secret` are read and written

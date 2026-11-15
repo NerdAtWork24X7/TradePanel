@@ -161,8 +161,9 @@ export const pluginBroker = createRoot(() => {
         ok: false,
         reason: "launch",
         title: translate("Connect a broker"),
-        text: translate("Connect a broker plugin from the Trade menu to trade."),
-        fix: (s?.brokers.length ?? 0) > 0 ? "connect" : "install",
+        // The broker picker holds the paper account (always there) beside the plugins: it is the one way in either.
+        text: translate("Connect a broker in the Trade menu to trade: the paper account is built in, or a broker plugin."),
+        fix: "connect",
       };
     }
     if (!s.pluginConnected || !s.state?.connected)

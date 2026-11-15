@@ -40,12 +40,19 @@ each ships its own agent guide in `skills/`.
 - `src-tauri/src/pi/` + `src/window/assistant/ChartAnalyst.tsx` — the chart analyst runs the
   bundled Pi coding agent (`ai-runtime/`, staged by `npm run ai:runtime`) as a read-only RPC
   child: five `panel_*` tools, a version-1 snapshot, no built-in tools. The window renders the
-  layout with `layoutSnapshot` and sends the snapshot; Rust validates it, owns the provider
-  key and streams the events. Base URLs are normalized to the API base (`/chat/completions`
-  is appended by Pi) and only HTTPS or loopback HTTP is accepted. `npm run test:ai` runs the
-  staged runtime against a mock provider.
+  selected symbol at 1d/4h/5m in a short-lived hidden Tauri window (`AnalysisCaptureWindow`,
+  with the visible studies) and sends those three pictures plus the snapshot; Rust validates them,
+  owns the provider key and streams the events. Completed runs live in the analysis log
+  (`src/data/analyst-log.ts`, pictures under `<app data>/analysis-images`). Base URLs are
+  normalized to the API base (`/chat/completions` is appended by Pi) and only HTTPS or loopback
+  HTTP is accepted. `npm run test:ai` runs the staged runtime against a mock provider.
 - `src/window/trading/plan.ts` + `TradePlanCard.tsx` — the ticket's projections; keep the
   math in `plan.ts` (tested) and the view free of it.
+- `src/data/trading/paper-account.ts` + `paper-broker.ts` — the built-in paper account: the
+  engine is pure and tested (`__tests__/paper-account.test.ts`), the store feeds it the
+  datafeed's live prices and keeps it in kv; `window/trading/PaperAccount.tsx` is its account
+  view. It is picked by `brokerOf()` in `data/trading/broker.ts` after replay and before a
+  broker plugin; connecting a plugin disconnects it and the other way round.
 
 ## Commands
 

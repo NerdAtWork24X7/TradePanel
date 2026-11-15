@@ -166,7 +166,9 @@ export function createLive(cx: ChartCx): LiveApi {
     if (!cx.series) return;
     const st = currentTokens().styles;
     // The chart given a slice of older bars (bar-slice.ts) keeps its series as it is; the studies update.
-    const onChart = cx.sliceAtEnd();
+    // In Bar Replay the chart's series are the replayed bars (`raw`): they are drawn here too (a cut then one
+    // update at a time), not left with the bars after the replay time.
+    const onChart = cx.replayActive || cx.sliceAtEnd();
     if (
       onChart &&
       next &&

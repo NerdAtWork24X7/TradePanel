@@ -40,6 +40,13 @@ const FILE: &str = "window-session.json";
 const MAIN: &str = "main";
 /// The screener's own window (placement "Separate window", window-bridge.ts).
 const SCREENER_WINDOW: &str = "screener";
+/// Analyze chart's short-lived off-screen renderer (window-bridge.ts).
+const ANALYSIS_CAPTURE_PREFIX: &str = "analysis-capture-";
+
+/// Windows that are not part of the user's workspace: not saved, not restored.
+fn ephemeral(label: &str) -> bool {
+    label == SCREENER_WINDOW || label.starts_with(ANALYSIS_CAPTURE_PREFIX)
+}
 /// Minimum overlap (physical px) between a saved window and a monitor for the
 /// saved position to be used.
 const MIN_VISIBLE: i32 = 64;
@@ -148,8 +155,8 @@ fn record(session: &Session, window: &Window) {
 /// Window events: keep bounds / focus current, forget a window the user closes
 /// while others stay open.
 pub fn on_window_event(window: &Window, event: &WindowEvent) {
-    // The screener's own window is not a chart window: not saved, not restored.
-    if window.label() == SCREENER_WINDOW {
+    // The screener's / capture window is not a workspace window.
+    if ephemeral(window.label()) {
         return;
     }
     let app = window.app_handle();
@@ -230,7 +237,9 @@ pub fn init(app: &AppHandle) {
             return;
         }
     };
-    let saved: SessionFile = files::load_or_default(&path);
+    let mut saved: SessionFile = files::load_or_default(&path);
+    // A capture window can only be left in the file by an interrupted run.
+    saved.windows.retain(|w| !ephemeral(&w.label));
 
     let Some(main) = app.get_webview_window(MAIN) else {
         eprintln!("[window-session] main window missing");
@@ -250,7 +259,7 @@ pub fn init(app: &AppHandle) {
     let others: Vec<WindowState> = saved
         .windows
         .iter()
-        .filter(|w| w.label != MAIN && Some(&w.label) != adopted.as_ref())
+        .filter(|w| w.label != MAIN && Some(&w.label) != adopted.as_ref() && !ephemeral(&w.label))
         .cloned()
         .collect();
 
@@ -269,7 +278,10 @@ pub fn init(app: &AppHandle) {
     }
 
     // Focus the window that had it (an adopted label now lives in main).
-    let focus = saved.focused.map(|f| if Some(&f) == adopted.as_ref() { MAIN.to_string() } else { f });
+    let focus = saved
+        .focused
+        .filter(|f| !ephemeral(f))
+        .map(|f| if Some(&f) == adopted.as_ref() { MAIN.to_string() } else { f });
     if let Some(label) = &focus {
         if let Some(win) = app.get_webview_window(label) {
             let _ = win.set_focus();

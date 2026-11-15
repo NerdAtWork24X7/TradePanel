@@ -189,6 +189,33 @@
   line-height: 17px;
 }
 
+/* The paper account's figures (its card): a label, the value on the right. */
+.ex-figures {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ex-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--color-content-secondary-neutral);
+  font-size: 12px;
+  line-height: 18px;
+}
+.ex-figure-value {
+  margin-inline-start: auto;
+  color: var(--ot-strong);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ex-figure-value.is-pos {
+  color: var(--trd-pos);
+}
+.ex-figure-value.is-neg {
+  color: var(--trd-neg);
+}
+
 /* ─── Detail pane ─── */
 .ex-detail {
   min-height: 0;

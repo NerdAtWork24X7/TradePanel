@@ -79,6 +79,9 @@ export function createBarSlice(cx: ChartCx): BarSliceApi {
 
   /** Show slice [a, b): the chart's data, its studies drawn there, the view on the same bars. */
   function moveTo(a: number, b: number): boolean {
+    // Bar Replay (and a type the chart does not slice): `raw` is the replayed bars, never a slice of `allBars`.
+    // A move here would put the bars after the replay time back on the chart.
+    if (!sliceable()) return false;
     if (moving || (a === from && b === from + cx.raw.length)) return false;
     const r = view();
     const shift = from - a;

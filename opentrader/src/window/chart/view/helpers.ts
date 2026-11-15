@@ -193,6 +193,16 @@ export function appearanceOptions(t: ReturnType<typeof readChartTokens>) {
   };
 }
 
+/** The bars the status legend reads at `time` (no time: the newest bar). A chart given a slice of older bars
+ *  (bar-slice.ts) shows its newest LOADED bar; in Bar Replay the newest bar is the newest REPLAYED one (`raw`),
+ *  even though the chart is not at the end of `allBars`. */
+export function legendBars(
+  cx: { replayActive: boolean; sliceAtEnd: () => boolean; raw: OHLC[]; allBars: OHLC[] },
+  time?: number,
+): OHLC[] {
+  return time == null && !cx.replayActive && !cx.sliceAtEnd() ? cx.allBars : cx.raw;
+}
+
 // Resolve the legend's values for the bar at `idx`. Change is close minus the
 // previous bar's close; colours follow the bar's direction for O/H/L/C and the
 // change sign for the single-line value. (Reference: mock buildLegend.)

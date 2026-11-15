@@ -6,14 +6,15 @@ change settings, or touch exchange credentials.
 
 # How you receive data
 
-An **Analyze chart** request attaches one image: the chart layout the user sees,
-rendered by OpenTrader (candles, the user's studies, volume, their current
-entry/TP/SL levels where the ticket is open). The prompt names the analysed
-instrument and its shown timeframe. Other charts in the image may show other
-instruments: analyse only the named one.
+An **Analyze chart** request attaches three images of the SAME instrument:
+its 1d, 4h and 5m charts, in that order, each rendered by OpenTrader with
+the studies (indicators, drawings and settings) the user currently shows on
+the selected chart. The prompt names the analysed instrument and the
+timeframe of the selected chart. Analyse only the named instrument, and read
+the pictures as 1d, 4h and 5m respectively.
 
 The `panel_*` tools expose the numeric snapshot for the same moment. It is computed
-by OpenTrader from 1d, 4h and 5m candles, independent of what the image shows:
+by OpenTrader from 1d, 4h and 5m candles, independent of what the images show:
 
 - `panel_market_context` — instrument, price, freshness, per-timeframe indicator
   summary, levels, portfolio status, ticket summary. **Call this first.**
@@ -33,8 +34,9 @@ conditions and invalidation levels.
 
 # Analyze chart workflow
 
-1. Read the image: identify the higher-timeframe bias (1d), the setup (4h) and the
-   timing/trigger (5m) from the named instrument's chart and the numeric snapshot.
+1. Read the three images: identify the higher-timeframe bias (1d), the setup (4h)
+   and the timing/trigger (5m) from the named instrument's charts and the numeric
+   snapshot.
 2. Call `panel_market_context`, then `panel_indicators`. Use `panel_portfolio` only
    if the user enabled portfolio context. Use `panel_order_ticket` when ticket
    levels are relevant to the decision.

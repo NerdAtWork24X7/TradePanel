@@ -1,6 +1,7 @@
 /* @refresh reload */
 import "./styles.css";
 import { hydrateKv } from "./data/kv";
+import { ANALYSIS_CAPTURE_VIEW } from "./data/analyst-capture";
 import { installOverflowTooltip } from "./components/overflow-tooltip";
 import { installBrowserMenuBlock } from "./components/browser-menu";
 
@@ -18,18 +19,33 @@ void hydrateKv().finally(async () => {
   // Restart: main may take over a saved window's tabs (window session).
   const { adoptSavedWindowTabs } = await import("./window/shell/window-bridge");
   await adoptSavedWindowTabs();
+  // The interface language, before anything is drawn.
+  const { startTranslation } = await import("./i18n/language");
+  await startTranslation();
+  const params = new URLSearchParams(location.search);
+  // Analyze chart's short-lived hidden renderer: a chart only, no shell.
+  if (params.get("view") === ANALYSIS_CAPTURE_VIEW) {
+    const id = params.get("id") ?? "";
+    // The chart studies must exist before the chart is created and pictured.
+    const { loadIndicatorLibrary } = await import("./window/chart/indicators/registry");
+    // A failed library chunk must not leave the capture window on its splash.
+    await loadIndicatorLibrary().catch(() => undefined);
+    const { render } = await import("solid-js/web");
+    const { AnalysisCaptureWindow } = await import("./window/chart/AnalysisCaptureWindow");
+    const root = document.getElementById("root") as HTMLElement;
+    render(() => <AnalysisCaptureWindow id={id} />, root);
+    hideSplash();
+    return;
+  }
   // Update state for the title bar, main menu and Settings > About.
   const { initAppUpdate } = await import("./data/app-update");
   initAppUpdate();
   // The run's app zoom (a window opened after a change takes it).
   const { initAppZoom } = await import("./data/app-zoom");
   initAppZoom();
-  // The interface language, before anything is drawn.
-  const { startTranslation } = await import("./i18n/language");
-  await startTranslation();
   const { render } = await import("solid-js/web");
   // The screener's own window (placement "Separate window") holds the screener only.
-  if (new URLSearchParams(location.search).get("view") === "screener") {
+  if (params.get("view") === "screener") {
     const { ScreenerWindow } = await import("./window/screener/ScreenerWindow");
     render(() => <ScreenerWindow />, document.getElementById("root") as HTMLElement);
     hideSplash();

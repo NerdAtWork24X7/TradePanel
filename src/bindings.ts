@@ -172,6 +172,15 @@ export const commands = {
 	readNoteImage: (name: string) => typedError<string, string>(__TAURI_INVOKE("read_note_image", { name })),
 	/**  Remove the chart snapshot of a note (a removed or edited note). */
 	deleteNoteImage: (name: string) => typedError<null, string>(__TAURI_INVOKE("delete_note_image", { name })),
+	/**
+	 *  Store an Analyze chart picture (1d / 4h / 5m) and return its file name.
+	 *  The analyst log keeps the name, never the bytes.
+	 */
+	saveAnalysisImage: (dataBase64: string, ext: string) => typedError<string, string>(__TAURI_INVOKE("save_analysis_image", { dataBase64, ext })),
+	/**  Read an Analyze chart picture back as base64. */
+	readAnalysisImage: (name: string) => typedError<string, string>(__TAURI_INVOKE("read_analysis_image", { name })),
+	/**  Remove an Analyze chart picture (a deleted or evicted log entry). */
+	deleteAnalysisImage: (name: string) => typedError<null, string>(__TAURI_INVOKE("delete_analysis_image", { name })),
 	/**  The imported series, by name. */
 	localSeriesList: () => typedError<LocalSeries[], string>(__TAURI_INVOKE("local_series_list")),
 	/**
@@ -302,19 +311,17 @@ export const commands = {
 	assistantChat: (request: number, body: string, onEvent: Channel<string>) => typedError<null, string>(__TAURI_INVOKE("assistant_chat", { request, body, onEvent })),
 	/**  Stops a chat request under way (its answer so far stays). */
 	assistantCancel: (request: number) => __TAURI_INVOKE<void>("assistant_cancel", { request }),
-	/**  The window's analyst settings (base URL, model, whether a key is stored). */
-	analystSettings: () => __TAURI_INVOKE<AnalystSettings>("analyst_settings"),
-	/**  Save the base URL and model; a non-empty `api_key` replaces the stored key. */
-	analystSetSettings: (baseUrl: string, model: string, apiKey: string | null) => typedError<AnalystSettings, string>(__TAURI_INVOKE("analyst_set_settings", { baseUrl, model, apiKey })),
-	/**  Remove the stored key (the base URL and model stay). */
-	analystClearKey: () => typedError<AnalystSettings, string>(__TAURI_INVOKE("analyst_clear_key")),
+	piStatus: () => __TAURI_INVOKE<PiStatus>("pi_status"),
+	piSetSettings: (baseUrl: string, model: string, apiKey: string | null) => typedError<PiStatus, string>(__TAURI_INVOKE("pi_set_settings", { baseUrl, model, apiKey })),
+	piClearKey: () => typedError<PiStatus, string>(__TAURI_INVOKE("pi_clear_key")),
 	/**
-	 *  One analysis: `messages` is the OpenAI-compatible message array the window built (with the
-	 *  screenshot as a data URL). Every streamed event is sent on `on_event` (its JSON text).
+	 *  One Analyze chart request: a versioned context snapshot, the rendered chart
+	 *  (data URLs), the prompt, and the event channel the run streams on.
 	 */
-	analystAnalyze: (request: number, messages: string, onEvent: Channel<string>) => typedError<null, string>(__TAURI_INVOKE("analyst_analyze", { request, messages, onEvent })),
-	/**  Stop an analysis under way (its answer so far stays). */
-	analystCancel: (request: number) => __TAURI_INVOKE<void>("analyst_cancel", { request }),
+	piAnalyze: (snapshot: string, images: string, message: string, onEvent: Channel<string>) => typedError<null, string>(__TAURI_INVOKE("pi_analyze", { snapshot, images, message, onEvent })),
+	piAbort: () => typedError<null, string>(__TAURI_INVOKE("pi_abort")),
+	/**  Clear the conversation: the next analysis starts a new Pi session. */
+	piNewSession: () => typedError<null, string>(__TAURI_INVOKE("pi_new_session")),
 	localModelInfo: () => typedError<LocalModelInfo, string>(__TAURI_INVOKE("local_model_info")),
 	/**
 	 *  Downloads what is missing: everything on a first install, the newest fine-tune on an update (then the older ones
@@ -486,14 +493,6 @@ export type AlertLeader = {
 	window: string,
 };
 
-export type AnalystSettings = {
-	/**  The OpenAI-compatible base URL (`https://api.openai.com/v1`). */
-	baseUrl: string,
-	model: string,
-	/**  A key is stored; its value never leaves Rust. */
-	hasKey: boolean,
-};
-
 /**  Current update state, sent to every window on each change. */
 export type AppUpdateStatus = {
 	state: UpdateState,
@@ -617,7 +616,14 @@ export type BrokerOrderEvent = {
 export type BrokerPlugin = {
 	id: string,
 	name: string,
+	/**  The exchange its manifest names: the venue the Exchanges tab and the picker list it under. */
+	exchange: string | null,
 	connected: boolean,
+	/**
+	 *  Enabled: its program runs, so it can be connected. A disabled one is listed all the same, so the
+	 *  user finds every venue's broker and turns on the one they trade.
+	 */
+	enabled: boolean,
 };
 
 /**  Bid / ask / last of a ticker the order ticket watches (`broker.quote`). */
@@ -1295,6 +1301,25 @@ export type PackagePreview = {
 	verified: boolean,
 	/**  The installed version it replaces. */
 	replaces: string | null,
+};
+
+/**  The window's view of the runtime. */
+export type PiStatus = {
+	/**  "streaming", "idle" or "stopped". */
+	state: string,
+	streaming: boolean,
+	ready: boolean,
+	/**  A base URL, a model, and a key (or a keyless loopback server). */
+	configured: boolean,
+	hasKey: boolean,
+	baseUrl: string,
+	model: string,
+	target: string | null,
+	runtimeRoot: string | null,
+	nodeVersion: string | null,
+	piVersion: string | null,
+	contextFile: string,
+	error: string | null,
 };
 
 /**  One installed plugin, as Settings shows it. */

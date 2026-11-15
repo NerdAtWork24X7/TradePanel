@@ -33,6 +33,7 @@ import { Tooltip } from "../../../components/Tooltip";
 import { tradingPrefs } from "../../../data/trading/trading-prefs";
 import { tradingAppearance, type TradingAppearance } from "../../header/chart-settings";
 import { broker, brokerOf, focusPane, tradesOn } from "../../../data/trading/broker";
+import { paperBroker } from "../../../data/trading/paper-broker";
 import { pluginBroker } from "../../../data/trading/plugin-broker";
 import { ticketQty, tradingUi } from "../../../data/trading/trading-ui";
 import type { TradingOrder, TradingPosition } from "../../../data/trading/types";
@@ -119,6 +120,8 @@ export function createTradingLines(cx: ChartCx): TradingLinesApi {
   const on = () => tradesOn(paneId);
   // The plugin broker maps this chart's symbol to its ticker.
   onCleanup(pluginBroker.registerChart(paneId, () => cx.props.symbol));
+  // The paper account reads each chart's symbol the same way (it trades the symbol itself).
+  onCleanup(paperBroker.registerChart(paneId, () => cx.props.symbol));
   /** This chart's Trading settings. */
   const ta = (): TradingAppearance => cx.appearance().trading ?? DEFAULT_TRADING;
   const tick = () => cachedSymbolSessions(cx.props.symbol ?? "")?.mintick ?? broker.quote()?.minTick ?? 0.01;
@@ -174,6 +177,10 @@ export function createTradingLines(cx: ChartCx): TradingLinesApi {
      *  "<id>#limit". */
     type Line = { key: string; id: string; limit: boolean };
 
+    /** A stop-limit order waiting for its stop shows its limit price on a
+     *  dotted line of its own (reference app). */
+    const hasLimitLine = (o: TradingOrder) => o.kind === "order" && o.type === "stopLimit" && !o.stopTriggered && o.limitPrice !== null;
+
     /** Drawing order (reference app: the last placed on top): the position's
      *  brackets, then each order followed by its own brackets. */
     const lines = createMemo<Line[]>(() => {
@@ -189,10 +196,6 @@ export function createTradingLines(cx: ChartCx): TradingLinesApi {
       }
       return out;
     });
-
-    /** A stop-limit order waiting for its stop shows its limit price on a
-     *  dotted line of its own (reference app). */
-    const hasLimitLine = (o: TradingOrder) => o.kind === "order" && o.type === "stopLimit" && !o.stopTriggered && o.limitPrice !== null;
 
     /** The price of a line (the dragged price while it is dragged). */
     const linePrice = (o: TradingOrder, limit = false): number | null => {

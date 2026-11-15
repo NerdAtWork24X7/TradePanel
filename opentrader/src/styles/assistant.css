@@ -772,6 +772,165 @@
   border: 1px solid var(--color-divider, var(--color-cold-gray-800));
   border-radius: 6px;
 }
+.asst-shot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+.asst-shot {
+  position: relative;
+  display: block;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  text-align: start;
+}
+.asst-shot:hover .asst-analyst-image {
+  border-color: var(--color-brand, var(--color-cold-gray-450));
+}
+.asst-shot:focus-visible {
+  outline: 2px solid var(--color-brand, var(--color-cold-gray-200));
+  outline-offset: 2px;
+}
+.asst-shot .asst-analyst-image {
+  display: block;
+}
+.asst-shot-label {
+  position: absolute;
+  inset-block-start: 4px;
+  inset-inline-start: 4px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-bg-primary, #000) 72%, transparent);
+  color: var(--color-text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 14px;
+  pointer-events: none;
+}
+.asst-log {
+  /* The analyst column is a finite-height flex column: without this the log
+     shrinks to its header and the rows paint under the next section. */
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--color-divider, var(--color-cold-gray-800));
+  border-radius: 8px;
+  background: var(--color-bg-highlight);
+}
+.asst-log-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.asst-log-count {
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+.asst-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.asst-log-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 6px;
+}
+.asst-log-row.is-current {
+  background: color-mix(in srgb, var(--color-brand, #2962ff) 12%, transparent);
+}
+.asst-log-open {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+.asst-log-open:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+}
+.asst-log-open:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.asst-log-open:focus-visible {
+  outline: 2px solid var(--color-brand, var(--color-cold-gray-200));
+  outline-offset: 1px;
+}
+.asst-log-side {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-content-primary-positive, #089981);
+}
+.asst-log-side.is-short {
+  color: var(--color-content-primary-danger, #f23645);
+}
+.asst-log-symbol {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.asst-log-stamp {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.asst-log-prob {
+  min-width: 30px;
+  text-align: end;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+}
+.asst-log-del {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.asst-log-del:hover:not(:disabled) {
+  color: var(--color-content-primary-danger, #f23645);
+  background: color-mix(in srgb, var(--color-content-primary-danger, #f23645) 12%, transparent);
+}
+.asst-log-del:focus-visible {
+  outline: 2px solid var(--color-brand, var(--color-cold-gray-200));
+  outline-offset: 1px;
+}
 .asst-analyst-figure figcaption {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
@@ -779,12 +938,19 @@
   white-space: pre-wrap;
 }
 .asst-analyst-ask {
+  /* The follow-up composer stays at the bottom of the analyst panel while a
+     long answer scrolls above it. */
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 8px;
   border: 1px solid var(--color-divider, #444);
   border-radius: 8px;
+  background: var(--color-bg-primary);
+  box-shadow: 0 -6px 14px 0 color-mix(in srgb, #000 32%, transparent);
 }
 .asst-analyst-ask:focus-within {
   border-color: var(--color-brand, var(--color-cold-gray-450));

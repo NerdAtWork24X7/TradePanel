@@ -104,12 +104,10 @@ function toolText(result: unknown): string {
     .join("\n");
 }
 
-/** A `panel_submit_trade_plan` result, or null when the record carries none. */
-function planOf(details: unknown): AnalystPlan | null {
-  if (!details || typeof details !== "object") return null;
-  const plan = (details as { plan?: unknown }).plan;
-  if (!plan || typeof plan !== "object") return null;
-  const p = plan as Record<string, unknown>;
+/** A validated plan object, or null when it lacks the levels the card needs. */
+export function asAnalystPlan(value: unknown): AnalystPlan | null {
+  if (!value || typeof value !== "object") return null;
+  const p = value as Record<string, unknown>;
   const action = p.action;
   if (action !== "long" && action !== "short") return null;
   const entry = asNumber(p.entry);
@@ -131,6 +129,12 @@ function planOf(details: unknown): AnalystPlan | null {
     lastPrice: asNumber(p.lastPrice),
     acceptedAtMs: asNumber(p.acceptedAtMs) ?? 0,
   };
+}
+
+/** A `panel_submit_trade_plan` result, or null when the record carries none. */
+function planOf(details: unknown): AnalystPlan | null {
+  if (!details || typeof details !== "object") return null;
+  return asAnalystPlan((details as { plan?: unknown }).plan);
 }
 
 /**

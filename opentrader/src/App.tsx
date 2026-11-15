@@ -16,6 +16,11 @@ import { activeChartProbe } from "./window/chart/active-chart";
 import { openCreateAlertOnSelection } from "./window/shell/create-alert";
 import { findTimezone } from "./data/timezones";
 import { ChartGrid } from "./window/chart/ChartGrid";
+import { installAnalystCapture } from "./data/analyst-capture";
+import { installAnalystTradeDrawing, type AnalystTradeDrawingPlan } from "./data/analyst-trade-drawing";
+import { chartLastBarTime } from "./data/chart-state-registry";
+import { planDrawing } from "./window/trading/plan-drawing";
+import { captureInAnalysisWindow } from "./window/chart/analyst-capture-window";
 import { LAYOUT_SPECS, layoutFromVariantId, variantIdForLayout, type LayoutId } from "./window/chart/layouts";
 import { DrawingToolbar } from "./window/drawings/DrawingToolbar";
 import { drawingPanelVisible } from "./data/drawing-panel";
@@ -25,7 +30,7 @@ import { TabPanelActions } from "./window/shell/TabPanelActions";
 import { KeyboardShortcutsPanel } from "./window/shell/KeyboardShortcutsPanel";
 import { ZoomToast } from "./window/shell/ZoomToast";
 import { WindowControls } from "./window/shell/WindowControls";
-import { DEFAULT_PANELS, reconcilePanes } from "./window/shell/tabs";
+import { DEFAULT_PANELS, reconcilePanes, type PaneChart } from "./window/shell/tabs";
 import { recordRecentSymbol } from "./data/recent-symbols";
 import { AppSettingsDialog } from "./window/header/AppSettingsDialog";
 import { AlertDialog } from "./window/alerts/AlertDialog";
@@ -86,6 +91,7 @@ import { BrokerPicker } from "./window/trading/BrokerPicker";
 import { TradingToasts } from "./window/trading/TradingToasts";
 import { tradingUi } from "./data/trading/trading-ui";
 import { replayBroker } from "./data/trading/replay-broker";
+import { paperBroker } from "./data/trading/paper-broker";
 import { pluginBroker } from "./data/trading/plugin-broker";
 import { createDrawingStore } from "./window/drawings/drawing-store";
 import { createChartBridge } from "./window/right-rail/community/chart-bridge";
@@ -396,6 +402,52 @@ function App() {
     moveDrawingToDisplayIndex,
   } = drawingStore;
   const chartEdits = createChartEdits(appTabs, undo, drawingStore);
+
+  // Analyze chart "Show on chart": the plan becomes a long / short position
+  // drawing (the risk/reward box) on a pane that shows the symbol. It is a
+  // drawing like any other: undoable, movable and removable.
+  onCleanup(
+    installAnalystTradeDrawing((plan: AnalystTradeDrawingPlan) => {
+      const symbol = plan.symbol.trim().toUpperCase();
+      const tab = activeTab();
+      const active = activePaneState();
+      const pane =
+        tab.panes.find((p) => p.symbol.trim().toUpperCase() === symbol) ??
+        (active.symbol.trim().toUpperCase() === symbol ? active : null);
+      if (!pane) return false;
+      const drawing = planDrawing(plan, pane.interval, chartLastBarTime(pane.symbol) ?? Date.now());
+      if (!drawing) return false;
+      const id = drawingStore.addDrawingToSymbol(drawingStore.drawingKeyFor(pane, tab.id), drawing);
+      setSelectedDrawingId(id);
+      return true;
+    }),
+  );
+
+  // Analyze chart's pictures: a short-lived, off-screen second Tauri window
+  // renders the selected chart at 1d / 4h / 5m with the studies it shows, so
+  // the analyst gets three images without the visible chart flashing through
+  // intervals and without a bundled browser.
+  const copyPane = (pane: PaneChart): PaneChart => ({
+    ...pane,
+    indicators: [...pane.indicators],
+    ...(pane.compare ? { compare: pane.compare.map((c) => ({ ...c })) } : {}),
+    ...(pane.indicatorSettings ? { indicatorSettings: JSON.parse(JSON.stringify(pane.indicatorSettings)) as PaneChart["indicatorSettings"] } : {}),
+    ...(pane.settings ? { settings: JSON.parse(JSON.stringify(pane.settings)) as PaneChart["settings"] } : {}),
+  });
+  onCleanup(
+    installAnalystCapture((request) => {
+      const pane = copyPane(activePaneState());
+      return captureInAnalysisWindow({
+        symbol: request.symbol || pane.symbol,
+        targets: [...request.targets],
+        pane,
+        indicatorsHidden: indicatorsHidden(),
+        theme: theme(),
+        timeZone: displayTimeZone(timezone().label, timezone().iana, pane.symbol),
+        timeZoneLabel: timezone().label,
+      });
+    }),
+  );
   const {
     patchStudyInputs,
     addIndicator,
@@ -508,8 +560,8 @@ function App() {
   // A tab switch only hides it: the tab left keeps its replay.
   createEffect(
     on([activeTabId, replayEnabled], ([tab, on], prev) => {
-      // A connected broker plugin keeps it.
-      if (!on && (!prev || prev[0] === tab) && !pluginBroker.status()?.active) tradingUi.closeTicket();
+      // A connected broker plugin or the paper account keeps it.
+      if (!on && (!prev || prev[0] === tab) && !pluginBroker.status()?.active && !paperBroker.active()) tradingUi.closeTicket();
     }),
   );
 
@@ -976,7 +1028,7 @@ function App() {
             for them — without this the WatchlistDetail panel gets no symbol and
             stays blank. WatchlistDetail/Watchlist both accept the bare form. */}
         {/* Order ticket (paper trading in Bar Replay, or a connected broker plugin), docked left of the right rail. */}
-        <Show when={replayEnabled() || !!pluginBroker.status()?.active}>
+        <Show when={replayEnabled() || !!pluginBroker.status()?.active || paperBroker.active()}>
           <OrderTicket />
         </Show>
         <RightRail

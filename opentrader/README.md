@@ -39,11 +39,18 @@ app's own seams (no fork of the charting core):
   `node scripts/install-broker-plugins.mjs` (or `npm run ot:brokers`); the launcher installs
   them **off** (`--disabled`) so no broker runs until it is enabled; one shared venv holds
   ccxt for all of them. See [plugins/ccxt-broker/README.md](plugins/ccxt-broker/README.md).
+- **Paper trading, built in** — `src/data/trading/paper-account.ts` fills a simulated
+  account at the chart's live price (market, limit, stop, stop-limit, brackets, partial
+  closes, reversals, modification, a 1:1 cash balance); `paper-broker.ts` connects it to
+  the datafeed and keeps it in kv, and it is a card in **Exchanges > Brokers** and
+  **Trade > Connect broker** beside the broker plugins. Nothing to install and no key.
 - **Secrets in the OS credential store** — a plugin manifest setting of type `secret` is
   read/written through `keyring` and never written to `plugins.json` or the webview.
-- **AI chart analyst** — *AI assistant > Analyze chart* renders the visible charts, sends
-  them with a data sheet (symbol, interval, studies, position, ticket) to an
-  OpenAI-compatible vision provider, and streams a read-only analysis. The API key stays in
+- **AI chart analyst** — *AI assistant > Analyze chart* renders the selected symbol at 1d, 4h
+  and 5m in a short-lived hidden Tauri window with the studies the user shows, sends those three
+  pictures plus a data sheet (symbol, interval, studies, position, ticket) to an OpenAI-compatible
+  vision provider, and streams a read-only analysis with a BP/SL/qty/TP/probability trade
+  card. Runs are kept in an analysis log that can be loaded again. The API key stays in
   Rust/the credential store; only HTTPS (or loopback HTTP) is accepted.
 - **Trade plan projections** — the order ticket shows entry / stop / target, risk and
   reward in account currency and % of the balance, R:R, and the balance after either level.

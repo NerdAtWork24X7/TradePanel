@@ -470,8 +470,9 @@ export function ChartView(props: ChartViewProps) {
       // reloads. Skipped while a symbol swap is mid-flight (the apply effect is
       // about to set the range itself — capturing the outgoing/transient range
       // here would clobber the new pane's saved view), and in a window of past
-      // bars (a reload opens on the latest bars, where its indices mean nothing).
-      if (!cx.swapping && cx.chart && cx.pastWindowEnd === null && cx.sliceAtEnd()) {
+      // bars (a reload opens on the latest bars, where its indices mean nothing). Bar Replay frames the replayed
+      // bars: its logical range means nothing once the live bars are back, so it is not the tab's anchor.
+      if (!cx.swapping && cx.chart && cx.pastWindowEnd === null && !cx.replayActive && cx.sliceAtEnd()) {
         const lr = cx.chart.timeScale().getVisibleLogicalRange();
         if (lr) {
           // Tag the scheduled write with the pane this range belongs to. The
@@ -581,6 +582,7 @@ export function ChartView(props: ChartViewProps) {
   // keyed by the full name ("NASDAQ:AAPL"). Re-keys on symbol change; provider reads the mutable
   // `raw`/`controller` lazily so values are always current. (chart-state-registry.ts)
   createEffect(() => {
+    if (props.capture) return;
     const key = (props.symbol ?? "").toUpperCase();
     if (!key) return;
     registerChartState(key, {

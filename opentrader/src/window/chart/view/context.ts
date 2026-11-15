@@ -144,6 +144,11 @@ export type ChartViewProps = {
   /** False while this pane's tab is hidden. App keeps every opened tab's grid
    *  mounted (each tab page stays alive), so a tab switch only shows it. */
   shown?: boolean;
+  /** Capture pane (Analyze chart): skip the alert registry and report when a
+   *  loaded series has been drawn. `interval` identifies the load, so an old
+   *  target's callback cannot be mistaken for the current one. */
+  capture?: boolean;
+  onCaptureReady?: (hasBars: boolean, interval: string | undefined) => void;
   /** The tab the pane is on (Bar Replay runs per tab) and the pane's index in it. */
   tabId: string;
   paneIndex: number;

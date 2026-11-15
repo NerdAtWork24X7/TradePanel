@@ -1,23 +1,27 @@
 /*
  * "Analyze chart": the bundled Pi coding agent reads the user's charts.
  *
- * The run is the reference `ai/runtime` design: the shown layout is rendered
- * by layoutSnapshot (the same render as Take a snapshot), the focused chart's
- * symbol, interval, studies, position and ticket travel as a versioned
- * snapshot, and the answer streams in below the picture. The agent's only
+ * A fresh analysis renders the selected chart at 1d, 4h and 5m in a
+ * short-lived hidden Tauri window (AnalysisCaptureWindow), with the
+ * studies the chart shows, and sends those three pictures plus the versioned
+ * numeric snapshot. The agent's only
  * tools are the five read-only `panel_*` tools; its final plan is validated in
- * the extension and rendered as a card the user can copy into the ticket.
+ * the extension and shown as a card with BP / SL / qty / TP / probability,
+ * "Show on chart" and "Fill values".
+ *
+ * Every completed analysis is kept in the analysis log (1d/4h/5m pictures,
+ * plan and answer) so an earlier run can be loaded again.
  *
  * The first analysis is one press ("Start analysis"): the agent asks its own
  * questions of the tools. Later messages are follow-ups about the same run;
  * each rebuilds the snapshot, so the tools never read stale data, and only a
- * fresh analysis attaches the picture again.
+ * fresh analysis attaches the pictures again.
  */
 import { For, Show, createSignal, onMount } from "solid-js";
 import { commands, type PiStatus } from "../../bindings";
 import { AnswerText } from "./AnswerText";
 import { exportableCharts, type ChartExportSource } from "../chart/chart-export";
-import { layoutSnapshot, snapshotTheme } from "../chart/layout-snapshot";
+import { showAnalystTradeOnChart } from "../../data/analyst-trade-drawing";
 import { chartBars, indicatorLegendFor } from "../../data/chart-state-registry";
 import { pluginBroker } from "../../data/trading/plugin-broker";
 import { tradingUi } from "../../data/trading/trading-ui";
@@ -31,13 +35,18 @@ import {
   type AnalystPlan,
   type ToolStep,
 } from "../../data/analyst";
+import { ANALYSIS_TARGETS, captureAnalystCharts, type AnalystCaptureImage } from "../../data/analyst-capture";
+import {
+  deleteAnalystLog,
+  listAnalystLogs,
+  migrateLegacyLastAnalysis,
+  readAnalystLogImages,
+  saveAnalystLog,
+  updateAnalystLog,
+  type AnalystLogEntry,
+} from "../../data/analyst-log";
 import { buildAnalystSnapshot, type AnalystPortfolio, type AnalystSnapshot, type AnalystStudy, type AnalystTicket } from "../../data/analyst-context";
 import { translate, translateWith } from "../../i18n/translator";
-import * as kv from "../../data/kv";
-
-const LAST_KEY = "ot:analyst:last";
-
-type Last = { symbol: string; interval: string; text: string; at: number };
 
 const num = (v: number | null | undefined, digits = 2) =>
   v == null || !Number.isFinite(v) ? "—" : v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -50,7 +59,12 @@ const priceNum = (v: number | null | undefined) => {
   return num(v, digits);
 };
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** A log row's stamp, dd/mm/yyyy hh:mm. */
+function logStamp(at: number): string {
+  const d = new Date(at);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 /** "<symbol>, <interval>" → its parts. */
 function titleParts(title: string): { symbol: string; interval: string } {
@@ -83,33 +97,6 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
-}
-
-/** The active chart, its grid, and the picture of the layout. */
-async function capture(): Promise<{ image: string; source: ChartExportSource }> {
-  const charts = exportableCharts();
-  const source = (charts.find((c) => c.source.active()) ?? charts[0])?.source;
-  if (!source) throw new Error(translate("No chart is shown."));
-  const grid = source.host()?.closest<HTMLElement>(".chart-grid");
-  if (!grid) throw new Error(translate("The chart is not laid out yet."));
-  // Studies just added or changed compute on the next frames.
-  await sleep(250);
-  const theme = document.documentElement.classList.contains("theme-light") ? "light" : "dark";
-  const canvas = await layoutSnapshot(grid, snapshotTheme(theme), source.timeZone());
-  if (!canvas) throw new Error(translate("The chart could not be pictured."));
-  return { image: analystImage(canvas), source };
-}
-
-/** A PNG when it is small enough, else a scaled JPEG: a vision request pays for pixels. */
-function analystImage(canvas: HTMLCanvasElement): string {
-  const png = canvas.toDataURL("image/png");
-  if (png.length <= 3_500_000) return png;
-  const scale = Math.min(1, 1600 / canvas.width);
-  const out = document.createElement("canvas");
-  out.width = Math.max(1, Math.round(canvas.width * scale));
-  out.height = Math.max(1, Math.round(canvas.height * scale));
-  out.getContext("2d")?.drawImage(canvas, 0, 0, out.width, out.height);
-  return out.toDataURL("image/jpeg", 0.86);
 }
 
 /** The focused chart's visible studies, as the extension reports them. */
@@ -203,7 +190,7 @@ export function ChartAnalyst(props: { ticker: string }) {
   const [hasKey, setHasKey] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
   const [setupOpen, setSetupOpen] = createSignal(false);
-  const [shot, setShot] = createSignal<string | null>(null);
+  const [shots, setShots] = createSignal<AnalystCaptureImage[]>([]);
   const [sheet, setSheet] = createSignal("");
   const [question, setQuestion] = createSignal("");
   const [answer, setAnswer] = createSignal("");
@@ -214,9 +201,17 @@ export function ChartAnalyst(props: { ticker: string }) {
   const [stopped, setStopped] = createSignal(false);
   const [error, setError] = createSignal("");
   const [copied, setCopied] = createSignal(false);
+  const [shownOnChart, setShownOnChart] = createSignal(false);
+  const [logs, setLogs] = createSignal<AnalystLogEntry[]>([]);
+  const [logsOpen, setLogsOpen] = createSignal(false);
+  const [logBusy, setLogBusy] = createSignal(false);
+  const [currentLogId, setCurrentLogId] = createSignal<string | null>(null);
+  const [loadedFromLog, setLoadedFromLog] = createSignal(false);
+  /** One analysis at a time: a stopped or replaced run must not write state. */
+  let runSeq = 0;
 
   const configured = () => runtime()?.configured ?? (!!base().trim() && !!model().trim() && (hasKey() || base().trim().startsWith("http://")));
-  const hasResult = () => !!answer().trim() || history().length > 0;
+  const hasResult = () => !!answer().trim() || history().length > 0 || !!plan();
   const provider = () => `${model() || translate("No model")} · ${hostOf(base()) || translate("No endpoint")}`;
   /** The runtime itself could not be found: a staged-runtime problem, not a provider one. */
   const runtimeError = () => {
@@ -229,7 +224,7 @@ export function ChartAnalyst(props: { ticker: string }) {
     return status.piVersion ? translateWith("Pi {0}", status.piVersion) : translate("AI runtime");
   };
   /** The full symbol of the last picture ("BINANCE:BTC/USDT"), for ticker links. */
-  const instrument = () => sheet().split(" · ")[0] || props.ticker;
+  const instrument = () => sheet().split(" · ")[0]?.split(", ")[0] || props.ticker;
 
   const refresh = async () => {
     const status = await loadRuntimeStatus();
@@ -243,19 +238,36 @@ export function ChartAnalyst(props: { ticker: string }) {
     return status;
   };
 
+  /** Put a stored analysis back on screen (pictures, card, answer). */
+  async function loadLog(entry: AnalystLogEntry): Promise<void> {
+    if (busy() || logBusy()) return;
+    runSeq += 1;
+    setLogBusy(true);
+    setError("");
+    try {
+      const images = await readAnalystLogImages(entry);
+      setShots(images);
+      setSheet(entry.symbol ? `${entry.symbol}${entry.interval ? ` · ${entry.interval}` : ""}` : "");
+      setPlan(entry.plan);
+      setAnswer(entry.text);
+      setHistory(entry.text ? [{ q: translate("Analyze chart"), a: entry.text }] : []);
+      setTools([]);
+      setQuestion("");
+      setCurrentLogId(entry.id);
+      setLoadedFromLog(true);
+      setShownOnChart(false);
+      // The old conversation is not the running Pi session: a later analysis starts fresh.
+      newAnalystSession();
+    } finally {
+      setLogBusy(false);
+    }
+  }
+
   onMount(() => {
     void refresh();
-    const saved = kv.getItem(LAST_KEY);
-    if (!saved) return;
-    try {
-      const last = JSON.parse(saved) as Last;
-      if (last.symbol && last.text) {
-        setAnswer(last.text);
-        setHistory([{ q: translate("Analyze chart"), a: last.text }]);
-      }
-    } catch {
-      /* an old or broken entry: start clean */
-    }
+    const entries = migrateLegacyLastAnalysis();
+    setLogs(entries);
+    if (entries[0]) void loadLog(entries[0]);
   });
 
   const save = async () => {
@@ -283,12 +295,13 @@ export function ChartAnalyst(props: { ticker: string }) {
   };
 
   /**
-   * `fresh` runs the standard analysis: the picture is attached and the agent
-   * decides what to ask. Otherwise the message is a follow-up about the same
-   * conversation; the snapshot is rebuilt without the picture.
+   * `fresh` runs the standard analysis: the 1d / 4h / 5m pictures are attached
+   * and the agent decides what to ask. Otherwise the message is a follow-up
+   * about the same conversation; the snapshot is rebuilt without the pictures.
    */
   const run = async (fresh: boolean) => {
     if (busy()) return;
+    const runId = ++runSeq;
     if (!configured()) {
       setSetupOpen(true);
       setError(translate("Set the analyst's provider first."));
@@ -298,17 +311,26 @@ export function ChartAnalyst(props: { ticker: string }) {
     if (!fresh && !followUp) return;
     setError("");
     setAnswer("");
-    setPlan(null);
+    if (fresh) setPlan(null);
     setTools([]);
     setCopied(false);
     setStopped(false);
+    setShownOnChart(false);
+    setLoadedFromLog(false);
     setBusy(true);
-    let source: ChartExportSource | null = null;
+    let captured: AnalystCaptureImage[] = [];
     try {
-      const picture = await capture();
-      source = picture.source;
+      const source = activeSource();
       const { symbol, interval } = titleParts(source.title());
       const exchange = symbol.includes(":") ? symbol.split(":")[0] : undefined;
+      if (fresh) {
+        // Headless render: the selected chart's studies at 1d, 4h and 5m.
+        setShots([]);
+        captured = await captureAnalystCharts({ symbol, targets: ANALYSIS_TARGETS });
+        if (runId !== runSeq || stopped()) return;
+        if (!captured.length) throw new Error(translate("The charts could not be pictured."));
+        setShots(captured);
+      }
       const chart = chartBars(symbol, interval);
       const snapshot = await buildAnalystSnapshot({
         symbol,
@@ -320,36 +342,57 @@ export function ChartAnalyst(props: { ticker: string }) {
         ticket: ticketOf(symbol),
         ...(chart && chart.length ? { chartBars: { interval, bars: chart } } : {}),
       });
-      setShot(picture.image);
+      if (runId !== runSeq || stopped()) return;
       setSheet(sheetLine(snapshot));
-      const prompt = fresh ? `Analyze ${symbol} on the ${interval} chart.` : followUp;
-      const outcome = await analyze(snapshot, fresh ? [picture.image] : [], prompt, {
-        onText: setAnswer,
-        onTool: setTools,
-        onPlan: setPlan,
+      const prompt = fresh
+        ? `Analyze ${symbol} on its ${interval} chart. The three attached images are the same instrument's 1d, 4h and 5m charts, each with the indicators currently shown on the selected chart.`
+        : followUp;
+      const outcome = await analyze(snapshot, fresh ? captured.map((image) => image.dataUrl) : [], prompt, {
+        onText: (text) => { if (runId === runSeq) setAnswer(text); },
+        onTool: (steps) => { if (runId === runSeq) setTools(steps); },
+        onPlan: (next) => { if (runId === runSeq) setPlan(next); },
       });
-      if (stopped()) return;
+      if (runId !== runSeq || stopped()) return;
       if (outcome.error && !outcome.aborted) setError(outcome.error);
       if (!outcome.text.trim() && !plan() && !outcome.error && !outcome.aborted) {
         setError(translate("The agent did not return a plan. Try again."));
       }
       if (outcome.text.trim()) {
         setHistory([...history(), { q: prompt, a: outcome.text }]);
-        if (fresh) {
-          const parts = titleParts(source.title());
-          kv.setItem(LAST_KEY, JSON.stringify({ symbol: parts.symbol, interval: parts.interval, text: outcome.text, at: Date.now() } satisfies Last));
-        }
       } else if (fresh) {
         setHistory([...history(), { q: prompt, a: "" }]);
+      }
+      const finalPlan = plan() ?? outcome.plan;
+      if (!outcome.aborted && (outcome.text.trim() || finalPlan)) {
+        // Keep the run: a fresh analysis opens a new log, a follow-up rewrites
+        // the current one (its plan can be revised).
+        if (fresh || !currentLogId() || loadedFromLog()) {
+          const entry = await saveAnalystLog({ symbol, interval, plan: finalPlan, text: outcome.text, images: fresh ? captured : undefined, model: model() });
+          if (runId !== runSeq) return;
+          setCurrentLogId(entry.id);
+          setLoadedFromLog(false);
+        } else {
+          await updateAnalystLog(currentLogId()!, { text: outcome.text, plan: finalPlan, model: model() });
+          if (runId !== runSeq) return;
+        }
+        setLogs(listAnalystLogs());
       }
       setQuestion("");
       void refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (runId === runSeq) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      if (runId === runSeq) setBusy(false);
     }
   };
+
+  /** The focused chart: its symbol, interval and visible studies drive the run. */
+  function activeSource(): ChartExportSource {
+    const charts = exportableCharts();
+    const source = (charts.find((c) => c.source.active()) ?? charts[0])?.source;
+    if (!source) throw new Error(translate("No chart is shown."));
+    return source;
+  }
 
   /** The last close of the chart as sent: the extension validates levels against it. */
   function snapshotPrice(source: ChartExportSource): number | null {
@@ -364,6 +407,7 @@ export function ChartAnalyst(props: { ticker: string }) {
   }
 
   const stop = () => {
+    runSeq += 1;
     setStopped(true);
     stopAnalysis();
     setBusy(false);
@@ -386,6 +430,33 @@ export function ChartAnalyst(props: { ticker: string }) {
     });
   };
 
+  /** Project the plan with the chart's long / short position drawing tool (no order, no ticket fill). */
+  const showOnChart = () => {
+    const p = plan();
+    if (!p) return;
+    const symbol = p.symbol ?? instrument();
+    let shown = false;
+    try {
+      shown = showAnalystTradeOnChart({
+        symbol,
+        action: p.action,
+        entry: p.entry,
+        takeProfit: p.takeProfit,
+        stopLoss: p.stopLoss,
+        qty: p.qty,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    if (!shown) {
+      setError(translateWith("Open {0} on the chart to show this trade.", symbol));
+      return;
+    }
+    setShownOnChart(true);
+    window.setTimeout(() => setShownOnChart(false), 2000);
+  };
+
   const copyLevels = () => {
     const p = plan();
     if (!p) return;
@@ -397,17 +468,43 @@ export function ChartAnalyst(props: { ticker: string }) {
     });
   };
 
-  const clear = () => {
+  /** Empty the panel without touching the stored log. */
+  const clearViews = () => {
+    runSeq += 1;
     setAnswer("");
     setHistory([]);
-    setShot(null);
+    setShots([]);
     setSheet("");
     setPlan(null);
     setTools([]);
     setQuestion("");
     setError("");
-    kv.removeItem(LAST_KEY);
+    setCurrentLogId(null);
+    setLoadedFromLog(false);
+    setShownOnChart(false);
+  };
+
+  const clear = () => {
+    stopAnalysis();
+    setBusy(false);
+    clearViews();
     newAnalystSession();
+  };
+
+  /** Delete one stored analysis (its pictures go with it). */
+  const removeLog = async (entry: AnalystLogEntry) => {
+    if (logBusy()) return;
+    setLogBusy(true);
+    try {
+      const next = await deleteAnalystLog(entry.id);
+      setLogs(next);
+      if (currentLogId() === entry.id) {
+        clearViews();
+        newAnalystSession();
+      }
+    } finally {
+      setLogBusy(false);
+    }
   };
 
   return (
@@ -424,10 +521,64 @@ export function ChartAnalyst(props: { ticker: string }) {
             <span data-no-translate>{provider()}</span>
           </div>
         </div>
-        <button type="button" class="asst-link" onClick={() => setSetupOpen(!setupOpen())}>
-          {setupOpen() ? translate("Close") : translate("Settings")}
-        </button>
+        <div class="asst-analyst-actions">
+          <button type="button" class="asst-link" onClick={() => setLogsOpen(!logsOpen())}>
+            {logsOpen() ? translate("Hide log") : translateWith("Log ({0})", logs().length)}
+          </button>
+          <button type="button" class="asst-link" onClick={() => setSetupOpen(!setupOpen())}>
+            {setupOpen() ? translate("Close") : translate("Settings")}
+          </button>
+        </div>
       </div>
+
+      <Show when={logsOpen()}>
+        <section class="asst-log" aria-label={translate("Analysis log")}>
+          <header class="asst-log-head">
+            <span>{translate("Analysis log")}</span>
+            <span class="asst-log-count">{translateWith("{0} saved", logs().length)}</span>
+          </header>
+          <Show when={!logs().length}>
+            <p class="asst-analyst-note">{translate("No saved analyses yet.")}</p>
+          </Show>
+          <ul class="asst-log-list">
+            <For each={logs()}>
+              {(entry) => (
+                <li class="asst-log-row" classList={{ "is-current": currentLogId() === entry.id }}>
+                  <button
+                    type="button"
+                    class="asst-log-open"
+                    disabled={busy() || logBusy()}
+                    onClick={() => void loadLog(entry)}
+                    title={translate("Load this analysis")}
+                  >
+                    <span class="asst-log-side" classList={{ "is-short": entry.plan?.action === "short" }}>
+                      {entry.plan?.action === "short" ? translate("Short") : entry.plan ? translate("Long") : translate("Analysis")}
+                    </span>
+                    <span class="asst-log-symbol" data-no-translate>
+                      {entry.symbol}
+                      {entry.interval ? `, ${entry.interval}` : ""}
+                    </span>
+                    <span class="asst-log-stamp" data-no-translate>{logStamp(entry.at)}</span>
+                    <Show when={entry.plan}>
+                      <span class="asst-log-prob" data-no-translate>{entry.plan?.probability}%</span>
+                    </Show>
+                  </button>
+                  <button
+                    type="button"
+                    class="asst-log-del"
+                    aria-label={translate("Delete this analysis")}
+                    title={translate("Delete this analysis")}
+                    disabled={logBusy()}
+                    onClick={() => void removeLog(entry)}
+                  >
+                    ×
+                  </button>
+                </li>
+              )}
+            </For>
+          </ul>
+        </section>
+      </Show>
 
       <Show when={runtimeError()}>
         {(message) => (
@@ -507,30 +658,35 @@ export function ChartAnalyst(props: { ticker: string }) {
         </div>
       </Show>
 
-      <Show when={shot()}>
-        {(src) => (
-          <figure class="asst-analyst-figure">
-            <img class="asst-analyst-image" src={src()} alt={translate("The charts sent to the analyst")} />
-            <figcaption class="asst-analyst-note">
-              <span data-no-translate>{sheet()}</span>
-              <button
-                type="button"
-                class="asst-link"
-                onClick={() => {
-                  const b64 = src().split(",")[1];
-                  if (b64) void commands.openSnapshot(b64);
-                }}
-              >
-                {translate("Open image")}
-              </button>
-            </figcaption>
-          </figure>
-        )}
+      <Show when={shots().length}>
+        <figure class="asst-analyst-figure">
+          <div class="asst-shot-grid">
+            <For each={shots()}>
+              {(image) => (
+                <button
+                  type="button"
+                  class="asst-shot"
+                  title={translate("Open image")}
+                  onClick={() => {
+                    const b64 = image.dataUrl.split(",")[1];
+                    if (b64) void commands.openSnapshot(b64);
+                  }}
+                >
+                  <img class="asst-analyst-image" src={image.dataUrl} alt={`${sheet()} ${image.label}`} />
+                  <span class="asst-shot-label" data-no-translate>{image.label.toUpperCase()}</span>
+                </button>
+              )}
+            </For>
+          </div>
+          <figcaption class="asst-analyst-note">
+            <span data-no-translate>{sheet()}</span>
+          </figcaption>
+        </figure>
       </Show>
 
       <Show when={!hasResult()}>
         <p class="asst-analyst-note">
-          {translate("The agent reads this chart and a 1d, 4h and 5m indicator snapshot, then returns a 5m trade plan. It cannot trade.")}
+          {translate("The agent reads 1d, 4h and 5m pictures of this chart, each with the indicators it shows, then returns a 5m trade plan. It cannot trade.")}
         </p>
       </Show>
 
@@ -554,35 +710,10 @@ export function ChartAnalyst(props: { ticker: string }) {
         </Show>
       </div>
 
-      <Show when={hasResult()}>
-        <div class="asst-analyst-ask">
-          <textarea
-            class="asst-input"
-            rows={2}
-            value={question()}
-            placeholder={translate("Ask about this analysis…")}
-            onInput={(e) => setQuestion(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                void run(false);
-              }
-            }}
-          />
-          <div class="asst-analyst-actions">
-            <button type="button" class="asst-primary" disabled={busy() || !question().trim() || !!runtimeError()} onClick={() => void run(false)}>
-              {translate("Send")}
-            </button>
-            <Show when={busy()}>
-              <button type="button" class="asst-link" onClick={stop}>
-                {translate("Stop")}
-              </button>
-            </Show>
-            <button type="button" class="asst-link" onClick={clear}>
-              {translate("New analysis")}
-            </button>
-          </div>
-        </div>
+      <Show when={hasResult() && loadedFromLog()}>
+        <p class="asst-analyst-note">
+          {translate("Loaded from the analysis log. Run a new analysis to ask follow-up questions.")}
+        </p>
       </Show>
 
       <Show when={error()}>
@@ -618,34 +749,35 @@ export function ChartAnalyst(props: { ticker: string }) {
             </header>
             <dl class="asst-plan-rows">
               <div>
-                <dt>{translate("Entry")}</dt>
+                <dt>{translate("Entry (BP)")}</dt>
                 <dd data-no-translate>{priceNum(p().entry)}</dd>
               </div>
               <div>
-                <dt>{translate("Take profit")}</dt>
-                <dd class="is-target" data-no-translate>{priceNum(p().takeProfit)}</dd>
+                <dt>{translate("Stop loss (SL)")}</dt>
+                <dd class="is-risk" data-no-translate>{priceNum(p().stopLoss)}</dd>
               </div>
               <div>
-                <dt>{translate("Stop loss")}</dt>
-                <dd class="is-risk" data-no-translate>{priceNum(p().stopLoss)}</dd>
+                <dt>{translate("Quantity")}</dt>
+                <dd data-no-translate>{p().qty != null ? num(p().qty, 6) : "—"}</dd>
+              </div>
+              <div>
+                <dt>{translate("Take profit (TP)")}</dt>
+                <dd class="is-target" data-no-translate>{priceNum(p().takeProfit)}</dd>
               </div>
               <div>
                 <dt>{translate("Risk/reward")}</dt>
                 <dd data-no-translate>{num(p().riskReward, 2)}</dd>
               </div>
-              <Show when={p().qty != null}>
-                <div>
-                  <dt>{translate("Quantity")}</dt>
-                  <dd data-no-translate>{num(p().qty, 6)}</dd>
-                </div>
-              </Show>
             </dl>
             <Show when={p().rationale}>
               <p class="asst-plan-note">{p().rationale}</p>
             </Show>
             <div class="asst-plan-actions">
               <button type="button" class="asst-primary" onClick={fillTicket}>
-                {translate("Fill ticket")}
+                {translate("Fill values")}
+              </button>
+              <button type="button" class="asst-link" onClick={showOnChart}>
+                {shownOnChart() ? translate("Shown on chart") : translate("Show on chart")}
               </button>
               <button type="button" class="asst-link" onClick={copyLevels}>
                 {copied() ? translate("Copied") : translate("Copy levels")}
@@ -659,6 +791,37 @@ export function ChartAnalyst(props: { ticker: string }) {
       <Show when={answer()}>
         <div class="asst-answer" aria-live="polite">
           <AnswerText text={answer()} known={new Map([[props.ticker.toUpperCase(), instrument()]])} />
+        </div>
+      </Show>
+
+      <Show when={hasResult() && !loadedFromLog()}>
+        <div class="asst-analyst-ask">
+          <textarea
+            class="asst-input"
+            rows={2}
+            value={question()}
+            placeholder={translate("Ask about this analysis…")}
+            onInput={(e) => setQuestion(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                void run(false);
+              }
+            }}
+          />
+          <div class="asst-analyst-actions">
+            <button type="button" class="asst-primary" disabled={busy() || !question().trim() || !!runtimeError()} onClick={() => void run(false)}>
+              {translate("Send")}
+            </button>
+            <Show when={busy()}>
+              <button type="button" class="asst-link" onClick={stop}>
+                {translate("Stop")}
+              </button>
+            </Show>
+            <button type="button" class="asst-link" onClick={clear}>
+              {translate("New analysis")}
+            </button>
+          </div>
         </div>
       </Show>
 

@@ -34,6 +34,16 @@ export interface SymbolLoadApi {
 
 export function createSymbolLoad(cx: ChartCx): SymbolLoadApi {
   const { currentTokens, history, props } = cx;
+  /** A capture pane tells its window the series is painted. */
+  const captureReady = (hasBars = true) => {
+    if (!props.capture) return;
+    const interval = props.interval;
+    const signal = () => props.onCaptureReady?.(hasBars, interval);
+    // rAF fires after the paint; the timeout is the hidden window's fallback
+    // when its compositor throttles animation frames.
+    requestAnimationFrame(signal);
+    window.setTimeout(signal, 150);
+  };
   // Symbol/interval change → drop the previous series immediately so an
   // in-flight fetch can never leave another symbol's candles (or its last
   // price in the legend) on screen. The history effect below refills once the
@@ -185,6 +195,7 @@ export function createSymbolLoad(cx: ChartCx): SymbolLoadApi {
       cx.swapping = false;
       cx.replayAfterApply();
       cx.loadApplied();
+      captureReady(false);
       return;
     }
     // The datafeed already aggregated 1W/1M; `real.daily` carries the
@@ -353,6 +364,7 @@ export function createSymbolLoad(cx: ChartCx): SymbolLoadApi {
     cx.replayAfterApply();
     // A window of past bars a Go to handed to this load, or the latest bars again.
     cx.loadApplied();
+    captureReady(true);
   });
 
   // Dim-and-hold transition: rather than a spinner on a

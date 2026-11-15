@@ -12,8 +12,9 @@
  */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import type { PluginInfo, PluginsStatus } from "../../bindings";
-import { CheckField } from "../../components/form";
+import { CheckField, NumberField } from "../../components/form";
 import { exchangeLogoSrc } from "../../data/exchange-logos";
+import { paperBroker } from "../../data/trading/paper-broker";
 import { pluginBroker } from "../../data/trading/plugin-broker";
 import { tradingUi } from "../../data/trading/trading-ui";
 import { brokerPluginsOf, marketDataVenues, venuePluginOf, type Venue } from "../../data/venues";
@@ -22,7 +23,9 @@ import { openLink, plugins, type Result } from "../header/app-settings/io";
 import { ConfirmButton } from "../header/app-settings/parts";
 import { PluginSettings, SymbolMap } from "../header/app-settings/PluginsTab";
 import { isTauri } from "../shell/window-bridge";
+import { fmtMoney, fmtPnl, parsePositive, pnlClass } from "./format";
 import { AccountManager } from "./AccountManager";
+import { PaperAccount } from "./PaperAccount";
 
 type Tone = "on" | "warn" | "off";
 type State = { text: string; tone: Tone };
@@ -31,7 +34,12 @@ type View = "list" | "account";
 
 type VenueRow = { kind: "venue"; key: string; venue: Venue; plugin?: PluginInfo };
 type BrokerRow = { kind: "broker"; key: string; venue?: Venue; plugin: PluginInfo };
-type Row = VenueRow | BrokerRow;
+/** The built-in paper account: no plugin, no key, the chart's prices. */
+type PaperRow = { kind: "paper"; key: string };
+type Row = VenueRow | BrokerRow | PaperRow;
+
+const PAPER_ROW: PaperRow = { kind: "paper", key: "paper" };
+const PAPER_NAME = "Paper trading";
 
 /** What a venue's card says of it. */
 function venueState(row: VenueRow): State {
@@ -59,8 +67,16 @@ function brokerState(row: BrokerRow): State {
   return p.connected ? { text: translate("Ready"), tone: "on" } : { text: translate("Starting…"), tone: "warn" };
 }
 
-/** A broker's venue name (Hyperliquid for the crypto plugin), its mark's code, or its own name. */
-const rowName = (row: Row) => (row.kind === "broker" ? row.venue?.name ?? row.plugin.manifest.name : row.venue.name);
+/** What the paper account's card says of it. */
+function paperState(): State {
+  if (!paperBroker.available) return { text: translate("Desktop app only"), tone: "off" };
+  return paperBroker.active() ? { text: translate("Connected"), tone: "on" } : { text: translate("Ready"), tone: "on" };
+}
+
+/** A broker's venue name (Hyperliquid for the crypto plugin), its mark's code, or its own name; the paper
+ *  account's own name. */
+const rowName = (row: Row) =>
+  row.kind === "paper" ? translate(PAPER_NAME) : row.kind === "broker" ? row.venue?.name ?? row.plugin.manifest.name : row.venue.name;
 
 /** What a broker's card says of its market: the saved `market` setting, the manifest's default, else perpetuals. */
 function brokerSub(row: BrokerRow): string {
@@ -153,14 +169,17 @@ export function ExchangesPanel(props: { onSymbol: (symbol: string) => void; heig
     })),
   );
 
-  const rows = createMemo<Row[]>(() => [...venueRows(), ...brokerRows()]);
+  /** The built-in paper account first (always available in the desktop app), then the venues and the plugins. */
+  const rows = createMemo<Row[]>(() => [...(paperBroker.available ? [PAPER_ROW] : []), ...venueRows(), ...brokerRows()]);
   const activeId = () => pluginBroker.status()?.active ?? null;
-  /** The row the detail shows: the picked one, else the broker being traded, else the first enabled broker
-   *  (what the tab is for), else any broker, else a venue. */
+  const paperOn = () => paperBroker.active();
+  /** The row the detail shows: the picked one, else the broker being traded, else the paper account in use, else
+   *  the first enabled broker (what the tab is for), else any broker, else a venue. */
   const selection = createMemo<Row | null>(
     () =>
       rows().find((r) => r.key === picked()) ??
       rows().find((r) => r.kind === "broker" && r.plugin.manifest.id === activeId()) ??
+      (paperOn() ? rows().find((r) => r.kind === "paper") : undefined) ??
       rows().find((r) => r.kind === "broker" && r.plugin.enabled) ??
       rows().find((r) => r.kind === "broker") ??
       rows()[0] ??
@@ -176,18 +195,21 @@ export function ExchangesPanel(props: { onSymbol: (symbol: string) => void; heig
   };
 
   const activeRow = () => brokerRows().find((r) => r.plugin.manifest.id === activeId());
-  const activeName = () => activeRow()?.venue?.name ?? pluginBroker.status()?.activeName ?? "";
+  const activeName = () =>
+    paperOn() ? translate(PAPER_NAME) : activeRow()?.venue?.name ?? pluginBroker.status()?.activeName ?? "";
   const account = () => (activeId() ? pluginBroker.account()?.account ?? null : null);
+  /** Something is connected: a broker plugin, or the paper account. */
+  const connected = () => !!activeId() || paperOn();
 
   // A broker that left while its account showed: back to the list.
   createEffect(() => {
-    if (!activeId() && props.view === "account") props.onView("list");
+    if (!connected() && props.view === "account") props.onView("list");
   });
 
   return (
     <div class="ex-panel" style={{ height: Number.isFinite(props.height) ? `${props.height}px` : "100%" }} data-name="exchanges-panel">
       <Show
-        when={props.view === "account" && activeId()}
+        when={props.view === "account" && connected()}
         fallback={
           <>
             <div class="ex-head">
@@ -195,9 +217,11 @@ export function ExchangesPanel(props: { onSymbol: (symbol: string) => void; heig
                 <span class="ex-head-title">Exchanges and brokers</span>
                 <span class="ex-head-sub">Market data is public. Trading goes through a broker.</span>
               </div>
-              <Show when={activeId()}>
+              <Show when={connected()}>
                 <div class="ex-head-account">
-                  <span class="ex-account-name" data-no-translate>{activeName()}</span>
+                  <Show when={paperOn()} fallback={<span class="ex-account-name" data-no-translate>{activeName()}</span>}>
+                    <span class="ex-account-name">{translate(PAPER_NAME)}</span>
+                  </Show>
                   <Show when={account()}>
                     {(acc) => (
                       <span class="trd-account-kind" classList={{ "is-live": !acc().isDemo }}>
@@ -217,6 +241,26 @@ export function ExchangesPanel(props: { onSymbol: (symbol: string) => void; heig
                   <section class="ex-group">
                     <div class="ex-group-title">Brokers</div>
                     <div class="ex-cards">
+                      <Show when={paperBroker.available}>
+                        <button
+                          type="button"
+                          class="ex-card"
+                          classList={{ "is-selected": selection()?.key === PAPER_ROW.key }}
+                          aria-pressed={selection()?.key === PAPER_ROW.key}
+                          data-broker="paper"
+                          onClick={() => setPicked(PAPER_ROW.key)}
+                        >
+                          <Logo name={translate(PAPER_NAME)} />
+                          <span class="ex-card-text">
+                            <span class="ex-card-name">{translate(PAPER_NAME)}</span>
+                            <span class="ex-card-sub">{translate("Simulated account")}</span>
+                            <span class={`ex-card-state is-${paperState().tone}`}>
+                              <span class={`ex-dot is-${paperState().tone}`} />
+                              {paperState().text}
+                            </span>
+                          </span>
+                        </button>
+                      </Show>
                       <For
                         each={brokerRows()}
                         fallback={
@@ -290,6 +334,9 @@ export function ExchangesPanel(props: { onSymbol: (symbol: string) => void; heig
                   <Show when={brokerRow()}>
                     {(row) => <BrokerDetail row={row()} busy={busy} take={take} />}
                   </Show>
+                  <Show when={selection()?.kind === "paper"}>
+                    <PaperDetail />
+                  </Show>
                 </aside>
               </Show>
             </div>
@@ -304,7 +351,12 @@ export function ExchangesPanel(props: { onSymbol: (symbol: string) => void; heig
               </svg>
               Exchanges
             </button>
-            <span class="ex-account-name" data-no-translate>{activeName()}</span>
+            <Show when={paperOn()} fallback={<span class="ex-account-name" data-no-translate>{activeName()}</span>}>
+              <span class="ex-account-name">{translate(PAPER_NAME)}</span>
+            </Show>
+            <Show when={paperOn()}>
+              <span class="trd-account-kind">PAPER</span>
+            </Show>
             <Show when={account()}>
               {(acc) => (
                 <span class="trd-account-kind" classList={{ "is-live": !acc().isDemo }}>
@@ -313,7 +365,9 @@ export function ExchangesPanel(props: { onSymbol: (symbol: string) => void; heig
               )}
             </Show>
           </div>
-          <AccountManager onSymbol={props.onSymbol} height={props.height} fill />
+          <Show when={paperOn()} fallback={<AccountManager onSymbol={props.onSymbol} height={props.height} fill />}>
+            <PaperAccount onSymbol={props.onSymbol} height={props.height} fill />
+          </Show>
         </div>
       </Show>
     </div>
@@ -368,6 +422,94 @@ function VenueDetail(props: { row: VenueRow; state: () => State; busy: () => str
       <Show when={isTauri() && !plugin()}>
         <p class="ex-detail-text is-warn">The plugin serving this venue is not installed.</p>
       </Show>
+    </div>
+  );
+}
+
+/** The built-in paper account: what it is, what it is worth, its starting balance, Connect / Disconnect and Reset. */
+function PaperDetail() {
+  const account = () => paperBroker.account();
+  const figures = (): { title: string; value: string; cls?: string }[] => [
+    { title: translate("Balance"), value: fmtMoney(account().balance) },
+    { title: translate("Equity"), value: fmtMoney(account().equity) },
+    { title: translate("Unrealized PnL"), value: fmtPnl(account().unrealizedPnl), cls: pnlClass(account().unrealizedPnl) },
+    { title: translate("Realized PnL"), value: fmtPnl(account().realizedPnl), cls: pnlClass(account().realizedPnl) },
+    { title: translate("Available funds"), value: fmtMoney(account().marginFree) },
+  ];
+  return (
+    <div class="ex-detail-inner" data-name="paper-detail">
+      <div class="ex-detail-head">
+        <Logo name={translate(PAPER_NAME)} large />
+        <div class="ex-detail-id">
+          <span class="ex-detail-name">{translate(PAPER_NAME)}</span>
+          <span class="ex-detail-code">{translate("Built in")}</span>
+        </div>
+      </div>
+      <div class="ex-chips">
+        <span class="ex-chip">{translate("Simulated account")}</span>
+        <span class="ex-chip is-quiet">{translate("No real money")}</span>
+      </div>
+      <p class="ex-detail-text">
+        Orders fill at the chart's live price with simulated money, while the app is open: no broker account or API
+        key is needed, and positions, orders and results are kept on this computer.
+      </p>
+      <div class="ex-status">
+        <span class={`ex-dot is-${paperState().tone}`} />
+        {paperState().text}
+        <span class="ex-plugin-name" data-no-translate>{account().currency}</span>
+      </div>
+      <div class="ex-figures">
+        <For each={figures()}>
+          {(f) => (
+            <div class="ex-figure">
+              {f.title}
+              <span class={`ex-figure-value ot-value ${f.cls ?? ""}`}>{f.value}</span>
+            </div>
+          )}
+        </For>
+      </div>
+      <Show
+        when={paperBroker.active()}
+        fallback={
+          <div class="ex-actions">
+            <button type="button" class="ex-primary" onClick={() => paperBroker.connect()}>
+              {translate("Connect")}
+            </button>
+          </div>
+        }
+      >
+        <div class="ex-actions">
+          <button type="button" class="ex-primary" onClick={() => tradingUi.showAccountManager()}>
+            {translate("Account manager")}
+          </button>
+          <button type="button" class="ex-btn" onClick={() => paperBroker.disconnect()}>
+            {translate("Disconnect the broker")}
+          </button>
+        </div>
+      </Show>
+      <div class="ex-section-title">{translate("Settings")}</div>
+      <label class="app-settings-field">
+        <span class="app-settings-field-label">{translate("Starting balance")}</span>
+        <NumberField
+          value={String(account().startingBalance)}
+          width={170}
+          num={{ min: 1, max: 1.79e308, step: 100 }}
+          noSpin
+          grouping
+          onChange={(v) => {
+            const n = parsePositive(v);
+            if (n !== null) paperBroker.setSettings({ startingBalance: n });
+          }}
+        />
+      </label>
+      <div class="ex-links">
+        <ConfirmButton
+          label={translate("Reset account")}
+          confirmLabel={translate("Reset the account")}
+          onConfirm={() => paperBroker.resetAccount()}
+        />
+      </div>
+      <p class="ex-detail-text">One broker at a time: a broker plugin that connects takes the paper account's place.</p>
     </div>
   );
 }

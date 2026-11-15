@@ -1,12 +1,12 @@
 /*
  * The order ticket's empty state: why it cannot trade, and the one place that fixes it.
  *
- * Brokers are plugins, so the way out of "not connected" is the broker's card in the Exchanges
- * tab under the chart (its settings, Connect, trading switch, symbol map), and the way out of
- * "no broker plugin" is Settings > Plugins (the catalog, or Install from file). The empty state
- * offers that path as a button instead of leaving the user to hunt for a settings card that is
- * not there: a venue plugin (the crypto markets) is configured in the Exchanges tab, never in
- * Settings > Plugins.
+ * The way out of "not connected" is the broker picker (the built-in paper account and every
+ * broker plugin) or the broker's card in the Exchanges tab under the chart (its settings,
+ * Connect, trading switch, symbol map); a broker plugin installed but not usable there leads
+ * to Settings > Plugins. The empty state offers that path as a button instead of leaving the
+ * user to hunt for a settings card that is not there: a venue plugin (the crypto markets) is
+ * configured in the Exchanges tab, never in Settings > Plugins.
  */
 import { Show } from "solid-js";
 import type { TicketFix, Tradability } from "../../data/trading/replay-broker";

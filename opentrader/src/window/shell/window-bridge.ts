@@ -18,6 +18,7 @@ import { getAllWebviewWindows, getCurrentWebviewWindow, WebviewWindow } from "@t
 import type { TabChart } from "./tabs";
 import { clearTabs, tabTitle } from "./tabs";
 import { pushClosed, type ClosedWindow } from "./closed-stack";
+import { ANALYSIS_CAPTURE_VIEW } from "../../data/analyst-capture";
 
 const DETACH_PREFIX = "ot:detach:";
 
@@ -90,6 +91,41 @@ export function detachTabToWindow(tab: TabChart, screenX: number, screenY: numbe
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Label prefix of the short-lived Analyze chart renderer (never restored). */
+export const ANALYSIS_CAPTURE_PREFIX = "analysis-capture-";
+
+/**
+ * Open the hidden window that renders Analyze chart's pictures. It is a real
+ * second Tauri webview (the same seam as detached tabs), created hidden so it
+ * can paint without flashing the user's chart. Returns null outside Tauri or
+ * when the window cannot be created.
+ */
+export function openAnalysisCaptureWindow(id: string): WebviewWindow | null {
+  if (!isTauri()) return null;
+  try {
+    const win = new WebviewWindow(`${ANALYSIS_CAPTURE_PREFIX}${id}`, {
+      url: `index.html?view=${ANALYSIS_CAPTURE_VIEW}&id=${encodeURIComponent(id)}`,
+      x: -20_000,
+      y: 0,
+      width: 1120,
+      height: 700,
+      title: "OpenTrader",
+      focus: false,
+      visible: false,
+      skipTaskbar: true,
+      decorations: false,
+      shadow: false,
+      resizable: false,
+      dragDropEnabled: false,
+    });
+    // The hidden window must not take focus from the chart.
+    void win.setFocusable(false).catch(() => undefined);
+    return win;
+  } catch {
+    return null;
   }
 }
 

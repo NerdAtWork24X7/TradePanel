@@ -1,8 +1,8 @@
 import { translate, translateWith } from "../../i18n/translator";
 /*
  * The AI assistant panel (right rail's AI button), laid out as the reference desktop app's (3.5.0, measured over CDP
- * on 04/11/2026, .tmp/ai-panel): an overlay at the window's right (or a split view), its header with "Move overlay to
- * split-view", the title, Collapse panel and Close; a 680 px column with the chat's title menu (Create new chat /
+ * on 04/11/2026, .tmp/ai-panel): a split view at the window's right (or an overlay over the charts), its header with
+ * "Move split-view to overlay", the title, Collapse panel and Close; a 680 px column with the chat's title menu (Create new chat /
  * Open chat…), the greeting and its suggestions on an empty chat, the messages, then the composer with Send, and the
  * note under it.
  *

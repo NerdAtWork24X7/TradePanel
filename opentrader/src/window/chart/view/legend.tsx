@@ -32,7 +32,7 @@ import { OAKSCRIPT_OPEN_EVENT } from "../indicators/user-scripts";
 import { editorScriptOfStudy, isOpenedInEditor } from "../../oakscript/editor-state";
 import { publishDataWindow, type DataWindowState } from "../../../data/data-window-store";
 import { type ChartCx } from "./context";
-import { buildLegend } from "./helpers";
+import { buildLegend, legendBars } from "./helpers";
 import { indexOfTime } from "../time-search";
 import { emitAppEvent } from "../../../data/app-events";
 import type { JSX } from "solid-js";
@@ -129,8 +129,7 @@ export function createLegend(cx: ChartCx): LegendApi {
       setLegend(buildLegend(bricks, k, cx.activeType, null, mainPriceSource()));
       return;
     }
-    // Not hovering on a chart given a slice of older bars (bar-slice.ts): the newest loaded bar.
-    const bars = time == null && !cx.sliceAtEnd() ? cx.allBars : cx.raw;
+    const bars = legendBars(cx, time);
     let idx = bars.length - 1;
     if (time != null) {
       const hit = indexOfTime(bars, time);

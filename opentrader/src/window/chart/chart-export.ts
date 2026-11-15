@@ -11,6 +11,8 @@
  * month bars).
  */
 
+import type { IndicatorLegendRow } from "./indicators/indicator-controller";
+
 /** One exported value column. */
 export type ExportColumn = { title: string; values: Map<number, number> };
 
@@ -20,6 +22,12 @@ export type ChartExportSource = {
   /** The chart is in the shown layout. */
   shown: () => boolean;
   active: () => boolean;
+  /** This chart's session ("RTH" / "ETH"): the analyst reads its studies the way the chart shows them. */
+  session: () => "RTH" | "ETH";
+  /** This chart's own visible studies (its legend rows). The symbol-keyed
+   *  chart-state registry cannot tell two charts of the same symbol apart, so
+   *  a reader that means THIS chart (the analyst) reads them here. */
+  studies: () => IndicatorLegendRow[];
   /** Chart element (layout order). */
   host: () => HTMLElement | undefined;
   /** Chart time zone (IANA) and whether bars are day / week / month. */

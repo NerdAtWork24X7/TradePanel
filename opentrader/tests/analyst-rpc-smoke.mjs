@@ -169,13 +169,17 @@ const snapshot = {
   capturedAtMs: Date.now(),
   generatedBy: "OpenTrader",
   instrument: { symbol: "BINANCE:BTC/USDT", exchange: "BINANCE", market: "spot", timeframe: "5", price: 100.5 },
-  chart: { title: "BINANCE:BTC/USDT, 5", interval: "5", studies: [{ title: "RSI", inputs: "14", plots: [{ plot: 0, value: 55.2 }] }], timeframes: ["1d", "4h", "5m"], missing: [] },
-  analysis: { timeframes: ["1d", "4h", "5m"], chartTimeframe: "5", notes: ["Computed by OpenTrader from 1d, 4h, 5m candles."] },
+  chart: { title: "BINANCE:BTC/USDT, 5", interval: "5", studies: [{ id: "rsi", title: "RSI", inputs: "14", plots: [{ plot: 0, value: 55.2 }] }], timeframes: ["1d", "4h", "5m"], missing: [] },
+  analysis: { timeframes: ["1d", "4h", "5m"], chartTimeframe: "5", notes: ["Computed by OpenTrader from 1d, 4h, 5m candles with the studies the user's chart shows."] },
   indicators: {
-    available: ["ema9", "ema21", "rsi14", "macd", "bollinger", "atr14", "volume"],
+    available: ["RSI"],
     unavailable: [],
-    summary: { bias: "1d up, 4h up, 5m up", alignment: "bullish (1d and 4h up)", momentum: "55.2 RSI on 5m", note: "context" },
-    perTimeframe: { "5m": { close: 100.5, rsi14: 55.2 } },
+    summary: { studies: ["RSI"], note: "the user's chart studies, recomputed on each timeframe" },
+    perTimeframe: {
+      "1d": { bars: 300, close: 99.0, changePct: 1.2, studies: [{ id: "rsi", title: "RSI", plots: [{ plot: 0, title: "RSI", value: 51.2 }] }] },
+      "4h": { bars: 300, close: 100.0, changePct: 0.8, studies: [{ id: "rsi", title: "RSI", plots: [{ plot: 0, title: "RSI", value: 53.4 }] }] },
+      "5m": { bars: 300, close: 100.5, changePct: 0.3, studies: [{ id: "rsi", title: "RSI", plots: [{ plot: 0, title: "RSI", value: 55.2 }] }] },
+    },
     levels: { last: 100.5, support: [98.0], resistance: [103.0], priorDay: null, timeframes: {} },
   },
   portfolio: { enabled: false },
@@ -286,7 +290,7 @@ child.stdin.write(
   JSON.stringify({
     id: "p1",
     type: "prompt",
-    message: "Analyze BINANCE:BTC/USDT on the 5m chart. The three attached images are its 1d, 4h and 5m charts.",
+    message: "Analyze BINANCE:BTC/USDT on its 5 chart. The selected chart shows: RSI (14). The three attached images are the same instrument's 1d, 4h and 5m charts, each with those indicators.",
     images: [
       { type: "image", data: png, mimeType: "image/png" },
       { type: "image", data: png, mimeType: "image/png" },
@@ -319,6 +323,10 @@ const indicators = toolResults.find((r) => r.name === "panel_indicators")?.text 
 expect(indicators.includes('"chartStudies"'), "panel_indicators did not report the chart's studies");
 expect(indicators.includes("RSI"), "the chart's study values did not reach the tool output");
 expect(indicators.includes('"perTimeframe"'), "panel_indicators did not report the per-timeframe values");
+// The first tool call carries them too: the model must never read the computed set as the chart's.
+const market = toolResults.find((r) => r.name === "panel_market_context")?.text ?? "";
+expect(market.includes('"chartStudies"'), "panel_market_context did not report the chart's studies");
+expect(market.includes("RSI"), "the chart's study values did not reach the first tool output");
 expect(PROMPT_LOGS[0]?.images === true, "the chart images never reached the provider");
 expect(PROMPT_LOGS.every((log) => log.model === "mock-model"), "the provider model was not used");
 expect(text.includes("Long while the 5m structure holds"), `the final text did not stream: ${text}`);

@@ -81,6 +81,8 @@ export function createSnapshot(cx: ChartCx): SnapshotApi {
       title: () => `${props.symbol ?? ""}, ${props.interval ?? "1D"}`,
       shown: () => props.shown !== false,
       active: () => !!props.active,
+      session: () => props.session ?? "RTH",
+      studies: () => cx.controller?.getLegend() ?? [],
       host: () => cx.host,
       timeZone: () => props.timeZone ?? "UTC",
       dwm: () => !isIntradayInterval(props.interval ?? "1D"),

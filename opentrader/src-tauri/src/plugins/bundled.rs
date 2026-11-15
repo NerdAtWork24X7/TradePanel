@@ -66,7 +66,9 @@ fn install_bundled(app: &AppHandle, bundled: &Path) -> Result<(), String> {
         ids.push(id);
     }
 
-    register(app, bundled, &ids)
+    register(app, bundled, &ids)?;
+    eprintln!("opentrader: the bundled plugins are in {}", plugins_dir.display());
+    Ok(())
 }
 
 /// The environment the plugins run under: the bundled Python, copied into the data folder and
@@ -96,8 +98,14 @@ fn runtime_venv(bundled: &Path, plugins_dir: &Path) -> Result<Option<PathBuf>, S
 
 /// The interpreter of a Python installation: `bin/python3` on Unix, `python.exe` on Windows.
 fn python_exe(python: &Path) -> Option<PathBuf> {
-    let names: &[&str] = if cfg!(windows) { &["python.exe"] } else { &["python3", "python"] };
-    names.iter().map(|n| python.join(n)).find(|p| p.is_file())
+    if cfg!(windows) {
+        let exe = python.join("python.exe");
+        return exe.is_file().then_some(exe);
+    }
+    ["python3", "python"]
+        .iter()
+        .map(|name| python.join("bin").join(name))
+        .find(|exe| exe.is_file())
 }
 
 /// The interpreter of an environment: `bin/python` on Unix, `Scripts/python.exe` on Windows.
@@ -165,8 +173,15 @@ fn link_dir(target: &Path, link: &Path) -> Result<(), String> {
     if std::fs::symlink_metadata(link).is_ok() {
         return Ok(());
     }
+    // The paths are quoted: `cmd` reads the line, not the arguments.
     let status = std::process::Command::new("cmd")
-        .args(["/c", "mklink", "/J", &link.to_string_lossy(), &target.to_string_lossy()])
+        .args([
+            "/c",
+            "mklink",
+            "/J",
+            &format!("\"{}\"", link.display()),
+            &format!("\"{}\"", target.display()),
+        ])
         .status()
         .map_err(|e| e.to_string())?;
     if !status.success() {
@@ -180,23 +195,7 @@ fn link_dir(target: &Path, link: &Path) -> Result<(), String> {
 fn register(app: &AppHandle, bundled: &Path, ids: &[String]) -> Result<(), String> {
     let template: Config = files::load_or_default(&bundled.join("plugins.json"));
     let mut config = read_config(app);
-    let mut changed = false;
-    for id in ids {
-        if config.plugins.contains_key(id) {
-            continue;
-        }
-        let Some(bundled_plugin) = template.plugins.get(id) else { continue };
-        config.plugins.insert(
-            id.clone(),
-            PluginConfig {
-                enabled: bundled_plugin.enabled,
-                token: new_token()?,
-                ..Default::default()
-            },
-        );
-        changed = true;
-    }
-    if !changed {
+    if !merge(&template, &mut config, ids)? {
         return Ok(());
     }
     write_config(app, &config)?;
@@ -205,4 +204,82 @@ fn register(app: &AppHandle, bundled: &Path, ids: &[String]) -> Result<(), Strin
     *state.config.locked() = config;
     apply(app);
     Ok(())
+}
+
+/// Add the plugins of the bundle that are not installed yet: the ones the bundle starts, with
+/// a token of their own. A plugin the user already has keeps its settings and its token.
+/// Returns whether anything was added.
+fn merge(template: &Config, config: &mut Config, ids: &[String]) -> Result<bool, String> {
+    let mut changed = false;
+    for id in ids {
+        if config.plugins.contains_key(id) {
+            continue;
+        }
+        let Some(bundled) = template.plugins.get(id) else { continue };
+        config.plugins.insert(
+            id.clone(),
+            PluginConfig {
+                enabled: bundled.enabled,
+                token: new_token()?,
+                ..Default::default()
+            },
+        );
+        changed = true;
+    }
+    Ok(changed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(plugins: &[(&str, bool)]) -> Config {
+        let mut config = Config::default();
+        for (id, enabled) in plugins {
+            config.plugins.insert(
+                (*id).to_string(),
+                PluginConfig { enabled: *enabled, token: format!("token-{id}"), ..Default::default() },
+            );
+        }
+        config
+    }
+
+    #[test]
+    fn the_bundled_plugins_are_added_with_the_switches_of_the_bundle() {
+        let template = config(&[("crypto", true), ("kraken", false)]);
+        let mut config = Config::default();
+        let changed = merge(&template, &mut config, &["crypto".into(), "kraken".into()]).unwrap();
+        assert!(changed);
+        assert!(config.plugins["crypto"].enabled);
+        assert!(!config.plugins["kraken"].enabled);
+        // The token is the app's own: the one in the bundle is not used.
+        assert!(!config.plugins["crypto"].token.is_empty());
+        assert_ne!(config.plugins["crypto"].token, template.plugins["crypto"].token);
+    }
+
+    #[test]
+    fn a_plugin_the_user_already_has_keeps_its_settings() {
+        let template = config(&[("crypto", true)]);
+        let mut config = config(&[("crypto", false)]);
+        config.plugins.get_mut("crypto").unwrap().settings.insert("network".into(), "live".into());
+        let changed = merge(&template, &mut config, &["crypto".into()]).unwrap();
+        assert!(!changed);
+        assert!(!config.plugins["crypto"].enabled);
+        assert_eq!(config.plugins["crypto"].settings["network"], "live");
+        assert_eq!(config.plugins["crypto"].token, "token-crypto");
+    }
+
+    #[test]
+    fn a_folder_is_copied_with_its_files() {
+        let dir = std::env::temp_dir().join(format!("opentrader-bundled-test-{}", std::process::id()));
+        let from = dir.join("from");
+        std::fs::create_dir_all(from.join("nested")).unwrap();
+        std::fs::write(from.join("plugin.py"), "print('hi')").unwrap();
+        std::fs::write(from.join("nested/manifest.json"), "{}").unwrap();
+        let to = dir.join("to");
+        copy_tree(&from, &to).unwrap();
+        assert_eq!(std::fs::read_to_string(to.join("plugin.py")).unwrap(), "print('hi')");
+        assert!(to.join("nested/manifest.json").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

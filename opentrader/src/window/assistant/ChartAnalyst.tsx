@@ -22,7 +22,7 @@ import { commands, type PiStatus } from "../../bindings";
 import { AnswerText } from "./AnswerText";
 import { exportableCharts, type ChartExportSource } from "../chart/chart-export";
 import { showAnalystTradeOnChart } from "../../data/analyst-trade-drawing";
-import { chartBars, indicatorLegendFor } from "../../data/chart-state-registry";
+import { chartBars } from "../../data/chart-state-registry";
 import { pluginBroker } from "../../data/trading/plugin-broker";
 import { tradingUi } from "../../data/trading/trading-ui";
 import {
@@ -45,7 +45,8 @@ import {
   updateAnalystLog,
   type AnalystLogEntry,
 } from "../../data/analyst-log";
-import { buildAnalystSnapshot, type AnalystPortfolio, type AnalystSnapshot, type AnalystStudy, type AnalystTicket } from "../../data/analyst-context";
+import { analystStudies, buildAnalystSnapshot, type AnalystPortfolio, type AnalystSnapshot, type AnalystStudyInput, type AnalystTicket } from "../../data/analyst-context";
+import { createChartStudyRunner } from "../../data/analyst-study-run";
 import { translate, translateWith } from "../../i18n/translator";
 
 const num = (v: number | null | undefined, digits = 2) =>
@@ -97,20 +98,6 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
-}
-
-/** The focused chart's visible studies, as the extension reports them. */
-function studiesOf(symbol: string): AnalystStudy[] {
-  return indicatorLegendFor(symbol)
-    .filter((row) => !row.hidden && !row.offInterval && !row.compare)
-    .slice(0, 24)
-    .map((row) => ({
-      title: row.title,
-      ...(row.inputs ? { inputs: row.inputs } : {}),
-      plots: row.plots
-        .filter((plot) => plot.value != null && Number.isFinite(plot.value))
-        .map((plot) => ({ plot: plot.index, value: Number(plot.value) })),
-    }));
 }
 
 /** The account context the agent may read (only when the user enabled it). */
@@ -169,15 +156,19 @@ function ticketOf(symbol: string): AnalystTicket | null {
   };
 }
 
+/** The selected chart's visible studies as the analysis prompt names them ("VWAP, RSI (14 close)"). */
+function studyList(studies: readonly AnalystStudyInput[]): string {
+  return studies.map((study) => (study.inputs ? `${study.title} (${study.inputs})` : study.title)).join(", ") || "no indicators";
+}
+
 /** A one-line data sheet for the caption under the picture. */
 function sheetLine(snapshot: AnalystSnapshot): string {
   const parts = [snapshot.instrument.symbol, snapshot.instrument.timeframe];
   const five = snapshot.indicators.perTimeframe["5m"];
   const close = snapshot.instrument.price ?? five?.close ?? null;
   if (close != null) parts.push(priceNum(close));
-  const rsi = five?.rsi14;
-  if (rsi != null) parts.push(`RSI ${num(rsi, 1)}`);
-  parts.push(snapshot.indicators.summary.alignment);
+  const studies = snapshot.indicators.summary.studies;
+  if (studies.length) parts.push(studies.join(", "));
   return parts.join(" · ");
 }
 
@@ -323,6 +314,9 @@ export function ChartAnalyst(props: { ticker: string }) {
       const source = activeSource();
       const { symbol, interval } = titleParts(source.title());
       const exchange = symbol.includes(":") ? symbol.split(":")[0] : undefined;
+      // The studies the selected chart shows drive everything: the message names them, the
+      // snapshot recomputes them for 1d/4h/5m.
+      const studies = analystStudies(source.studies());
       if (fresh) {
         // Headless render: the selected chart's studies at 1d, 4h and 5m.
         setShots([]);
@@ -336,8 +330,10 @@ export function ChartAnalyst(props: { ticker: string }) {
         symbol,
         ...(exchange ? { exchange } : {}),
         timeframe: interval,
+        session: source.session(),
         price: snapshotPrice(source),
-        studies: studiesOf(symbol),
+        studies,
+        runStudy: createChartStudyRunner(symbol),
         portfolio: portfolioOf(symbol),
         ticket: ticketOf(symbol),
         ...(chart && chart.length ? { chartBars: { interval, bars: chart } } : {}),
@@ -345,7 +341,7 @@ export function ChartAnalyst(props: { ticker: string }) {
       if (runId !== runSeq || stopped()) return;
       setSheet(sheetLine(snapshot));
       const prompt = fresh
-        ? `Analyze ${symbol} on its ${interval} chart. The three attached images are the same instrument's 1d, 4h and 5m charts, each with the indicators currently shown on the selected chart.`
+        ? `Analyze ${symbol} on its ${interval} chart. The selected chart shows: ${studyList(studies)}. The three attached images are the same instrument's 1d, 4h and 5m charts, each with those indicators.`
         : followUp;
       const outcome = await analyze(snapshot, fresh ? captured.map((image) => image.dataUrl) : [], prompt, {
         onText: (text) => { if (runId === runSeq) setAnswer(text); },

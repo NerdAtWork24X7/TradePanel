@@ -63,3 +63,4 @@ tmp/
 node_modules/
 dist/
 target/
+dist-standalone/

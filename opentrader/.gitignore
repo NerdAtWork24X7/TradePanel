@@ -67,3 +67,6 @@ plugins/dist/
 src-tauri/ai-runtime/*
 !src-tauri/ai-runtime/README.md
 ai-runtime/node_modules/
+
+# Staged standalone build (npm run standalone): build artifact
+src-tauri/standalone/

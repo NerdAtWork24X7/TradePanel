@@ -228,16 +228,16 @@ mod tests {
             "chart": {
                 "title": "BINANCE:BTC/USDT, 5",
                 "interval": "5",
-                "studies": [{"title": "RSI", "inputs": "14", "plots": [{"plot": 0, "value": 55.2}]}],
+                "studies": [{"id": "rsi", "title": "RSI", "inputs": "14", "plots": [{"plot": 0, "value": 55.2}]}],
                 "timeframes": ["1d", "4h", "5m"],
                 "missing": [{"timeframe": "4h", "error": "no data"}]
             },
-            "analysis": {"timeframes": ["1d", "5m"], "chartTimeframe": "5", "notes": ["Computed by OpenTrader."]},
+            "analysis": {"timeframes": ["1d", "5m"], "chartTimeframe": "5", "notes": ["Computed by OpenTrader with the studies the user's chart shows."]},
             "indicators": {
-                "available": ["ema9", "rsi14", "macd", "bollinger", "atr14", "volume", "structural-levels"],
-                "unavailable": ["ema200: not enough bars in the fetched history"],
-                "summary": {"bias": "1d up, 4h unknown, 5m up", "alignment": "unknown (missing higher-timeframe data)", "momentum": "55.2 RSI on 5m", "note": "context"},
-                "perTimeframe": {"5m": {"bars": 300, "close": 100.5, "changePct": 1.2, "ema": {"ema9": 100.1, "ema21": 99.8, "ema50": 98.9, "ema200": null}, "rsi14": 55.2, "macd": {"line": 0.4, "signal": 0.2, "histogram": 0.2}, "bollinger": {"middle": 100.0, "upper": 101.5, "lower": 98.5, "bandwidthPct": 3.0}, "atr14": 0.9, "atrPct": 0.9, "volume": {"last": 120, "average": 100, "ratio": 1.2}}},
+                "available": ["RSI"],
+                "unavailable": ["EMA: 1d: no value"],
+                "summary": {"studies": ["RSI", "EMA"], "note": "the user's chart studies, recomputed on each timeframe"},
+                "perTimeframe": {"5m": {"bars": 300, "close": 100.5, "changePct": 1.2, "studies": [{"id": "rsi", "title": "RSI", "plots": [{"plot": 0, "title": "RSI", "value": 55.2}]}]}},
                 "levels": {"last": 100.5, "support": [98.0], "resistance": [103.0],
                     "priorDay": {"high": 112, "low": 98, "close": 110, "pivot": 106.67, "r1": 115.33, "s1": 101.33},
                     "timeframes": {"1d": {"high": 112, "low": 98}, "5m": {"high": 103, "low": 98}}}

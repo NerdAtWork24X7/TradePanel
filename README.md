@@ -45,6 +45,8 @@ adds:
 - Rust stable (`rustup`)
 - Tauri system dependencies for your OS:
   <https://v2.tauri.app/start/prerequisites/>
+- [uv](https://docs.astral.sh/uv/) — only for the standalone build, which brings the Python
+  the trading plugins run under
 
 Ubuntu/Debian:
 
@@ -106,6 +108,44 @@ npm run build
 Installers are written under `opentrader/src-tauri/target/release/bundle/`; the release
 binary is `opentrader/src-tauri/target/release/opentrader`. `npm run ot:frontend:build`
 builds only the Vite bundle.
+
+### Standalone build
+
+```bash
+npm run standalone
+```
+
+One folder that holds the app **and everything it runs**, so it starts on a computer with
+nothing installed — no Node, no Rust, no Python:
+
+```
+dist-standalone/TradePanel-<version>-<os>-<arch>/
+  TradePanel                          the launcher (TradePanel.cmd on Windows)
+  bin/opentrader                      the app; the frontend is inside the binary
+  lib/OpenTrader/ai-runtime           the Node and Pi the AI analyst runs
+  lib/OpenTrader/plugins              the plugin packages, the Python they run under
+                                      and their dependencies (ccxt, the Hyperliquid SDK…)
+```
+
+The first start copies the plugins and the Python runtime into the app's data folder, where
+the plugin host expects them (`opentrader/src-tauri/src/plugins/bundled.rs`); the folder
+itself stays read-only and can be copied to any computer of the same platform. The crypto
+plugin starts; the eight broker plugins are listed in **Exchanges → Brokers** and start when
+they are switched on.
+
+Flags:
+
+```bash
+npm run standalone -- --no-ai        # without the AI runtime (Node + Pi)
+npm run standalone -- --no-plugins   # without the Python plugins
+npm run standalone -- --out DIR      # where the folder is written
+npm run standalone -- --bundle       # also build the installers of the platform
+npm run standalone -- --skip-build   # assemble the folder from the last release build
+```
+
+The build needs `uv` (it brings the Python the plugins run under) and takes a while: it
+stages the AI runtime, installs the Python dependencies, builds the frontend and compiles
+the Rust binary.
 
 ## Test
 

@@ -64,6 +64,7 @@ cd src-tauri && cargo test --lib # Rust tests; also regenerates src/bindings.ts
 npm run ai:runtime               # stage Node + Pi into src-tauri/ai-runtime (before a release)
 npm run test:ai                  # the staged Pi runtime against a mock provider
 npm run tauri dev                # the app with hot reload (first Rust build: minutes)
+node ../scripts/build-standalone.mjs   # the standalone folder (the app with everything it runs)
 ```
 
 A new Tauri command: add it in `src-tauri/src/`, list it in `specta_builder()` (`src-tauri/src/lib.rs`), then run

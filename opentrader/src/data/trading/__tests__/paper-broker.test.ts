@@ -52,6 +52,8 @@ vi.mock("../plugin-broker", async () => {
 
 const SYMBOL = "BINANCE:BTC/USDT";
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+/** The trade-tick handler of the last import: a restart builds a new module instance and leaves the older ones behind. */
+const lastTick = () => h.ticks[h.ticks.length - 1]!;
 
 async function freshBroker() {
   h.kv.clear();
@@ -87,7 +89,7 @@ describe("paperBroker", () => {
     expect(paper.active()).toBe(true);
 
     // A live tick is the price the ticket and the orders use.
-    h.ticks.at(-1)!({ symbol: SYMBOL, price: 100 });
+    lastTick()({ symbol: SYMBOL, price: 100 });
     expect(paper.tradability().ok).toBe(true);
     expect(paper.quote()).toMatchObject({ symbol: SYMBOL, bid: 100, ask: 100, last: 100 });
 
@@ -101,7 +103,7 @@ describe("paperBroker", () => {
     expect(events).toEqual([`placed:${SYMBOL}`, `executed:${SYMBOL}`]);
 
     // The take profit fills on a later tick; the account survives a restart.
-    h.ticks.at(-1)!({ symbol: SYMBOL, price: 112 });
+    lastTick()({ symbol: SYMBOL, price: 112 });
     expect(paper.position(7)).toBeNull();
     expect(paper.account()).toMatchObject({ balance: 100_020, realizedPnl: 20 });
     paper.disconnect();
@@ -113,15 +115,17 @@ describe("paperBroker", () => {
 
   it("keeps a working order off screen after a restart and fills it on a tick", async () => {
     const paper = await freshBroker();
+    paper.registerChart(7, () => SYMBOL);
     paper.connect();
-    h.ticks.at(-1)!({ symbol: SYMBOL, price: 100 });
+    lastTick()({ symbol: SYMBOL, price: 100 });
     paper.place(order({ type: "limit", limitPrice: 95 }));
     paper.disconnect();
 
     vi.resetModules();
     const { paperBroker: again } = await import("../paper-broker");
+    again.connect();
     expect(again.orderRows()).toMatchObject([{ status: "working", limitPrice: 95 }]);
-    h.ticks.at(-1)!({ symbol: SYMBOL, price: 94 });
+    lastTick()({ symbol: SYMBOL, price: 94 });
     expect(again.positions()).toMatchObject([{ symbol: SYMBOL, qty: 1, avgPrice: 94 }]);
   });
 
@@ -149,7 +153,7 @@ describe("paperBroker", () => {
     paper.registerChart(7, () => SYMBOL);
     paper.connect();
     paper.setSettings({ startingBalance: 100 });
-    h.ticks.at(-1)!({ symbol: SYMBOL, price: 100 });
+    lastTick()({ symbol: SYMBOL, price: 100 });
     const events: string[] = [];
     paper.onEvent((e) => events.push(`${e.kind}:${e.message ?? ""}`));
     paper.place(order({ qty: 5 }));
@@ -162,7 +166,7 @@ describe("paperBroker", () => {
     const paper = await freshBroker();
     paper.registerChart(7, () => SYMBOL);
     paper.connect();
-    h.ticks.at(-1)!({ symbol: SYMBOL, price: 100 });
+    lastTick()({ symbol: SYMBOL, price: 100 });
     paper.place(order());
     paper.setSettings({ startingBalance: 5_000 });
     paper.resetAccount();
@@ -176,12 +180,12 @@ describe("paperBroker", () => {
     const paper = await freshBroker();
     paper.registerChart(7, () => SYMBOL);
     paper.connect();
-    h.ticks.at(-1)!({ symbol: SYMBOL, price: 100 });
+    lastTick()({ symbol: SYMBOL, price: 100 });
     paper.place(order({ qty: 2 }));
     paper.closePosition(null, 7);
     expect(paper.positions()).toEqual([]);
     paper.place(order({ qty: 1 }));
-    h.ticks.at(-1)!({ symbol: SYMBOL, price: 110 });
+    lastTick()({ symbol: SYMBOL, price: 110 });
     paper.reverse(7);
     expect(paper.positions()).toMatchObject([{ side: "sell", qty: 1, avgPrice: 110 }]);
     expect(paper.account().realizedPnl).toBe(10);

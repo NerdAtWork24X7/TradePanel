@@ -223,10 +223,11 @@ export default function tradepanelAnalysis(pi) {
     name: "panel_market_context",
     label: "OpenTrader market context",
     description:
-      "Return the user's current view: instrument, exchange, market, timeframe, last price, 24h change/volume, data freshness, per-timeframe indicator values, computed levels, portfolio availability and a read-only order-ticket summary. Call this before making any market claim. The attached chart images are the visual source for structure.",
+      "Return the user's current view: instrument, exchange, market, timeframe, last price, 24h change/volume, data freshness, the studies visible on the user's chart with their last plot values (chartStudies), each recomputed on the 1d/4h/5m timeframes, computed levels, portfolio availability and a read-only order-ticket summary. Call this before making any market claim. The attached chart images are the visual source for structure.",
     promptSnippet: "Read the current OpenTrader instrument snapshot (always call before analysis)",
     promptGuidelines: [
       "Call panel_market_context before any statement about the instrument, price, trend, indicators, portfolio, or order ticket.",
+      "The only indicators are the user's own studies, listed in chartStudies and recomputed per timeframe in perTimeframe. Never name an indicator the user's chart does not show.",
     ],
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, signal) {
@@ -238,6 +239,8 @@ export default function tradepanelAnalysis(pi) {
         freshness: freshness(snapshot),
         instrument: snapshot.instrument,
         analysis: snapshot.analysis ?? null,
+        // The user's own chart's studies, first so the model never reads the computed set as theirs.
+        chartStudies: (snapshot.chart && snapshot.chart.studies) || [],
         indicatorSummary: snapshot.indicators ? snapshot.indicators.summary : null,
         perTimeframe: snapshot.indicators ? snapshot.indicators.perTimeframe : null,
         indicatorsAvailable: snapshot.indicators ? snapshot.indicators.available : [],
@@ -263,8 +266,8 @@ export default function tradepanelAnalysis(pi) {
     name: "panel_indicators",
     label: "OpenTrader indicators",
     description:
-      "Return every indicator value OpenTrader computed for the 1d/4h/5m timeframes (RSI, MACD, EMA ribbon, Bollinger Bands, ATR, volume statistics and structural levels), the studies visible on the user's chart with their last plot values, and which indicators could not be computed. Values are factual tool output, not model estimates.",
-    promptSnippet: "Read the indicator values computed by OpenTrader for each timeframe",
+      "Return the studies visible on the user's chart with their last plot values (chartStudies), each of them recomputed by OpenTrader on the 1d/4h/5m timeframes with the user's own inputs (perTimeframe), structural levels, and the studies that could not be computed. OpenTrader has no fixed indicator set: only the user's studies are reported. Values are factual tool output, not model estimates.",
+    promptSnippet: "Read the user's chart studies, recomputed by OpenTrader for each timeframe",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, signal) {
       if (signal && signal.aborted) throw new Error("Cancelled");

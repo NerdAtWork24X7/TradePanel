@@ -7,6 +7,8 @@
     "start": "node scripts/tradepanel.mjs",
     "dev": "npm --prefix opentrader run tauri dev",
     "build": "npm --prefix opentrader run tauri build",
+    "standalone": "node scripts/build-standalone.mjs",
+    "test:standalone": "node --test scripts/__tests__/standalone-build.test.mjs",
     "tauri": "npm --prefix opentrader run tauri",
     "ot:install": "npm --prefix opentrader ci",
     "ot:test": "npm --prefix opentrader test",

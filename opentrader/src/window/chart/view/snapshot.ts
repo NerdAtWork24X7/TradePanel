@@ -30,6 +30,18 @@ export interface SnapshotApi {
   takeSnapshot: (action?: "copy" | "download" | "open") => Promise<void>;
 }
 
+/** A pane's plot width, or null while its widget is not built yet: the library
+ *  builds pane widgets on a draw, so a pane added this frame (a study given a
+ *  pane of its own) makes `paneSize()` throw "Value is undefined" until one
+ *  runs. */
+function paneWidth(chart: { paneSize(index: number): { width: number } }, index: number): number | null {
+  try {
+    return chart.paneSize(index).width || null;
+  } catch {
+    return null;
+  }
+}
+
 export function createSnapshot(cx: ChartCx): SnapshotApi {
   const { appearance, currentTokens, indLegend, mainPriceSource, paneId, props, refreshIndicatorLegend, refreshLegend } = cx;
   // "Download chart data" source: time, the main series values, the visible
@@ -110,9 +122,16 @@ export function createSnapshot(cx: ChartCx): SnapshotApi {
       const title = row.querySelector(".ot-ind-legend-title")?.textContent?.trim() ?? "";
       add(pane, legendLine(title, [...row.querySelectorAll(".ot-ind-legend-val")].map((v) => ({ ...valueOf(v), title: "" }))));
     }
-    return cx.paneBoxes().map((b) => ({
+    // Pane width: all panes share the plot width, so the panes that have a
+    // built widget set it for the ones that do not yet (a pane added this
+    // frame has no widget and the library throws "Value is undefined" from
+    // paneSize until a draw builds it — snapshotPicture draws first).
+    const boxes = cx.paneBoxes();
+    const widths = boxes.map((b) => paneWidth(cx.chart!, b.index));
+    const width = widths.find((w): w is number => w !== null) ?? 0;
+    return boxes.map((b, i) => ({
       left: leftW,
-      width: cx.chart!.paneSize(b.index).width,
+      width: widths[i] ?? width,
       top: b.top,
       height: b.height,
       lines: lines.get(b.index) ?? [],
@@ -190,14 +209,13 @@ export function createSnapshot(cx: ChartCx): SnapshotApi {
   async function snapshotPicture(): Promise<ChartSnapshot | null> {
     if (!cx.chart) return null;
     const dpr = window.devicePixelRatio || 1;
-    let leftW = 0;
-    try { leftW = cx.chart.options().leftPriceScale.visible ? cx.chart.priceScale("left").width() : 0; } catch { /* not laid out yet */ }
     // The image shows the latest bar's values, whatever the crosshair.
     refreshLegend();
     refreshIndicatorLegend();
-    const panes = snapshotLegendPanes(leftW);
-    refreshLegend(cx.crosshairActive ? cx.lastLegendTime : undefined);
-    refreshIndicatorLegend(cx.crosshairActive ? cx.lastLegendTime : undefined);
+    // Take the canvas BEFORE reading the pane geometry: the library builds a
+    // pane's widget on a draw, and takeScreenshot forces the pending one, so
+    // every pane — including one added this frame, whose paneSize() would
+    // throw "Value is undefined" — has its element by the time panes are read.
     for (const p of cx.alertLabelPrims.values()) p.setState({ printing: true });
     let canvas: HTMLCanvasElement;
     try {
@@ -207,6 +225,13 @@ export function createSnapshot(cx: ChartCx): SnapshotApi {
     } finally {
       for (const p of cx.alertLabelPrims.values()) p.setState({ printing: false });
     }
+    // The pane boxes are read from the elements the draw just laid out.
+    cx.refreshPaneBoxes();
+    let leftW = 0;
+    try { leftW = cx.chart.options().leftPriceScale.visible ? cx.chart.priceScale("left").width() : 0; } catch { /* not laid out yet */ }
+    const panes = snapshotLegendPanes(leftW);
+    refreshLegend(cx.crosshairActive ? cx.lastLegendTime : undefined);
+    refreshIndicatorLegend(cx.crosshairActive ? cx.lastLegendTime : undefined);
     const ctx = canvas.getContext("2d");
     if (ctx) {
       await paintSnapshotDrawings(ctx, dpr, leftW);

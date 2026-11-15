@@ -1141,7 +1141,12 @@ export class IndicatorLayer {
     // numbers onto the PRICE axis strip — always off, whatever the
     // "Indicators and financials" setting says.
     applyChanged(series, { priceScaleId: md.ownScaleId, lastValueVisible: false });
-    applyChanged(series.priceScale(), { scaleMargins: md.ownScaleMargins ?? { top: 0.75, bottom: 0 }, visible: false });
+    // The bottom-quarter margins keep the study under the price action while
+    // it shares the price pane (Volume). Given a pane of its own it fills
+    // that pane instead: the same margins there would pin it to the bottom
+    // quarter of an already short pane.
+    const margins = this.pricePane ? md.ownScaleMargins ?? { top: 0.75, bottom: 0 } : { top: 0, bottom: 0 };
+    applyChanged(series.priceScale(), { scaleMargins: margins, visible: false });
   }
 
   /** Time price opportunity study: its drawn profiles. */

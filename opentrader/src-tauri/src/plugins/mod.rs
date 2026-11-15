@@ -8,6 +8,7 @@
  * one runs inside another application and finds the address and its token in the connection file written for it.
  */
 pub mod broker;
+pub mod bundled;
 pub mod data;
 mod package;
 
@@ -247,6 +248,9 @@ pub fn init(app: &AppHandle) {
     });
     data::init(app);
     broker::init(app);
+    // The plugins that ship inside the app (the standalone build): installed in the data
+    // folder, in the background, before they are needed.
+    bundled::install(app);
     apply(app);
 }
 

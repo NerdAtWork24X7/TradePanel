@@ -1,0 +1,74 @@
+/*
+ * TV fib level labels (module 445750 LineToolPaneViewFibWithLabels
+ * `_updateLabelForLevel` / `_updateRendererLabel` + TextRenderer
+ * getTextAlignInBox): the coefficient (number, or percent with 2 decimals)
+ * and / or " (price)", in a text box 4px from the level's end chosen by the
+ * horizontal alignment; font = labelFontSize (factory 12).
+ */
+import type { Coords } from "../coords";
+import { labelOrDefault } from "../labels";
+import { fixedText, percentText, shortText } from "../numbers";
+import { tvTextLayout } from "./tv-text";
+
+/** Level value text (TV numeric / percentage formatter). */
+export function fibCoeffText(coeff: number, percents: boolean): string {
+  if (percents) return percentText(100 * coeff, 2, false);
+  return shortText(Math.round(coeff * 1e4) / 1e4);
+}
+
+/** Combined coeff / price label string, hooked before layout / measure. */
+export function fibLevelText(
+  coeff: number,
+  percents: boolean,
+  price: number | null,
+  digits: number,
+  showC: boolean,
+  showP: boolean,
+  coords?: { formatLabel?: Coords["formatLabel"] } | null,
+  /** Override the coeff piece (fib channel uses trimmed toFixed(3)). */
+  coeffText?: string,
+): string {
+  let text = "";
+  if (showC) text += coeffText ?? fibCoeffText(coeff, percents);
+  if (showP && price != null) text += ` (${fixedText(price, digits)})`;
+  if (!text) return text;
+  return labelOrDefault(coords, {
+    id: "fib-level",
+    text,
+    coeff,
+    price: showP ? price : null,
+    digits,
+  });
+}
+
+/** Label of a horizontal level from `left` to `right` at `y`. TV Left = the
+ *  box ends 4px before the left end (with extend left: starts 4px after the
+ *  pane's left edge), Right = starts 4px after the right end (extend right:
+ *  ends 4px before the pane edge), Center = the middle of the drawn span. */
+export function fibLevelLabel(o: {
+  text: string;
+  y: number;
+  left: number;
+  right: number;
+  extendLeft: boolean;
+  extendRight: boolean;
+  paneW: number;
+  horz: "left" | "center" | "right";
+  vert: "top" | "middle" | "bottom";
+  fs: number;
+}) {
+  if (!o.text) return null;
+  let x: number;
+  let horz: "left" | "center" | "right";
+  if (o.horz === "left") {
+    x = o.extendLeft ? 0 : o.left;
+    horz = o.extendLeft ? "left" : "right";
+  } else if (o.horz === "right") {
+    x = o.extendRight ? o.paneW : o.right;
+    horz = o.extendRight ? "right" : "left";
+  } else {
+    x = ((o.extendLeft ? 0 : o.left) + (o.extendRight ? o.paneW : o.right)) / 2;
+    horz = "center";
+  }
+  return tvTextLayout({ x, y: o.y, text: o.text, fs: o.fs, vert: o.vert, horz, offsetX: 4 });
+}

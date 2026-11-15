@@ -1,0 +1,41 @@
+/*
+ * SegmentedControl — shared pill toggle.
+ *
+ * Used by AlertsPanel, ObjectTreePanel, and any other surface that needs
+ * the two/three-pill toggle.  Keep the shared rule here; do NOT duplicate
+ * these declarations into per-panel stylesheets.
+ */
+.ot-segmented-control {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  background-color: var(--color-container-fill-primary-neutral-light);
+  border-radius: 4px;
+  padding: 3px;
+  height: 34px;
+  box-sizing: border-box;
+}
+
+.ot-segmented-control__segment {
+  flex: 1;
+  height: 28px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-content-primary-neutral-semi-bold);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: default;
+  border-radius: 2px;
+  transition: background-color 60ms ease, color 60ms ease;
+}
+
+.ot-segmented-control__segment:hover:not(.selected) {
+  color: var(--color-toolbar-button-text);
+}
+
+.ot-segmented-control__segment.selected {
+  background-color: var(--color-content-primary-neutral-extra-light);
+  color: var(--ot-text-max);
+}

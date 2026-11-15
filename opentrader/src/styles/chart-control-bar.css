@@ -1,0 +1,266 @@
+/*
+ * `.ot-control-bar` — the two floating button boxes a chart pane owns:
+ *
+ *   • the centred group bar (ChartControlBar.tsx) — zoom, maximize, scroll,
+ *     reset.  Anchored by `left`; the whole row fades as one.
+ *   • the bottom-right "Scroll to the most recent bar" button (ChartView) —
+ *     anchored by `right`; only that button fades.
+ *
+ * Both are `.control-bar-wrapper` boxes; the second one is the "back"
+ * button (wrapper `--back-present`).
+ *
+ * The wrapper keeps pointer-events off so it never eats a drag over
+ * the pane; only the buttons opt back in.  ChartView positions the wrappers —
+ * `bottom` tracks the target pane's bottom edge, `right` tracks the price-scale
+ * width, `left` centres the group bar — and toggles the visibility modifiers.
+ */
+.ot-control-bar {
+  position: absolute;
+  /* The control bar needs to clear the drawings overlay (5/6) and stay under
+     the legends (10). Only the button takes pointer events, so a hidden one
+     never shadows the canvas underneath. */
+  z-index: 7;
+  /* The 24px is the content height; the 5px padding sits outside it, so the
+     wrapper measures 34px. Tailwind's preflight would fold the padding in. */
+  box-sizing: content-box;
+  height: 24px;
+  padding: 5px 0;
+  direction: ltr;
+  pointer-events: none;
+}
+
+/* `.control-bar`: the group row. Hiding it hides its buttons too, so their
+   own .4s opacity transition doesn't fight the row's .3s one. */
+.ot-control-bar__row {
+  display: flex;
+  visibility: visible;
+  transition: opacity 0.3s, visibility 0.3s;
+}
+
+.ot-control-bar__row--hidden,
+.ot-control-bar__row--hidden .ot-control-bar__btn {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.ot-control-bar__group {
+  display: flex;
+  align-items: center;
+  margin: 0 4px;
+}
+
+.ot-control-bar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: 0 4px;
+  border-radius: 4px;
+  background-color: var(--color-container-fill-quinary-inverse);
+  box-shadow: 0 2px 4px var(--color-shadow-primary-neutral-extra-heavy);
+  color: var(--color-button-content-quiet-primary-neutral-bold-default);
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  user-select: none;
+  z-index: 1;
+  transition: color 0.3s, visibility 0.4s, opacity 0.4s;
+}
+
+.ot-control-bar__btn--hidden {
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* Maximized: the button is inverted while the chart is full-screen. */
+.ot-control-bar__btn--activated {
+  background-color: var(--color-container-fill-primary-neutral-extra-bold);
+  color: var(--color-content-secondary-inverse);
+}
+
+/* Both scroll buttons share one chevron; the left one is rotated. */
+.ot-control-bar__btn--move-left svg {
+  transform: rotate(180deg);
+}
+
+@media (any-hover: hover) {
+  .ot-control-bar__btn:hover {
+    background-color: var(--color-container-fill-primary-neutral-extra-light);
+  }
+  .ot-control-bar__btn--activated:hover {
+    background-color: var(--color-container-fill-primary-neutral-bold);
+    color: var(--color-content-secondary-inverse);
+  }
+}
+
+.ot-control-bar__btn:active {
+  background-color: var(--color-container-fill-primary-neutral-light);
+  transition: none;
+}
+
+/* Keep the icon out of hit-testing so the button is always the hit target
+   (`.control-bar__btn svg`). Icon adds a <span> wrapper, so it needs the
+   same treatment. */
+.ot-control-bar__btn > span,
+.ot-control-bar__btn svg {
+  pointer-events: none;
+}
+
+/* ── Price-axis overlays (Scales tab rows) ──
+ * Currency label: wrapper padding 4 across the axis width; box 1 px #4a4a4a
+ *   r4 on the chart background; row 24 px r3 padding 0 3, text at the left,
+ *   7×5 chevron at the right; 12 px text.
+ * A / L buttons: 30 px strip at the bottom of the price axis, two halves
+ *   (padding 4, 2 px towards the middle), button 20×22 r4 1 px #4a4a4a,
+ *   14/18 px; active = #f2f2f2 fill + border, #0f0f0f text.
+ * Plus button: square label box on the pane side of the crosshair price
+ *   label, crosshair-label background, outer corners r2. */
+.ot-price-currency {
+  position: absolute;
+  top: 0;
+  z-index: 5;
+  box-sizing: border-box;
+  padding: 4px;
+  pointer-events: none;
+}
+.ot-price-currency-box {
+  pointer-events: auto;
+  border: 1px solid var(--color-divider);
+  border-radius: 4px;
+}
+.ot-price-currency-row {
+  height: 24px;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 3px;
+  color: var(--color-text-primary);
+  line-height: 12px;
+  cursor: default;
+  user-select: none;
+}
+.ot-price-modes {
+  position: absolute;
+  z-index: 5;
+  height: 30px;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+}
+.ot-price-mode-wrap { flex: 1 1 0%; display: flex; padding: 4px; }
+.ot-price-mode-wrap:first-child { justify-content: flex-end; padding-right: 2px; }
+.ot-price-mode-wrap:last-child { justify-content: flex-start; padding-left: 2px; }
+.ot-price-mode {
+  width: 20px;
+  height: 22px;
+  box-sizing: border-box;
+  padding: 1px 0;
+  border: 1px solid var(--color-divider);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 18px;
+  cursor: default;
+}
+.ot-price-mode:hover { background-color: var(--color-bg-primary-hover); }
+.ot-price-mode:active { background-color: var(--color-container-fill-primary-neutral-light); }
+.ot-price-mode.is-on { background-color: var(--color-container-fill-primary-neutral-extra-bold); border-color: var(--ot-strong); color: var(--ot-text-inverse); }
+.ot-price-mode.is-on:hover { background-color: var(--color-container-fill-primary-neutral-bold); border-color: var(--color-text-primary); }
+.ot-price-plus {
+  position: absolute;
+  z-index: 5;
+  box-sizing: border-box;
+  padding: 0;
+  border: 0;
+  border-radius: 2px 0 0 2px;
+  color: var(--color-white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.ot-price-plus.is-left { border-radius: 0 2px 2px 0; }
+
+/* Pane controls (dark theme): buttons
+ * 24×24 r4, 1 px #4a4a4a on #0f0f0f, #dbdbdb icon 15 px, 4 px apart;
+ * hover #2e2e2e; activated (restore) #f2f2f2 fill, #0f0f0f icon, no border. */
+.ot-pane-controls {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  column-gap: 4px;
+  pointer-events: auto;
+}
+.ot-pane-btn {
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-divider);
+  border-radius: 4px;
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  cursor: default;
+}
+.ot-pane-btn:hover { background-color: var(--color-bg-primary-hover); }
+.ot-pane-btn:active { background-color: var(--color-container-fill-primary-neutral-light); border-width: 0; }
+.ot-pane-btn.is-active { background-color: var(--color-container-fill-primary-neutral-extra-bold); color: var(--ot-text-inverse); border-width: 0; }
+.ot-pane-btn.is-active:hover { background-color: var(--color-container-fill-primary-neutral-bold); }
+.ot-pane-btn svg { display: block; }
+.ot-pane-menu-icon { display: inline-flex; }
+.ot-pane-menu-icon svg { width: 18px; height: 18px; }
+
+/* Axis corner button: the time axis' corner under the price axis (gear,
+   price scale menu). The tint over the main price axis takes no input. */
+.ot-axis-corner {
+  position: absolute;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+.ot-axis-corner-tint {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* Price axes past the first one of a side (view/scales.tsx): a mouse strip
+   over each painted axis (drag = scale, double click = auto, right click =
+   its menu) and the scale names under the axes. */
+.ot-extra-axis {
+  position: absolute;
+  z-index: 4;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.ot-axis-stub {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+.ot-axis-stub-letter {
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+  pointer-events: none;
+}

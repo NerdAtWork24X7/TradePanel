@@ -1,0 +1,177 @@
+# lightweight-charts-drawing
+
+**[Live Demo](https://deepentropy.github.io/lightweight-charts-drawing/)**
+
+TradingView-style drawing tools for [lightweight-charts](https://github.com/tradingview/lightweight-charts) v5:
+86 tools with TradingView's factory defaults, labels, hit tests, placement
+and anchor rules (trend lines, channels, pitchforks, Fibonacci and Gann
+tools, patterns, Elliott waves, cycles, forecasting and measuring tools,
+volume-based tools, shapes, text and notes). List: [docs/TOOLS.md](docs/TOOLS.md).
+
+> Version 0.2 breaks the 0.1 API: the tool classes of 0.1 are replaced by one
+> `DrawingManager` on a shared drawing core. See [CHANGELOG.md](CHANGELOG.md).
+
+## Installation
+
+```bash
+npm install lightweight-charts-drawing lightweight-charts
+```
+
+## Quick start
+
+```typescript
+import { createChart, CandlestickSeries } from 'lightweight-charts';
+import { DrawingManager } from 'lightweight-charts-drawing';
+
+const chart = createChart(document.getElementById('chart')!, { autoSize: true });
+const series = chart.addSeries(CandlestickSeries);
+series.setData(bars); // your OHLC data
+
+const drawings = new DrawingManager(chart, series, { magnet: 'weak' });
+
+// Arm a tool: the user places it with the mouse (TV clicks / drag rules).
+drawings.setTool('fib-retracement');
+
+// Or add one in code (the tool's TradingView defaults fill the style).
+drawings.add({ kind: 'trend-line', points: [
+  { time: bars[10].time, price: bars[10].low },
+  { time: bars[40].time, price: bars[40].high },
+] });
+
+// Save / restore (the core Drawing model, checked and migrated on import).
+localStorage.setItem('drawings', drawings.exportJSON());
+drawings.importJSON(localStorage.getItem('drawings') ?? '[]');
+```
+
+## DrawingManager
+
+`new DrawingManager(chart, series, options?)` attaches one series primitive
+that draws every drawing, the placement preview, the anchors and the
+drawings' axis labels.
+
+Options: `bars` (bar getter with volume; default the series data, which
+usually has no volume: the volume profiles then show no rows and the
+anchored VWAP uses equal weights), `fontFamily`
+(default the chart font), `magnet` (`'off' | 'weak' | 'strong'`), `magnetSource`
+(`(time) => { time, values } | null`: the host's magnet candidates for the cursor time, instead of the
+series OHLC; `null` or no values = no snap), `interval`
+(per-interval visibility, TV Visibility tab), `timeInfo` (time zone /
+intraday of date labels), `stayInDrawingMode` (TV Keep drawing),
+`keyboard` (default true; false adds no window key listener: the key actions are off, but Shift and Ctrl / Cmd of a pointer gesture are still read from the pointer events),
+`formatLabel` (optional host formatter for every on-canvas label), `dragToPlace`
+(place the first two points of a tool by press, drag, release; a movement under 3 px is a click,
+so click-click still works; default `false`), `clampToPane`
+(a pending placement accepts a press outside the pane and clamps it to the pane edge; the
+pointer of a drag and the placement preview are kept inside the pane; default `false`), `interactive`
+(default `true`; `false` = view-only: drawings paint but take no pointer input and no key action
+(Escape, Delete / Backspace), and no event is stopped, so the chart pans over them;
+`setInteractive(false)` also clears the selection and a half-placed drawing).
+
+### Labels and number format
+
+`formatLabel?: (label: DrawingLabel) => string | null | undefined` is called
+once per on-canvas label with the library's default `text` and the raw
+inputs (prices, volumes, dates, …). Return the string to draw; `undefined`
+or `null` keeps the default; `""` draws empty. Strings are measured after
+the hook, so translated labels size their boxes. Axis labels stay on the
+chart's own `priceFormatter` / `localization.timeFormatter`.
+`setFormatLabel(fn)` replaces the hook on a live manager and repaints (switch
+the language without rebuilding); `setFormatLabel(undefined)` restores the
+library defaults.
+
+`setNumberFormat({ formatNumber(value, digits, grouped), formatPercent(value, digits), formatVolume(value) })`
+writes every number the drawings draw (ruler and range stats, position and forecast labels, price
+notes and labels, channel / fib / Gann prices, coefficients, pattern ratios, volumes) in the host's
+marks, for example `"1 234,56"`, `"−5,81%"`, `"103,47 M"`. `grouped` tells where the library's
+English text groups thousands. It is global (all managers): call `redraw()` after a change.
+`setNumberFormat(undefined)` restores the English text; `ENGLISH_NUMBER_FORMAT` is that format,
+for a host changing only part of it. The labels then reach `formatLabel` with the host's numbers.
+
+| `id` | Raw fields |
+|---|---|
+| `price-range` | `change`, `percent`, `pips`, `digits`, `price0`, `price1` |
+| `bars-range` | `bars` |
+| `time-span` | `seconds` |
+| `distance` | `distancePx` |
+| `angle` | `degrees` |
+| `volume` | `volume` |
+| `position-target` / `position-stop` | `distance`, `percent`, `ticks`, `amount`, `pnl`, `digits` |
+| `position-middle` | `pnl`, `closed`, `qty`, `ratio` |
+| `forecast` | `change`, `percent`, `seconds`, `digits` |
+| `forecast-date` | `time`, `timeZone`, `intraday` |
+| `price` | `price`, `digits` |
+| `fib-level` | `coeff`, `price`, `digits` |
+| `pearson` | `r` |
+| `gann-ratio` | `ratio` |
+
+| Method | |
+|---|---|
+| `setTool(kind \| null, { glyph? })`, `tool()` | arm / disarm a tool (`kind` from docs/TOOLS.md) |
+| `cancelPending()` | cancel a half-placed drawing, the tool stays armed |
+| `setMagnet(mode)`, `setInterval(i)`, `setStayInDrawingMode(on)`, `setFormatLabel(fn \| undefined)`, `setInteractive(on)` | settings |
+| `add(drawing)`, `update(drawing)`, `remove(id)`, `clear()`, `get(id)`, `drawings()` | drawings |
+| `setHidden(id, hidden)` | hide / show one drawing without removing it (the drawing's `hidden` flag, saved with it) |
+| `setDrawingsVisible(visible)`, `drawingsVisible()` | hide / show every drawing at once (TV "Hide all drawings"; not saved, the drawings are untouched) |
+| `select(ids)`, `selection()` | selection (multi-select with Ctrl / Cmd) |
+| `bringToFront(id)`, `sendToBack(id)` | z-order |
+| `toggleAnchored(id)` | TV "Anchor drawing" for Text, Pin and Table: the drawing keeps its pane position when the chart scrolls (`isAnchorable(kind)`) |
+| `exportJSON()`, `importJSON(json)` | save / restore |
+| `addImage({ name, width, height })` | place an image (file put in the image cache by the host: `cacheImage` / `setImageReader`) |
+| `setTableCellText(id, cell, text)`, `endTableEdit()`, `tableOp(id, op)`, `tableState()` | table cell editing (after a `tableEdit` event) and row / column operations |
+| `on(event, cb)` → unsubscribe | events |
+| `redraw()`, `destroy()` | |
+
+Events: `change`, `add`, `update`, `remove`, `selection`, `tool`,
+`visibility` (every drawing hidden / shown again),
+`textEdit` (a text tool was placed or double-clicked: open your editor at
+the given pane point and `update` the drawing's `text`), `tableEdit` (a click
+on a cell of the selected table: open your editor over the given cell box),
+`gestureEnd` (end of a drag / placement, for undo grouping).
+
+Mouse and keys (TradingView behaviour): placement by clicks, press-drag for
+brush / highlighter, double-click (or a click on the last point) finishes a
+path / polyline; anchor drags, body drag of a selected drawing, Ctrl / Cmd
+click to multi-select and group drag, Ctrl + body drag clones; Shift = 45°
+steps / square boxes and magnet off, Ctrl / Cmd inverts the magnet; Escape
+drops pending points, then the tool, then the selection; Delete removes the
+selection (locked drawings stay).
+With `keyboard: false` the manager adds no key listener: no Escape cascade,
+no Delete / Backspace removal. Shift and Ctrl / Cmd are read from the pointer
+events of a gesture, so snap, axis lock, magnet inversion, multi-select and clone still work.
+
+Touch and pen: a press on a drawing or with an armed tool holds the chart until
+the finger lifts or the browser cancels the pointer; elsewhere the chart pans
+and pinches as without the library.
+
+Drawing flags: `locked` (selectable, but no drag and no Delete) and `hidden`
+(not drawn, hit or selected). A drawing that gets hidden leaves the
+selection. Arming a tool while every drawing is hidden shows them again.
+
+The host keeps what is not drawing logic: undo stack, storage, settings
+dialogs, text / table editors, toolbar, context menu.
+
+## Architecture
+
+```
+src/core/      shared drawing core, no UI and no lightweight-charts runtime:
+               tool model + TradingView factory defaults (specs), hit tests,
+               placement and drag rules (interact), saved-drawing migration
+               (serialize), renderer-neutral scenes per tool (scene)
+src/runtime/   canvas runtime: DrawingManager, scene -> canvas renderer,
+               chart <-> price / time bridge (makeCoords)
+```
+
+The core is shared with [OpenTrader](https://github.com/deepentropy/opentrader),
+which draws the same scenes as SVG. The package imports only types from
+lightweight-charts, so the chart library is not bundled twice.
+
+## Demo
+
+```bash
+npm run demo        # dev server, demo/
+npm run build:demo  # dist-demo/ (GitHub Pages)
+```
+
+## License
+
+MIT

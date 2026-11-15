@@ -1,0 +1,1497 @@
+import { translate, translateWith } from "../../i18n/translator";
+import { dateText, listText } from "../../i18n/format";
+/*
+ * AlertDialog — create or edit a single alert rule.
+ *
+ * A real, condition-based alert (the per-symbol counterpart to the watchlist's
+ * list-level AddAlertDialog). A (left · operator · right) condition over
+ * price / drawing / indicator operands, plus trigger, expiration, message and
+ * notifications. Saving writes to alert-store; the engine evaluates it live.
+ *
+ * Layout: 480 px, header "Create alert on <symbol>" (the symbol is a button
+ * that turns into a field), the Condition block (label column 131 px, 34 px
+ * controls stacked 8 px apart), a divider, then Trigger / Expiration /
+ * Message / Notifications as one text row each. Trigger and Expiration open
+ * a menu; Message and Notifications open their own view (back arrow, Cancel
+ * / Apply). Footer: Cancel and Create.
+ *
+ * Opened from the header "Create alert" button and the chart context menu
+ * (prefilled with the clicked symbol + price), or with an `editId` to edit.
+ */
+import { track } from "../../data/analytics";
+import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
+import { Portal } from "solid-js/web";
+import { createStore } from "solid-js/store";
+import {
+  alertStore,
+  alertWebhook,
+  setAlertWebhook,
+  type AlertCondition,
+  type AlertFrequency,
+  type AlertOperator,
+  type StudyConditionRef,
+} from "../../data/alert-store";
+import {
+  callsGiveMessages,
+  chartStudies,
+  defaultFibLevel,
+  defaultFibLevel2,
+  drawingOperators,
+  fibLevelText,
+  fixedFrequency,
+  movingBarsMin,
+  savedConditions,
+  sharedBarInterval,
+  strategyOperators,
+  studyLabel,
+  studyPlots,
+} from "../../data/alert-operands";
+import {
+  LEVEL_OPERATORS,
+  OPERATOR_LABELS,
+  bandOperatorLabel,
+  isBandOperator,
+  defaultAlertMessage,
+  isPercentOperator,
+  priceableDrawings,
+  VWAP_PLOTS,
+  alertIntervalText,
+  conditionHasIntervalRow,
+  alertAmountText,
+  drawingSelectLabel,
+  isMovingOperator,
+  VALUE_OPERATORS,
+  isStrategyOperator,
+  MAX_CONDITIONS,
+  blocksMoreConditions,
+  ruleConditions,
+} from "../../data/alert-condition";
+import { isStrategyId } from "../chart/indicators/strategy-entries";
+import { chartComparesFor, chartLastPrice, indicatorPlotValue } from "../../data/chart-state-registry";
+import { quoteFor } from "../../data/quotes";
+import { cachedSymbolSessions } from "../../data/session";
+import { buildIntervalMenu, sectionOf, SECTION_TITLES, type IntervalSection } from "../chart/custom-intervals";
+import { compareIntervals, favoriteIntervals, longIntervalLabel } from "../chart/interval-favorites";
+import { hasAlertFunction, studyConditions } from "../../data/alert-study-conditions";
+import { appendPlaceholder, placeholderGroups, type PlaceholderGroup } from "../../data/alert-placeholders";
+import { messageOutputs } from "../../data/alert-outputs";
+import { studyOperandValue } from "../../data/alert-studies";
+import { stepAmountText } from "../../data/study-format";
+import { priceFieldProps } from "../../i18n/price-field";
+import { getIndicatorEntry } from "../chart/indicators/registry";
+import type { SessionId } from "../../data/session/symbol-sessions";
+import { isFullSymbol, isSupportedResolution, toFullSymbol } from "../../data/datafeed";
+import { SOUND_DURATIONS, SOUND_GROUP, SOUND_OPTIONS, isAlertSoundPlaying, playAlertSound, stopAlertSound } from "../../data/alert-sounds";
+import { alertSettings } from "../../data/alert-settings";
+import { ensureNotificationPermission } from "../../data/alert-delivery";
+import { attachDialogSize } from "./dialog-size";
+import { createDialogKeys } from "../../components/Dialog";
+import { createPopover } from "../../components/popover";
+import * as form from "./alert-form";
+import { fieldText, openPlaceholderGroups, saveOpenPlaceholderGroups, type ConditionChoices, type SideKind } from "./alert-form";
+import {
+  conditionFields,
+  createMessageState,
+  createNotificationsState,
+  createSettingsState,
+  expiryTime,
+  openingFields,
+  type EditorFields,
+  type ExpiryKey,
+} from "./alert-dialog-state";
+import { PRESET_SEGMENTS, PRESET_TITLES, localTimeZone, schedulePreset, scheduleTitle, segmentText, type SchedulePreset } from "../../data/alert-schedule";
+
+type Props = {
+  /** When set, edit this existing rule instead of creating one. */
+  editId?: string;
+  /** Prefill symbol (full name "EXCHANGE:TICKER") for new rules. */
+  symbol?: string;
+  /** Prefill the right-hand value (e.g. the clicked chart price). */
+  price?: number;
+  /** New alert on a study (chart menu in a study pane): the left operand. */
+  indicatorId?: string;
+  /** New alert on a compared symbol (its full name): the left operand. */
+  compareSymbol?: string;
+  /** New alert on a drawing (its "Add alert" button): the right operand. */
+  drawingId?: string;
+  /** Chart interval to stamp onto the rule as its resolution. */
+  interval: string;
+  /** Session of the chart (regular or extended hours), kept on a new alert. */
+  session?: SessionId;
+  onClose: () => void;
+};
+
+
+/** Trigger choices. A condition on price offers "Once only" and "Every
+ *  time"; one that reads a study has the per-bar ones, and "Every time" is
+ *  then called "Once per minute" and comes last. */
+const FREQUENCIES: { key: AlertFrequency; label: string; desc: string }[] = [
+  { key: "only_once", label: "Once only", desc: "Triggers once when condition is met" },
+  { key: "every_time", label: "Every time", desc: "Triggers once per minute while condition remains met" },
+];
+const STUDY_FREQUENCIES: { key: AlertFrequency; label: string; desc: string }[] = [
+  { key: "only_once", label: "Once only", desc: "Triggers once when condition is met" },
+  { key: "once_per_bar", label: "Once per bar", desc: "Triggers once per bar when condition is met" },
+  { key: "once_per_bar_close", label: "Once per bar close", desc: "Triggers every time condition is met at bar close" },
+  { key: "every_time", label: "Once per minute", desc: "Triggers once per minute while condition remains met" },
+];
+
+/** "Oct 7, 23:59" */
+function shortDateTime(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${dateText(d, { month: "short", day: "numeric" })}, ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** datetime-local value of a time. */
+function toLocalInput(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+type MenuOption = { value: string; label: string; desc?: string; right?: string; disabled?: boolean; icon?: string; /** A play button at the end of the row (sound preview). */ play?: () => void; /** A line above the row (a new group). */ sep?: boolean };
+
+/** Condition icons: stroked 18 x 18 paths. A level is a horizontal line, a
+ *  channel two of them; the arrow or the dot is the price. */
+const OPERATOR_ICONS: Record<AlertOperator, string> = {
+  crossing: "M3 13.5 15 4.5M11.5 4.5H15V8M3 4.5l12 9",
+  crossing_up: "M2.5 11.5h13M5 15.5l8-11M9.5 4.5H13V8",
+  crossing_down: "M2.5 6.5h13M5 2.5l8 11M9.5 13.5H13V10",
+  greater: "M2.5 13.5h13M9 10.5v-7M6 6.5l3-3 3 3",
+  less: "M2.5 4.5h13M9 7.5v7M6 11.5l3 3 3-3",
+  moving_up: "M2.5 13.5l4.5-4.5 3 3 5-6.5M11.5 5.5H15V9",
+  moving_down: "M2.5 4.5 7 9l3-3 5 6.5M11.5 12.5H15V9",
+  moving_up_pct: "M2.5 13.5l4.5-4.5 3 3 5-6.5M11.5 5.5H15V9",
+  moving_down_pct: "M2.5 4.5 7 9l3-3 5 6.5M11.5 12.5H15V9",
+  entering: "M2.5 5h13M2.5 12.5h13M9 16.5V8.5M6.5 11 9 8.5l2.5 2.5",
+  exiting: "M2.5 5h13M2.5 12.5h13M9 8.5v8M6.5 14 9 16.5l2.5-2.5",
+  inside: "M2.5 4.5h13M2.5 13.5h13M9 7.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8Z",
+  outside: "M2.5 7h13M2.5 15.5h13M9 2.1a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8Z",
+  hits_level: "M2.5 4h4M11.5 4h4M2.5 9h13M2.5 14h4M11.5 14h4M9 2.5v13",
+  // A study's own conditions are listed by title, without an icon.
+  alert_condition: "",
+  // A script's alert() calls: a function sign ("f" with an "x").
+  alert_function: "M10.5 3.2c-.4-.5-1-.7-1.6-.6-.8.1-1.4.8-1.4 1.6v9.6c0 .8-.6 1.5-1.4 1.6-.6.1-1.2-.1-1.6-.6M4.5 7.5h5M11 10.5l4 4M15 10.5l-4 4",
+  strategy_orders: "",
+  strategy_orders_and_alerts: "",
+  strategy_alerts: "",
+  // Alerts on a stock screen are made from the screener, not in this dialog.
+  screen_enter: "",
+  screen_exit: "",
+};
+
+/** Dropdown of the dialog. `box`: a 34 px bordered control showing the value;
+ *  `inline`: the value as text with a chevron (Trigger, Expiration). `more`:
+ *  the options after this count sit behind a "Show more" row. */
+function AdMenu(props: { variant: "box" | "inline"; value: string; options: MenuOption[]; onPick: (v: string) => void; more?: number; label?: string; placeholder?: string; group?: string; /** One option only: shown read-only (no menu). */ lockSingle?: boolean }) {
+  const [open, setOpen] = createSignal(false);
+  const [all, setAll] = createSignal(false);
+  // The menu and its button: a press outside closes it, Escape is the dialog's.
+  const el = createPopover(undefined, { onClose: () => setOpen(false), placement: false, active: open, escape: "none" });
+  const current = () => props.options.find((o) => o.value === props.value);
+  const locked = () => !!props.lockSingle && props.options.length <= 1;
+  const cut = () => (props.more !== undefined && !all() && props.options.findIndex((o) => o.value === props.value) < props.more ? props.more : props.options.length);
+  const menuIcon = (d: string) => (
+    <svg class="ad-option-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+      <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" d={d} />
+    </svg>
+  );
+  const row = (o: MenuOption) => (
+    <>
+    <Show when={o.sep}><div class="ad-option-sep" role="separator" /></Show>
+    <button
+      type="button"
+      role="option"
+      aria-selected={o.value === props.value}
+      disabled={o.disabled}
+      class="ad-option"
+      classList={{ "is-selected": o.value === props.value, "has-desc": !!o.desc }}
+      onClick={() => { props.onPick(o.value); setOpen(false); }}
+    >
+      <Show when={o.icon}>{menuIcon(o.icon!)}</Show>
+      <span class="ad-option-main">
+        <span class="ad-option-label">{o.label}</span>
+        <Show when={o.desc}><span class="ad-option-desc">{o.desc}</span></Show>
+      </span>
+      <Show when={o.right}><span class="ad-option-right">{o.right}</span></Show>
+      <Show when={o.play}>
+        <span class="ad-option-play" role="button" title="Play" onClick={(e) => { e.stopPropagation(); o.play!(); }}>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+            <circle cx="9" cy="9" r="6.9" fill="none" stroke="currentColor" stroke-width="1.2" />
+            <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M7.4 6.2v5.6L12 9 7.4 6.2Z" />
+          </svg>
+        </span>
+      </Show>
+    </button>
+    </>
+  );
+  return (
+    <div class={`ad-menu ad-menu--${props.variant}`} ref={el}>
+      <button
+        type="button"
+        class="ad-menu-btn"
+        aria-label={props.label}
+        aria-expanded={open()}
+        aria-disabled={locked() || undefined}
+        onClick={() => { if (locked()) return; setAll(false); setOpen(!open()); }}
+      >
+        <Show when={current()?.icon}>{menuIcon(current()!.icon!)}</Show>
+        <span class="ad-menu-value">{current()?.label ?? props.placeholder ?? ""}</span>
+        <svg class="ad-chevron" classList={{ "is-open": open() }} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+          <path fill="none" stroke="currentColor" stroke-width="1.2" d="m4.5 7 4.5 4 4.5-4" />
+        </svg>
+      </button>
+      <Show when={open()}>
+        <div class="ad-menu-list" role="listbox">
+          <Show when={props.group}><div class="ad-option-group">{props.group}</div></Show>
+          <For each={props.options.slice(0, cut())}>{row}</For>
+          <Show when={cut() < props.options.length}>
+            <button type="button" class="ad-option ad-option-more" onClick={() => setAll(true)}>
+              <span class="ad-option-label">Show more</span>
+              <svg class="ad-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+                <path fill="none" stroke="currentColor" stroke-width="1.2" d="m4.5 7 4.5 4 4.5-4" />
+              </svg>
+            </button>
+          </Show>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+/** Interval sections of the Interval row (no ticks or ranges). */
+const INTERVAL_SECTIONS: IntervalSection[] = ["seconds", "minutes", "hours", "days"];
+const isAlertInterval = (id: string) => INTERVAL_SECTIONS.includes(sectionOf(id) as IntervalSection);
+type IntervalGroup = { id: string; title: string; items: string[] };
+
+/** Groups of the Interval menu: the interval menu's rows (built-in and
+ *  custom) by section, with `extra` (the chart's interval, the alert's own)
+ *  added where missing. */
+function intervalGroups(extra: string[]): IntervalGroup[] {
+  const ids = new Set<string>();
+  for (const s of buildIntervalMenu().sections) for (const r of s.items) if (!r.iconName && isAlertInterval(r.id)) ids.add(r.id);
+  for (const id of extra) if (isAlertInterval(id)) ids.add(id);
+  const all = [...ids].sort(compareIntervals);
+  return INTERVAL_SECTIONS.map((k) => ({ id: k, title: SECTION_TITLES[k], items: all.filter((id) => sectionOf(id) === k) })).filter((g) => g.items.length > 0);
+}
+
+/** Interval row of a condition: the button shows "Same as chart" with the
+ *  chart's interval, or the chosen one ("1h"). Its menu: "Same as chart",
+ *  then Favorites and the interval sections, folded except the one the
+ *  choice was made in (or the one holding it); a row is selected in the
+ *  group it was picked from only. */
+function AdIntervalMenu(props: { value: string; origin: string; chart?: string; favorites: string[]; groups: IntervalGroup[]; onPick: (id: string, origin: string) => void }) {
+  const [open, setOpen] = createSignal(false);
+  const [unfolded, setUnfolded] = createSignal<Record<string, boolean>>({});
+  const [maxHeight, setMaxHeight] = createSignal(420);
+  let btn: HTMLButtonElement | undefined;
+  let list: HTMLDivElement | undefined;
+  // The width of the list's scroll bar, once the rows are laid out (folding a section changes it).
+  createEffect(() => {
+    if (!open()) return;
+    unfolded();
+    queueMicrotask(() => list?.style.setProperty("--ad-iv-scrollbar", `${list.offsetWidth - list.clientWidth}px`));
+  });
+  const el = createPopover(undefined, { onClose: () => setOpen(false), placement: false, active: open, escape: "none" });
+  const groups = (): IntervalGroup[] => [...(props.favorites.length ? [{ id: "favorites", title: "Favorites", items: props.favorites }] : []), ...props.groups];
+  const toggle = () => {
+    if (open()) { setOpen(false); return; }
+    const init: Record<string, boolean> = {};
+    for (const g of groups()) init[g.id] = g.id === "favorites" ? props.origin === "favorites" : props.origin !== "favorites" && g.items.includes(props.value);
+    setUnfolded(init);
+    // The list goes down to the bottom of the window at most.
+    if (btn) setMaxHeight(Math.max(160, window.innerHeight - btn.getBoundingClientRect().bottom - 8));
+    setOpen(true);
+  };
+  const pick = (id: string, origin: string) => { props.onPick(id, origin); setOpen(false); };
+  const same = () => props.origin === "same-as-chart";
+  return (
+    <div class="ad-menu ad-menu--box ad-iv" ref={el}>
+      <button type="button" class="ad-menu-btn" ref={btn} data-name="resolution-dropdown" aria-label="Interval" aria-expanded={open()} onClick={toggle}>
+        <span class="ad-menu-value">{same() ? "Same as chart" : alertIntervalText(props.value, true)}</span>
+        <Show when={same() && props.chart}><span class="ad-iv-hint">{longIntervalLabel(props.chart!)}</span></Show>
+        <svg class="ad-chevron" classList={{ "is-open": open() }} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+          <path fill="none" stroke="currentColor" stroke-width="1.2" d="m4.5 7 4.5 4 4.5-4" />
+        </svg>
+      </button>
+      <Show when={open()}>
+        <div class="ad-iv-menu" role="listbox" style={{ "max-height": `${maxHeight()}px` }} ref={list}>
+          <div class="ad-iv-rows">
+          <Show when={props.chart}>
+            <button type="button" role="option" aria-selected={same()} class="ad-option" classList={{ "is-selected": same() }} onClick={() => pick(props.chart!, "same-as-chart")}>
+              <span class="ad-option-main"><span class="ad-option-label">Same as chart</span></span>
+              <span class="ad-option-right">{longIntervalLabel(props.chart!)}</span>
+            </button>
+            <div class="ad-ph-divider" role="separator" />
+          </Show>
+          <For each={groups()}>
+            {(g, i) => (
+              <>
+                <button type="button" class="ad-ph-title" role="group" aria-expanded={!!unfolded()[g.id]} onClick={() => setUnfolded({ ...unfolded(), [g.id]: !unfolded()[g.id] })}>
+                  <span class="ad-ph-title-text">{g.title}</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+                    <path fill="currentColor" d={unfolded()[g.id] ? "m4.67 10.62.66.76L9 8.16l3.67 3.22.66-.76L9 6.84l-4.33 3.78Z" : "m4.67 7.38.66-.76L9 9.84l3.67-3.22.66.76L9 11.16 4.67 7.38Z"} />
+                  </svg>
+                </button>
+                <Show when={unfolded()[g.id]}>
+                  <For each={g.items}>
+                    {(id) => {
+                      const selected = () => props.value === id && props.origin === g.id;
+                      return (
+                        <button type="button" role="option" aria-selected={selected()} class="ad-option" classList={{ "is-selected": selected() }} disabled={!isSupportedResolution(id)} onClick={() => pick(id, g.id)}>
+                          <span class="ad-option-main"><span class="ad-option-label">{longIntervalLabel(id)}</span></span>
+                        </button>
+                      );
+                    }}
+                  </For>
+                </Show>
+                <Show when={i() < groups().length - 1}><div class="ad-ph-divider" role="separator" /></Show>
+              </>
+            )}
+          </For>
+          </div>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+/** "Add placeholder" button of the message view and its menu: opens above the
+ *  button, one foldable group per kind, a row = title + placeholder; a click
+ *  adds the placeholder to the message and closes the menu. */
+function AdPlaceholders(props: { groups: PlaceholderGroup[]; onPick: (value: string) => void }) {
+  const [open, setOpen] = createSignal(false);
+  const [expanded, setExpanded] = createSignal(openPlaceholderGroups());
+  // Escape closes the menu only (the dialog stays).
+  const el = createPopover(undefined, { onClose: () => setOpen(false), placement: false, active: open });
+  const toggle = (id: string) => {
+    const next = { ...expanded(), [id]: !expanded()[id] };
+    setExpanded(next);
+    saveOpenPlaceholderGroups(next);
+  };
+  return (
+    <div class="ad-ph" ref={el}>
+      <button type="button" class="ad-small-btn" data-name="alert-message-placeholder-button" aria-expanded={open()} onClick={() => setOpen(!open())}>
+        Add placeholder
+      </button>
+      <Show when={open()}>
+        <div class="ad-ph-menu" role="menu" data-name="alert-placeholders-menu">
+          <For each={props.groups.filter((g) => g.items.length)}>
+            {(g, i) => (
+              <>
+                <Show when={i() > 0}><div class="ad-ph-divider" role="separator" /></Show>
+                <button type="button" class="ad-ph-title" role="group" aria-expanded={!!expanded()[g.id]} onClick={() => toggle(g.id)}>
+                  <span class="ad-ph-title-text">{g.title}</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+                    <path fill="currentColor" d={expanded()[g.id] ? "m4.67 10.62.66.76L9 8.16l3.67 3.22.66-.76L9 6.84l-4.33 3.78Z" : "m4.67 7.38.66-.76L9 9.84l3.67-3.22.66.76L9 11.16 4.67 7.38Z"} />
+                  </svg>
+                </button>
+                <Show when={expanded()[g.id]}>
+                  <For each={g.items}>
+                    {(it) => (
+                      <button type="button" class="ad-ph-item" role="option" onClick={() => { props.onPick(it.value); setOpen(false); }}>
+                        <span class="ad-ph-item-title">{it.title}</span>
+                        <span class="ad-ph-item-value">{it.value}</span>
+                      </button>
+                    )}
+                  </For>
+                </Show>
+              </>
+            )}
+          </For>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+/** The web version (alerts checked by the browser tab). */
+const WEB_BUILD = import.meta.env.MODE === "web";
+
+
+export function AlertDialog(props: Props) {
+  const existing = props.editId ? alertStore.rule(props.editId) : undefined;
+
+  const [symbol, setSymbol] = createSignal((existing?.symbol ?? props.symbol ?? "").toUpperCase());
+
+  // ── Conditions ── One condition is edited in place (the editor below). A multi-condition alert lists its
+  // conditions (two or more) in `conds`; the "Add condition" / "Edit condition" view edits one of them in the
+  // editor and writes it back. `seed`: the condition the editor started from (its operands keep their saved inputs
+  // and labels).
+  const [conds, setConds] = createSignal<AlertCondition[]>(existing?.and?.length ? ruleConditions(existing) : []);
+  const multi = () => conds().length >= 2;
+  const [seed, setSeed] = createSignal<AlertCondition | undefined>(existing ? ruleConditions(existing)[0] : undefined);
+  /** The condition view: the index it edits and the condition before (null: a new one). */
+  const [draft, setDraft] = createSignal<{ index: number; saved: AlertCondition | null } | null>(null);
+
+  // The set of indicators / priceable drawings available for the symbol comes
+  // from the charted symbol; captured once at open (the dialog is short-lived).
+  // A drawing is a choice only in the dialog opened from it (its alert button) or the alert made on it.
+  const drawings = () =>
+    priceableDrawings(symbol()).filter((d) => d.id === props.drawingId || (existing?.right.kind === "drawing" && existing.right.drawingId === d.id));
+
+  // Include the rule's *existing* operands as options even when the symbol
+  // isn't currently charted (or the study/drawing is gone), so editing never
+  // silently drops or mis-displays an indicator/drawing operand.
+  const indicatorOptions = createMemo(() => {
+    const opts = chartStudies(symbol());
+    const ids = new Set(opts.map((o) => o.id));
+    const saved = [...(existing ? ruleConditions(existing) : []), ...conds()];
+    for (const o of saved.flatMap((c) => [c.left, c.right, c.right2])) {
+      if (o && o.kind === "indicator" && !ids.has(o.indicatorId)) {
+        // Its saved label carries the inputs (and the plot): the title alone.
+        opts.push({ id: o.indicatorId, label: o.inputs && o.label ? o.label.replace(/ \(.*$/, "") : (o.label ?? "indicator"), inputs: o.inputs });
+        ids.add(o.indicatorId);
+      }
+    }
+    return opts;
+  });
+  /** The symbols compared on the chart: sources like the studies ("Microsoft Corp. (NASDAQ)"); the one of an alert
+   *  being edited stays. */
+  const compareOptions_ = createMemo(() => {
+    const opts: { symbol: string; label: string; last: number | null }[] = chartComparesFor(symbol()).map((c) => ({ symbol: c.symbol.toUpperCase(), label: c.label, last: c.last }));
+    for (const l of [...(existing ? ruleConditions(existing) : []), ...conds()].map((c) => c.left)) {
+      if (l.kind === "symbol" && !opts.some((o) => o.symbol === l.symbol.toUpperCase())) opts.push({ symbol: l.symbol.toUpperCase(), label: l.label ?? l.symbol, last: null });
+    }
+    // The same symbol compared twice: one source.
+    return opts.filter((o, i) => opts.findIndex((x) => x.symbol === o.symbol) === i);
+  });
+  /** A study as the selects name it: its legend title with its inputs ("MACD (close, 12, 26, 9)"). */
+  const studyName = (id: string): string => studyLabel(indicatorOptions(), id);
+  const drawingOptions = createMemo(() => {
+    const opts = drawings();
+    const r = seed()?.right;
+    if (r && r.kind === "drawing" && !opts.some((o) => o.id === r.drawingId)) {
+      return [...opts, { id: r.drawingId, label: r.label ?? "drawing", band: r.band ?? null, ...(r.plot != null ? { plots: VWAP_PLOTS } : {}) }];
+    }
+    return opts;
+  });
+
+
+  /** The conditions a study declares for alerts (script alertcondition(),
+   *  TPO extended levels), with its inputs on the chart. An alert being
+   *  edited keeps its own condition in the list. */
+  const condsOf = (indicatorId: string): StudyConditionRef[] => {
+    const list = studyConditions(getIndicatorEntry(indicatorId), indicatorOptions().find((o) => o.id === indicatorId)?.inputs);
+    const was = seed()?.left;
+    const kept = was?.kind === "indicator" && was.indicatorId === indicatorId ? was.condition : undefined;
+    return kept && !list.some((c) => c.id === kept.id) ? [kept, ...list] : list;
+  };
+
+  /** The study calls alert(): "Any alert() function call" comes first in its condition list. */
+  const callsOf = (indicatorId: string): boolean =>
+    hasAlertFunction(getIndicatorEntry(indicatorId)) || (seed()?.op === "alert_function" && seed()?.left.kind === "indicator" && (seed()!.left as { indicatorId: string }).indicatorId === indicatorId);
+  /** A strategy's conditions: its order fills, with its alert() calls and the calls only when it calls alert(). */
+  const strategyOpsOf = (indicatorId: string): AlertOperator[] => strategyOperators(callsOf(indicatorId));
+  // A study with alert() calls opens on them, one that declares conditions on its first one; a strategy on its
+  // first condition.
+  const firstStrategy = !existing && !!props.indicatorId && isStrategyId(props.indicatorId) ? strategyOpsOf(props.indicatorId)[0] : undefined;
+  const firstCalls = !existing && !!props.indicatorId && !firstStrategy && untrack(() => callsOf(props.indicatorId!));
+  const firstCond = !existing && props.indicatorId && !firstCalls && !firstStrategy ? untrack(() => condsOf(props.indicatorId!))[0] : undefined;
+  // A chart on ticks or ranges: the alert reads 1 minute.
+  const chartInterval = isAlertInterval(props.interval) ? props.interval : undefined;
+  // A saved number is shown as the source's values are written.
+  const savedText = (v: number) => fieldText(alertAmountText(existing?.symbol ?? symbol(), seed()?.left ?? { kind: "price" }, v));
+  const editorContext = { savedText, chartInterval };
+  /** The condition editor's fields (see ./alert-dialog-state). The value and the bounds follow the source's current
+   *  value until they are edited; the interval is "Same as chart" on a new alert, its own on an alert being edited. */
+  const [fields, setFields] = createStore<EditorFields>(
+    openingFields(
+      existing,
+      seed(),
+      {
+        indicatorId: props.indicatorId,
+        compareSymbol: props.compareSymbol,
+        drawingId: props.drawingId,
+        price: props.price,
+        op: firstStrategy ?? (firstCalls ? "alert_function" : firstCond ? "alert_condition" : "crossing"),
+        leftCond: firstCond?.id,
+      },
+      editorContext,
+    ),
+  );
+  const isCond = () => fields.op === "alert_condition";
+  /** "Any alert() function call": the script's calls give the message and how often it fires. */
+  const isCalls = () => fields.op === "alert_function";
+  /** A strategy's condition (its order fills, its alert() calls). */
+  const isStrat = () => isStrategyOperator(fields.op);
+  /** The alert() calls give the messages: "Any alert() function call", a strategy's "alert() function calls only". */
+  const isCallsOnly = () => callsGiveMessages(fields.op);
+  /** A condition of the study itself: no plot, nothing compared. */
+  const isOwn = () => isCond() || isCalls() || isStrat();
+  const leftStrategy = () => fields.leftKind === "indicator" && isStrategyId(fields.leftIndicator);
+  const leftCalls = () => fields.leftKind === "indicator" && callsOf(fields.leftIndicator) && !draft();
+  const leftConds = () => (fields.leftKind === "indicator" ? condsOf(fields.leftIndicator) : []);
+  const leftCondition = () => leftConds().find((c) => c.id === fields.leftCond);
+
+  // "in N bars" (1-300): 1 bar on a price, 2 on a study (a compared symbol is read like one) until it is edited.
+  const barsMin = () => movingBarsMin(fields.leftKind);
+  const barsValue = () => {
+    const n = Math.round(Number(fields.bars));
+    return fields.bars !== "" && Number.isFinite(n) ? Math.max(barsMin(), Math.min(300, n)) : barsMin();
+  };
+  const intervalChoices = createMemo(() => ({
+    favorites: favoriteIntervals().filter(isAlertInterval).sort(compareIntervals),
+    groups: intervalGroups([chartInterval ?? "", existing?.resolution ?? ""]),
+  }));
+
+  // Trigger and expiration, the message and the notifications (each view edits a copy, written back on Apply).
+  const settings = createSettingsState(existing);
+  const msg = createMessageState(existing);
+  // The webhook is kept per rule by the alert store (deleting the alert deletes it).
+  const notify = createNotificationsState(existing, existing ? alertWebhook(existing.id) : null);
+  const expiryOptions = (): MenuOption[] => [
+    { value: "open", label: "Open-ended", right: "Won't expire" },
+    { value: "eod", label: "End of day", right: shortDateTime(expiryTime("eod", null)!) },
+    { value: "1w", label: "1 week", right: shortDateTime(expiryTime("1w", null)!) },
+    { value: "1m", label: "1 month", right: shortDateTime(expiryTime("1m", null)!) },
+    { value: "custom", label: "Custom date", right: settings.customExpiry() != null ? shortDateTime(settings.customExpiry()!) : "" },
+  ];
+
+  // Which view of the dialog shows.
+  const [view, setView] = createSignal<"main" | "message" | "notifications" | "condition">("main");
+  /** Play button of a sound row: plays it once, or stops it when it is the one playing. */
+  const previewSound = (key: string) => {
+    const was = isAlertSoundPlaying(key);
+    stopAlertSound();
+    if (!was) playAlertSound(key, { preview: true });
+  };
+  const [symbolEdit, setSymbolEdit] = createSignal(!((existing?.symbol ?? props.symbol ?? "").trim()));
+
+  const isPct = () => isPercentOperator(fields.op);
+  /** Moving Up / Down (%): an amount in N bars, nothing compared. */
+  const isMoving = () => isMovingOperator(fields.op);
+  /** A channel between two bounds (not a drawing's). */
+  const valueBand = () => isBandOperator(fields.op) && fields.rightKind !== "drawing";
+
+  /** Current value of the source: the study's last value, the compared symbol's price, else the price. */
+  const sourceValue = (): number | null => {
+    if (fields.leftKind === "indicator") {
+      const c = studyPlots(fields.leftIndicator)[fields.leftPlot];
+      if (!c?.output) return indicatorPlotValue(symbol(), fields.leftIndicator, c?.plot ?? 0);
+      // An output the legend does not show: computed as the alert reads it.
+      const o = untrack(buildLeft);
+      return o.kind === "indicator" ? studyOperandValue(symbol(), o, fields.resolution, existing?.session ?? props.session ?? "RTH") : null;
+    }
+    if (fields.leftKind === "symbol") return compareOptions_().find((c) => c.symbol === fields.leftSymbol)?.last ?? quoteFor(fields.leftSymbol)?.last ?? null;
+    return chartLastPrice(symbol()) ?? quoteFor(symbol())?.last ?? null;
+  };
+  /** A value written as the source's values are. */
+  const valueText = (v: number) => fieldText(alertAmountText(symbol(), buildLeft(), v));
+  createEffect(() => {
+    const v = sourceValue();
+    if (v == null) return;
+    if (!fields.valueEdited) setFields("rightValue", untrack(() => valueText(v)));
+    if (!fields.boundsEdited) {
+      const tick = cachedSymbolSessions(symbol())?.tickAt(v) ?? 0.01;
+      setFields("upperValue", untrack(() => valueText(v + tick)));
+      setFields("lowerValue", untrack(() => valueText(v)));
+    }
+  });
+
+  // The drawing chosen as the level sets the conditions: a channel or a
+  // rectangle has entering / exiting / inside / outside, a vertical line
+  // only "Crossing" (once, so no trigger choice), a position its one fixed
+  // condition; a fib tool adds the choice of its level.
+  const drawingOption = () => (fields.rightKind === "drawing" ? drawingOptions().find((o) => o.id === fields.rightDrawing) : undefined);
+  const band = () => drawingOption()?.band ?? null;
+  const fibLevels = () => drawingOption()?.levels ?? [];
+  // An anchored VWAP: the five level conditions on one of its lines.
+  const vwapPlots = () => drawingOption()?.plots ?? [];
+  const fixedOperators = () => drawingOperators(drawingOption());
+  // A study without plots (a TPO) has only its conditions.
+  const operators = () => (leftStrategy() || (fields.leftKind === "indicator" && studyPlots(fields.leftIndicator).length === 0) ? [] : (fixedOperators() ?? VALUE_OPERATORS));
+  const operatorLabel = (o: AlertOperator) =>
+    !isBandOperator(o) ? OPERATOR_LABELS[o] : bandOperatorLabel(o, band() === "rectangle" ? "rectangle" : "channel");
+  createEffect(() => {
+    const list = operators();
+    const conds = leftConds();
+    const calls = leftCalls();
+    // A strategy: one of its conditions.
+    if (leftStrategy()) {
+      const own = strategyOpsOf(fields.leftIndicator);
+      if (!own.includes(untrack(() => fields.op))) setFields("op", own[0]);
+      return;
+    }
+    if (untrack(() => fields.op) === "alert_function" || isStrategyOperator(untrack(() => fields.op))) {
+      if (calls) return;
+      if (conds.length) {
+        setFields("leftCond", conds[0].id);
+        setFields("op", "alert_condition");
+      } else if (list.length) setFields("op", list[0]);
+      return;
+    }
+    if (untrack(() => fields.op) === "alert_condition") {
+      if (conds.some((c) => c.id === untrack(() => fields.leftCond))) return;
+      if (conds.length) setFields("leftCond", conds[0].id);
+      else if (list.length) setFields("op", list[0]);
+      return;
+    }
+    if (list.includes(untrack(() => fields.op))) return;
+    if (calls) setFields("op", "alert_function");
+    else if (conds.length) {
+      setFields("leftCond", conds[0].id);
+      setFields("op", "alert_condition");
+    } else if (list.length) setFields("op", list[0]);
+  });
+  /** The condition list: the script's alert() calls, a line, the study's conditions, a line, then the comparisons
+   *  ("Show more" after the first three); a strategy's own conditions only. */
+  const conditionOptions = (): MenuOption[] => {
+    if (leftStrategy()) return strategyOpsOf(fields.leftIndicator).map((o) => ({ value: o, label: OPERATOR_LABELS[o], icon: OPERATOR_ICONS[o] || undefined }));
+    return [
+      ...(leftCalls() ? [{ value: "alert_function", label: OPERATOR_LABELS.alert_function, icon: OPERATOR_ICONS.alert_function }] : []),
+      ...leftConds().map((c, i) => ({ value: `cond:${c.id}`, label: c.title, sep: i === 0 && leftCalls() })),
+      ...operators().map((o, i) => ({ value: o, label: operatorLabel(o), icon: OPERATOR_ICONS[o], sep: i === 0 && (leftConds().length > 0 || leftCalls()) })),
+    ];
+  };
+  createEffect(() => {
+    const lv = fibLevels();
+    if (lv.length && !lv.some((l) => l.coeff === untrack(() => fields.rightLevel))) setFields("rightLevel", defaultFibLevel(lv));
+  });
+  // Fib tool, channel condition: a second level (the lower bound), by
+  // default the level after the first one.
+  const fibChannel = () => fibLevels().length > 0 && isBandOperator(fields.op);
+  createEffect(() => {
+    const lv = fibLevels();
+    if (!lv.length) return;
+    const cur = untrack(() => fields.rightLevel2);
+    if (cur != null && lv.some((l) => l.coeff === cur)) return;
+    setFields("rightLevel2", defaultFibLevel2(lv, fields.rightLevel));
+  });
+
+  const choices = (): ConditionChoices => ({ studies: indicatorOptions(), compares: compareOptions_(), drawings: drawingOptions(), seed: seed(), studyCondition: leftCondition(), fibChannel: fibChannel() });
+  const buildLeft = () => form.buildLeft(fields, choices());
+  const buildRight = () => form.buildRight(fields, choices());
+  const buildRight2 = () => form.buildRight2(fields, choices());
+
+  /** Default message: the condition as it is set ("AZO Crossing 150"), or
+   *  the message a study's condition declares. An alert keeps no message of
+   *  its own while its message is this one, so it follows the condition. */
+  const condition = createMemo(() => ({ left: buildLeft(), op: fields.op, right: buildRight(), right2: buildRight2() }));
+  /** The Interval row: a condition that reads an interval, unless a drawing
+   *  gives the level. Without it the alert keeps the chart's interval. */
+  const intervalRow = () => conditionHasIntervalRow(condition());
+  const ruleResolution = () => (intervalRow() ? fields.resolution : (seed()?.resolution ?? props.interval));
+  const preview = createMemo(() =>
+    multi()
+      ? defaultAlertMessage({ symbol: symbol(), ...conds()[0], and: conds().slice(1) })
+      : defaultAlertMessage({ symbol: symbol(), resolution: ruleResolution(), ...condition(), bars: barsValue() }),
+  );
+
+  /** The condition in the editor can be saved. */
+  const conditionValid = createMemo(() => form.conditionValid(fields, choices(), { strategy: leftStrategy(), calls: leftCalls() }));
+  const canSave = createMemo(() => !!symbol().trim() && notify.webhookValid() && (multi() || conditionValid()));
+
+  /** The condition in the editor. */
+  function snapshot(): AlertCondition {
+    return form.conditionOf(fields, choices(), barsValue(), ruleResolution());
+  }
+
+  /** Put condition `c` in the editor (null: a new one, the price crossing its current value). */
+  function reseed(c: AlertCondition | null) {
+    batch(() => {
+      setSeed(c ?? undefined);
+      setFields(conditionFields(c, editorContext));
+    });
+  }
+
+  /** "Add condition": the condition in the editor joins the list, a new one opens in the condition view. */
+  function addCondition() {
+    const list = multi() ? conds() : [snapshot()];
+    setConds(list);
+    setDraft({ index: list.length, saved: null });
+    reseed(null);
+    setView("condition");
+  }
+  /** A condition row: its condition opens in the condition view. */
+  function editCondition(i: number) {
+    const c = conds()[i];
+    if (!c) return;
+    setDraft({ index: i, saved: c });
+    reseed(c);
+    setView("condition");
+  }
+  /** Add / Apply: the condition in the editor takes its place in the list. */
+  function applyDraft() {
+    const d = draft();
+    if (!d || !conditionValid()) return;
+    const list = [...conds()];
+    list[d.index] = snapshot();
+    setConds(list);
+    setDraft(null);
+    setView("main");
+  }
+  /** Cancel / Back on a new condition: the list as it was; one condition left is edited in place again. */
+  function abortDraft() {
+    setDraft(null);
+    setView("main");
+    if (conds().length === 1) {
+      reseed(conds()[0]);
+      setConds([]);
+    }
+  }
+  /** Delete condition `i` (its row, or the condition view of an edited one). */
+  function removeCondition(i: number) {
+    const list = conds().filter((_, k) => k !== i);
+    setDraft(null);
+    setView("main");
+    if (list.length === 1) {
+      reseed(list[0]);
+      setConds([]);
+    } else setConds(list);
+  }
+  /** Why "Add condition" cannot add one (reference rules): the limit (the row is hidden), a strategy or a
+   *  script's alert() calls as the first condition, a long / short position. */
+  const addConditionBlock = (): "limit" | "strategy" | "position" | null => {
+    const count = multi() ? conds().length : 1;
+    if (count >= MAX_CONDITIONS) return "limit";
+    const first = multi() ? conds()[0] : { op: fields.op, right: condition().right };
+    return blocksMoreConditions(first);
+  };
+
+  function save() {
+    if (!canSave()) return;
+    const typed = symbol().trim().toUpperCase();
+    // Several conditions: the first in the rule's own fields, the others in `and`. A condition read on every
+    // update takes the interval the others read on bars, so the per-bar triggers count those bars.
+    const list = multi() ? savedConditions(conds()) : [];
+    const [first, ...others] = list;
+    const n = notify.values();
+    const rule = {
+      symbol: typed,
+      resolution: first ? first.resolution : ruleResolution(),
+      session: existing ? existing.session : props.session,
+      left: first ? first.left : buildLeft(),
+      op: first ? first.op : fields.op,
+      right: first ? first.right : buildRight(),
+      right2: first ? first.right2 : buildRight2(),
+      bars: first ? first.bars : isMoving() ? barsValue() : undefined,
+      and: others.length ? others : undefined,
+      // alert() calls: each call's frequency and message; order fills: every fill.
+      frequency: fixedFrequency(fields.op, band()) ?? settings.frequency(),
+      ...msg.saved(preview(), isCallsOnly()),
+      sound: n.sound,
+      soundDuration: n.sound ? n.soundDuration : 0,
+      popup: n.popup,
+      toast: n.toast,
+      schedule: n.schedule ?? undefined,
+      expiresAt: settings.expiresAt(),
+    };
+
+    if (n.popup) ensureNotificationPermission();
+
+    const webhook = n.webhookOn ? n.webhookUrl : null;
+    const commit = (sym: string) => {
+      const r = { ...rule, symbol: sym };
+      let id: string;
+      if (existing) {
+        alertStore.update(existing.id, { ...r, enabled: true });
+        id = existing.id;
+      } else {
+        id = alertStore.add(r);
+        track("alert_created");
+      }
+      setAlertWebhook(id, webhook);
+    };
+    // A typed bare ticker gets its primary listing (rules are keyed by the
+    // full name); if the lookup fails it is kept and migrated on a later start.
+    if (isFullSymbol(typed)) commit(typed);
+    else void toFullSymbol(typed).then(commit, () => commit(typed));
+    props.onClose();
+  }
+
+  createDialogKeys({
+    target: "document",
+    onEscape: () => props.onClose(),
+    onEnter: (e) => {
+      // "Save changes in the Edit alert dialog" = Ctrl+Enter (bound for the
+      // Edit dialog only).
+      if (!existing || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return false;
+      e.preventDefault();
+      save();
+    },
+  });
+
+  // ── View helpers ──────────────────────────────────────────────────────────
+  const usesIndicator = () =>
+    fields.leftKind !== "price" || (!isMoving() && (valueBand() ? /^(ind|sym):/.test(fields.upperSel) || /^(ind|sym):/.test(fields.lowerSel) : fields.rightKind === "indicator" || fields.rightKind === "symbol"));
+  const triggerOptions = (): MenuOption[] => {
+    // Several conditions (reference rules): the per-bar triggers when the conditions that read bars share one
+    // interval; else "Once only" and "Every time".
+    if (multi()) {
+      const list = sharedBarInterval(conds()) ? STUDY_FREQUENCIES : FREQUENCIES;
+      const kept = list.some((f) => f.key === settings.frequency()) ? [] : STUDY_FREQUENCIES.filter((f) => f.key === settings.frequency());
+      return [...list, ...kept].map((f) => ({ value: f.key, label: f.label, desc: f.desc }));
+    }
+    // A position: "Once only", read-only (each level it hits fires; its stop or profit level ends the alert).
+    if (band() === "position") return FREQUENCIES.filter((f) => f.key === "only_once").map((f) => ({ value: f.key, label: f.label, desc: f.desc }));
+    const list = usesIndicator() ? STUDY_FREQUENCIES : FREQUENCIES;
+    const kept = list.some((f) => f.key === settings.frequency()) ? [] : STUDY_FREQUENCIES.filter((f) => f.key === settings.frequency());
+    return [...list, ...kept].map((f) => ({ value: f.key, label: f.label, desc: f.desc }));
+  };
+  // A study is a source when it has plots or conditions; the one being edited stays.
+  const alertable = (id: string) =>
+    isStrategyId(id) || studyPlots(id).length > 0 || condsOf(id).length > 0 || callsOf(id) || (existing?.left.kind === "indicator" && existing.left.indicatorId === id);
+  const sourceOptions = (): MenuOption[] => [
+    { value: "price", label: "Price" },
+    ...indicatorOptions().filter((r) => alertable(r.id) && !(draft() && isStrategyId(r.id))).map((r) => ({ value: `ind:${r.id}`, label: studyName(r.id) })),
+    ...compareOptions_().map((c) => ({ value: `sym:${c.symbol}`, label: c.label })),
+  ];
+  /** The compared symbols other than the source. */
+  const otherCompares = () => compareOptions_().filter((c) => !(fields.leftKind === "symbol" && c.symbol === fields.leftSymbol));
+  /** What the condition compares with, in one select: a value, the price (the level conditions of a study or a
+   *  compared symbol), the other studies with plots, the other compared symbols, and the drawing the dialog was
+   *  opened for. */
+  const compareOptions = (): MenuOption[] => [
+    { value: "value", label: "Value" },
+    ...(fields.leftKind !== "price" && LEVEL_OPERATORS.includes(fields.op) ? [{ value: "price", label: "Price" }] : []),
+    ...indicatorOptions()
+      .filter((r) => (studyPlots(r.id).length > 0 || r.id === fields.rightIndicator) && !(fields.leftKind === "indicator" && r.id === fields.leftIndicator))
+      .map((r) => ({ value: `ind:${r.id}`, label: studyName(r.id) })),
+    ...otherCompares().map((c) => ({ value: `sym:${c.symbol}`, label: c.label })),
+    ...drawingOptions().filter((d) => !(draft() && d.band === "position")).map((d) => ({ value: `drw:${d.id}`, label: drawingSelectLabel(d.label) })),
+  ];
+  const compareValue = () => (fields.rightKind === "indicator" ? `ind:${fields.rightIndicator}` : fields.rightKind === "drawing" ? `drw:${fields.rightDrawing}` : fields.rightKind === "symbol" ? `sym:${fields.rightSymbol}` : fields.rightKind);
+  const pickCompare = (v: string) => {
+    if (v.startsWith("sym:")) {
+      setFields("rightKind", "symbol");
+      setFields("rightSymbol", v.slice(4));
+    } else if (v.startsWith("ind:")) {
+      setFields("rightKind", "indicator");
+      setFields("rightIndicator", v.slice(4));
+      setFields("rightPlot", 0);
+    } else if (v.startsWith("drw:")) {
+      setFields("rightKind", "drawing");
+      setFields("rightDrawing", v.slice(4));
+    } else setFields("rightKind", v as SideKind);
+  };
+  const levelOptions = (): MenuOption[] => fibLevels().map((l) => ({ value: String(l.coeff), label: fibLevelText(l) }));
+  const plotOptions = (id: string): MenuOption[] => studyPlots(id).map((p) => ({ value: String(p.index), label: p.title }));
+  /** The Notifications row: what notifies, "Scheduled: …" with a schedule other than 24/7, else "None". */
+  const notificationsText = () => {
+    const n = notify.values();
+    // Each word translated here: the row shows them joined (data-no-translate).
+    const words = [n.popup && translate("Notification"), n.toast && translate("Toasts"), n.webhookOn && translate("Webhook"), n.sound && translate("Sound")];
+    const on = listText(words.filter((w): w is string => !!w));
+    if (!on) return translate("None");
+    return n.schedule ? translateWith("Scheduled: {0}", on) : on;
+  };
+  const openMessage = () => {
+    msg.open(preview(), isCallsOnly());
+    setView("message");
+  };
+  /** Placeholder menu: the plots of the source when it is a study. */
+  const placeholderMenu = () =>
+    placeholderGroups(
+      fields.leftKind === "indicator" && !leftStrategy() ? messageOutputs(getIndicatorEntry(fields.leftIndicator)) : null,
+      leftStrategy() ? "strategy" : band() === "position" ? "position" : undefined,
+    );
+  const openNotifications = () => {
+    notify.open();
+    setView("notifications");
+  };
+  /** One step up / down of a number field, in its last decimal. */
+  const stepped = (text: string, dir: 1 | -1) => stepAmountText(text, dir);
+  /** A number field with its up / down steppers. */
+  const valueBox = (get: () => string, set: (v: string) => void, label: string) => {
+    // Shown and typed in the interface language's marks ("1 234,5"), kept in English ones.
+    const field = priceFieldProps(get, set);
+    return (
+      <span class="ad-number">
+        <input class="ad-input" type="text" inputmode="decimal" aria-label={label} value={field.value} onFocus={field.onFocus} onBlur={field.onBlur} onInput={(e) => set(e.currentTarget.value)} placeholder="0.00" />
+        <span class="ad-steppers">
+          <button type="button" tabIndex={-1} aria-label="Increase" onClick={() => set(stepped(get(), 1))}>{arrow("m5 11 4-4 4 4")}</button>
+          <button type="button" tabIndex={-1} aria-label="Decrease" onClick={() => set(stepped(get(), -1))}>{arrow("m5 7 4 4 4-4")}</button>
+        </span>
+      </span>
+    );
+  };
+  /** What a bound can be: a value, the studies with plots (not the source itself), and the drawing with two bounds
+   *  the dialog was opened for (picking it makes the drawing the level). The price is not a bound. */
+  const boundOptions = (): MenuOption[] => [
+    { value: "value", label: "Value" },
+    ...indicatorOptions().filter((r) => studyPlots(r.id).length > 0 && !(fields.leftKind === "indicator" && r.id === fields.leftIndicator)).map((r) => ({ value: `ind:${r.id}`, label: studyName(r.id) })),
+    ...otherCompares().map((c) => ({ value: `sym:${c.symbol}`, label: c.label })),
+    ...drawingOptions().filter((d) => d.band === "channel" || d.band === "rectangle" || (d.levels?.length ?? 0) > 0).map((d) => ({ value: `drw:${d.id}`, label: drawingSelectLabel(d.label) })),
+  ];
+  /** A row "Upper bound" / "Lower bound": its select, the value field for a value, the plot select for a study with
+   *  several plots. */
+  const boundRow = (title: string, side: "upper" | "lower") => {
+    const sel = () => fields[`${side}Sel`];
+    const setSel = (v: string) => setFields(`${side}Sel`, v);
+    const value = () => fields[`${side}Value`];
+    const setValue = (v: string) => setFields(`${side}Value`, v);
+    const plot = () => fields[`${side}Plot`];
+    const setPlot = (v: number) => setFields(`${side}Plot`, v);
+    return (
+      <div class="ad-row">
+        <span class="ad-label">{title}</span>
+        <div class="ad-controls">
+          <div class="ad-pair">
+            <AdMenu
+              variant="box"
+              label={title}
+              value={sel()}
+              options={boundOptions()}
+              onPick={(v) => {
+                if (v.startsWith("drw:")) {
+                  setFields("rightKind", "drawing");
+                  setFields("rightDrawing", v.slice(4));
+                  return;
+                }
+                setFields("boundsEdited", true);
+                setSel(v);
+                setPlot(0);
+              }}
+            />
+            <Show when={sel() === "value"}>{valueBox(value, (v) => { setFields("boundsEdited", true); setValue(v); }, title)}</Show>
+          </div>
+          <Show when={sel().startsWith("ind:") && studyPlots(sel().slice(4)).length >= 2}>
+            <AdMenu variant="box" label={translateWith("{0} plot", title)} value={String(plot())} options={plotOptions(sel().slice(4))} onPick={(v) => setPlot(Number(v))} />
+          </Show>
+        </div>
+      </div>
+    );
+  };
+  /** Hint of "Add condition" after a strategy or a script's alert() calls (reference text). */
+  const MULTI_CONDITION_STRATEGY_HINT = "Multi-condition alerts don't support strategies and scripts with alert() function";
+  // Own drawings: a bin, a plus, a question mark in a circle (one node per use).
+  const trashIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+      <path fill="none" stroke="currentColor" d="M3.5 5.5h11M7.5 5.5v-2h3v2M5 5.5l.7 9.5h6.6l.7-9.5M7.5 8v4.5M10.5 8v4.5" />
+    </svg>
+  );
+  const plusIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+      <path fill="none" stroke="currentColor" d="M9 4v10M4 9h10" />
+    </svg>
+  );
+  const hintIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+      <circle cx="9" cy="9" r="6.5" fill="none" stroke="currentColor" />
+      <path fill="none" stroke="currentColor" d="M7.2 7.3a1.8 1.8 0 1 1 2.5 1.6c-.5.2-.7.6-.7 1.1v.5" />
+      <circle cx="9" cy="12.6" r=".7" fill="currentColor" />
+    </svg>
+  );
+  const closeIcon = (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+      <path stroke="currentColor" stroke-width="1.2" fill="none" d="m1.5 1.5 15 15m0-15-15 15" />
+    </svg>
+  );
+  /** `along`: the arrow points back or forward along the reading direction (turned around right to left). */
+  const arrow = (d: string, along = false) => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true" class={along ? "ot-flip-rtl" : undefined}>
+      <path stroke="currentColor" stroke-width="1.2" fill="none" d={d} />
+    </svg>
+  );
+  /** The condition editor: source, condition, what it is compared with, bounds, level and interval. */
+  const conditionEditor = () => (
+    <>
+              <div class="ad-row ad-row--top">
+                <span class="ad-label">Condition</span>
+                <div class="ad-controls">
+                  <AdMenu
+                    variant="box"
+                    label="Source"
+                    value={fields.leftKind === "indicator" ? `ind:${fields.leftIndicator}` : fields.leftKind === "symbol" ? `sym:${fields.leftSymbol}` : "price"}
+                    options={sourceOptions()}
+                    onPick={(v) => {
+                      if (v === "price" || v.startsWith("sym:")) {
+                        setFields("leftKind", v === "price" ? "price" : "symbol");
+                        if (v !== "price") setFields("leftSymbol", v.slice(4));
+                        if (isOwn()) setFields("op", "crossing");
+                        return;
+                      }
+                      setFields("leftKind", "indicator");
+                      setFields("leftIndicator", v.slice(4));
+                      setFields("leftPlot", 0);
+                      // A strategy starts on its first condition, a study with alert() calls on them, one with
+                      // conditions on its first one.
+                      const conds = condsOf(v.slice(4));
+                      if (isStrategyId(v.slice(4))) setFields("op", strategyOpsOf(v.slice(4))[0]);
+                      else if (callsOf(v.slice(4)) && !draft()) setFields("op", "alert_function");
+                      else if (conds.length) {
+                        setFields("leftCond", conds[0].id);
+                        setFields("op", "alert_condition");
+                      } else if (isOwn()) setFields("op", "crossing");
+                    }}
+                  />
+                  {/* Plot select: a study with 2 or more plots (not for one of its conditions). */}
+                  <Show when={!isOwn() && fields.leftKind === "indicator" && studyPlots(fields.leftIndicator).length >= 2}>
+                    <AdMenu variant="box" label="Plot" value={String(fields.leftPlot)} options={plotOptions(fields.leftIndicator)} onPick={(v) => setFields("leftPlot", Number(v))} />
+                  </Show>
+
+                  {/* A strategy with its order fills as its only condition shows no condition control. */}
+                  <Show when={!(leftStrategy() && conditionOptions().length === 1)}>
+                  <AdMenu
+                    variant="box"
+                    label="Condition"
+                    value={isCond() ? `cond:${fields.leftCond}` : fields.op}
+                    more={fixedOperators() || leftStrategy() ? undefined : (leftCalls() ? 1 : 0) + leftConds().length + 3}
+                    options={conditionOptions()}
+                    lockSingle
+                    onPick={(v) => {
+                      if (v.startsWith("cond:")) {
+                        setFields("leftCond", v.slice(5));
+                        setFields("op", "alert_condition");
+                      } else setFields("op", v as AlertOperator);
+                    }}
+                  />
+                  </Show>
+
+                  {/* A study's condition compares nothing. */}
+                  <Show when={!isOwn()}>
+                  <Show
+                    when={!isMoving()}
+                    fallback={
+                      <div class="ad-pair ad-pct">
+                        {/* The amount ("1.00"), with "%" for Moving Up / Down %, then "in N bars". */}
+                        {valueBox(() => fields.pct, (v) => setFields("pct", v), isPct() ? "Percent" : "Amount")}
+                        <span class="ad-suffix">{isPct() ? "% in" : "in"}</span>
+                        <input
+                          class="ad-input"
+                          type="number"
+                          step="1"
+                          min={barsMin()}
+                          max="300"
+                          aria-label="Bars"
+                          value={fields.bars || String(barsMin())}
+                          onInput={(e) => setFields("bars", e.currentTarget.value)}
+                        />
+                        <span class="ad-suffix">{barsValue() === 1 ? "bar" : "bars"}</span>
+                      </div>
+                    }
+                  >
+                    <Show when={!valueBand()}>
+                    <div class="ad-pair">
+                      <AdMenu variant="box" label="Compared with" value={compareValue()} options={compareOptions()} onPick={pickCompare} />
+                      <Show when={fields.rightKind === "value"}>
+                        {valueBox(() => fields.rightValue, (v) => { setFields("valueEdited", true); setFields("rightValue", v); }, "Value")}
+                      </Show>
+                    </div>
+                    {/* Anchored VWAP: which of its lines. */}
+                    <Show when={fields.rightKind === "drawing" && vwapPlots().length > 0}>
+                      <AdMenu variant="box" label="Line" value={String(fields.rightVwapPlot)} options={vwapPlots().map((p, i) => ({ value: String(i), label: p }))} onPick={(v) => setFields("rightVwapPlot", Number(v))} />
+                    </Show>
+                    <Show when={fields.rightKind === "indicator" && studyPlots(fields.rightIndicator).length >= 2}>
+                      <AdMenu variant="box" label="Plot" value={String(fields.rightPlot)} options={plotOptions(fields.rightIndicator)} onPick={(v) => setFields("rightPlot", Number(v))} />
+                    </Show>
+                    </Show>
+                  </Show>
+                  </Show>
+                </div>
+              </div>
+              {/* Channel between two bounds: a value, the price or a study each. */}
+              <Show when={!isOwn() && valueBand()}>
+                {boundRow("Upper bound", "upper")}
+                {boundRow("Lower bound", "lower")}
+              </Show>
+              {/* Fib tool: its level; with a channel condition the two bounds. */}
+              <Show when={!isMoving() && fields.rightKind === "drawing" && fibLevels().length > 0}>
+                <div class="ad-row">
+                  <span class="ad-label">{fibChannel() ? "Upper bound" : "Level"}</span>
+                  <div class="ad-controls">
+                    <AdMenu variant="box" label={fibChannel() ? "Upper bound" : "Level"} value={String(fields.rightLevel)} options={levelOptions()} onPick={(v) => setFields("rightLevel", Number(v))} />
+                  </div>
+                </div>
+                <Show when={fibChannel()}>
+                  <div class="ad-row">
+                    <span class="ad-label">Lower bound</span>
+                    <div class="ad-controls">
+                      <AdMenu variant="box" label="Lower bound" value={String(fields.rightLevel2)} options={levelOptions()} onPick={(v) => setFields("rightLevel2", Number(v))} />
+                    </div>
+                  </div>
+                </Show>
+              </Show>
+              <Show when={intervalRow()}>
+                <div class="ad-row">
+                  <span class="ad-label">Interval</span>
+                  <div class="ad-controls">
+                    <AdIntervalMenu
+                      value={fields.resolution}
+                      origin={fields.intervalOrigin}
+                      chart={chartInterval}
+                      favorites={intervalChoices().favorites}
+                      groups={intervalChoices().groups}
+                      onPick={(id, origin) => { setFields("resolution", id); setFields("intervalOrigin", origin); }}
+                    />
+                  </div>
+                </div>
+              </Show>
+    </>
+  );
+
+  /** A condition as its row reads ("AAPL Crossing 250.00"). */
+  const conditionText = (c: AlertCondition) => defaultAlertMessage({ symbol: symbol(), ...c });
+  /** Its row: the operator in the condition colour. */
+  const conditionTokens = (c: AlertCondition) => {
+    const text = conditionText(c);
+    const label = isBandOperator(c.op)
+      ? bandOperatorLabel(c.op, c.right.kind === "drawing" && c.right.band === "rectangle" ? "rectangle" : "channel")
+      : OPERATOR_LABELS[c.op];
+    const at = label ? text.indexOf(label) : -1;
+    if (at < 0) return text;
+    return (
+      <>
+        {text.slice(0, at)}
+        <span class="ad-cond-op">{label}</span>
+        {text.slice(at + label.length)}
+      </>
+    );
+  };
+
+  /** Schedule choices: the presets with their days and hours, then the custom schedule (reference). */
+  const scheduleOptions = (): MenuOption[] => [
+    ...(["24/7", "weekdays", "standard_working_hours"] as const).map((k) => ({ value: k, label: PRESET_TITLES[k], desc: segmentText(PRESET_SEGMENTS[k], localTimeZone()) })),
+    {
+      value: "custom",
+      label: schedulePreset(notify.draft().schedule) === "custom" ? scheduleTitle(notify.draft().schedule) : PRESET_TITLES.custom,
+      sep: true,
+    },
+  ];
+
+  const subHeader = (title: string) => (
+    <header class="ad-header" data-dialog-title>
+      <button type="button" class="ad-icon-btn" data-name="back" aria-label="Back" onClick={() => setView("main")}>
+        {arrow("M11 3.5 5.5 9l5.5 5.5", true)}
+      </button>
+      <span class="ad-title">{title}</span>
+      <span class="ad-spacer" />
+      <button type="button" class="ad-icon-btn" data-name="close" aria-label="Close" onClick={() => props.onClose()}>
+        {closeIcon}
+      </button>
+    </header>
+  );
+
+  return (
+    <Portal mount={document.body}>
+      <div class="ad-backdrop" role="presentation" onMouseDown={() => props.onClose()}>
+        <div class="ad" classList={{ "ad--message": view() === "message", "ad--condition": view() === "condition" }} role="dialog" aria-label={existing ? "Edit alert" : "Create alert"} ref={(el) => onMount(() => onCleanup(attachDialogSize(el)))} onMouseDown={(e) => e.stopPropagation()}>
+          {/* ── Main view ── */}
+          <Show when={view() === "main"}>
+            <header class="ad-header" data-dialog-title>
+              <span class="ad-title">{existing ? "Edit alert on" : "Create alert on"}</span>
+              <Show
+                when={!symbolEdit()}
+                fallback={
+                  <input
+                    class="ad-input ad-symbol-input"
+                    type="text"
+                    aria-label="Symbol"
+                    value={symbol()}
+                    placeholder="Symbol"
+                    spellcheck={false}
+                    ref={(el) => queueMicrotask(() => { if (symbol()) el.select(); el.focus(); })}
+                    onInput={(e) => setSymbol(e.currentTarget.value.toUpperCase())}
+                    onKeyDown={(e) => { if (e.key === "Enter" && symbol().trim()) setSymbolEdit(false); }}
+                    onBlur={() => { if (symbol().trim()) setSymbolEdit(false); }}
+                  />
+                }
+              >
+                <button type="button" class="ad-symbol-btn" data-name="symbols-button" onClick={() => setSymbolEdit(true)}>
+                  {/* A level from a drawing: the drawing's chart sets the interval, shown with the symbol. */}
+                  <span class="ad-symbol-text">
+                    {symbol().includes(":") ? symbol().split(":")[1] : symbol()}
+                    {condition().right.kind === "drawing" ? `, ${alertIntervalText(ruleResolution(), true)}` : ""}
+                  </span>
+                  {arrow("m4.5 7 4.5 4 4.5-4")}
+                </button>
+              </Show>
+              <span class="ad-spacer" />
+              <button type="button" class="ad-icon-btn" data-name="close" aria-label="Close" onClick={() => props.onClose()}>
+                {closeIcon}
+              </button>
+            </header>
+
+            <div class="ad-body">
+              <Show when={multi()} fallback={conditionEditor()}>
+                <div class="ad-row ad-row--top">
+                  <span class="ad-label">Condition</span>
+                  <div class="ad-conds">
+                    <For each={conds()}>
+                      {(c, k) => (
+                        <>
+                          <Show when={k() > 0}>
+                            <div class="ad-and">AND</div>
+                          </Show>
+                          <div class="ad-cond">
+                            <button type="button" class="ad-cond-edit" data-name="edit-condition-button" title={conditionText(c)} onClick={() => editCondition(k())}>
+                              {conditionTokens(c)}
+                            </button>
+                            <button type="button" class="ad-cond-delete" data-name="delete-condition-button" title="Delete condition" aria-label="Delete condition" onClick={() => removeCondition(k())}>
+                              {trashIcon()}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </For>
+                  </div>
+                </div>
+              </Show>
+              {/* Add condition: hidden at the limit, unavailable after a strategy, a script's alert() calls or a position. */}
+              <Show when={addConditionBlock() !== "limit"}>
+                <div class="ad-add-cond">
+                  <button type="button" class="ad-add-cond-btn" data-name="add-condition-button" disabled={addConditionBlock() !== null} onClick={addCondition}>
+                    {plusIcon()}
+                    <span>Add condition</span>
+                  </button>
+                  <Show when={addConditionBlock() === "strategy"}>
+                    <span class="ad-add-cond-hint" role="img" aria-label={MULTI_CONDITION_STRATEGY_HINT} title={MULTI_CONDITION_STRATEGY_HINT}>
+                      {hintIcon()}
+                    </span>
+                  </Show>
+                </div>
+              </Show>
+
+              <div class="ad-divider" />
+
+              {/* A vertical line is crossed once: no trigger choice; alert() calls say how often they fire. */}
+              <Show when={band() !== "time" && !isCalls() && !isStrat()}>
+                <div class="ad-row ad-row--text">
+                  <span class="ad-label">Trigger</span>
+                  <AdMenu variant="inline" label="Trigger" value={band() === "position" ? "only_once" : settings.frequency()} options={triggerOptions()} lockSingle={band() === "position"} onPick={(v) => settings.setFrequency(v as AlertFrequency)} />
+                </div>
+              </Show>
+              <div class="ad-row ad-row--text">
+                <span class="ad-label">Expiration</span>
+                <AdMenu variant="inline" label="Expiration" value={settings.expiry()} options={expiryOptions()} onPick={(v) => settings.pickExpiry(v as ExpiryKey)} />
+                <Show when={settings.expiry() === "custom"}>
+                  <input
+                    class="ad-input ad-date"
+                    type="datetime-local"
+                    aria-label="Expiration date"
+                    value={settings.customExpiry() != null ? toLocalInput(settings.customExpiry()!) : ""}
+                    onChange={(e) => { const t = Date.parse(e.currentTarget.value); settings.setCustomExpiry(Number.isFinite(t) ? t : null); }}
+                  />
+                </Show>
+              </div>
+              <div class="ad-row ad-row--text">
+                <span class="ad-label">Message</span>
+                <button type="button" class="ad-link" data-name="alert-message-button" onClick={openMessage}>
+                  <span class="ad-link-text">{isCallsOnly() ? msg.values().name || preview() : <>{msg.values().name ? <span data-no-translate>{`${msg.values().name}: `}</span> : ""}{msg.values().message || preview()}</>}</span>
+                  {arrow("m7 4.5 4 4.5-4 4.5", true)}
+                </button>
+              </div>
+              <div class="ad-row ad-row--text">
+                <span class="ad-label">Notifications</span>
+                <button type="button" class="ad-link" data-name="alert-notifications-button" onClick={openNotifications}>
+                  <span class="ad-link-text" data-no-translate>{notificationsText()}</span>
+                  {arrow("m7 4.5 4 4.5-4 4.5", true)}
+                </button>
+              </div>
+            </div>
+            {/* Web version: alerts are checked by this browser tab (no server
+                side alert engine for visitors). */}
+            <Show when={WEB_BUILD}>
+              <div class="ad-web-note" role="note">
+                Alerts run in this browser tab: they trigger only while the tab is open, and webhooks are sent by the browser. The desktop app keeps checking them in the background.
+              </div>
+            </Show>
+
+            <footer class="ad-footer">
+              <Show when={existing}>
+                <button
+                  type="button"
+                  class="ot-dlg-btn is-secondary ad-delete"
+                  onClick={() => {
+                    alertStore.remove(existing!.id);
+                    props.onClose();
+                  }}
+                >
+                  Delete
+                </button>
+              </Show>
+              <span class="ad-spacer" />
+              <button type="button" class="ot-dlg-btn is-secondary" data-name="cancel" onClick={() => props.onClose()}>Cancel</button>
+              <button type="button" class="ot-dlg-btn is-main is-neutral" data-name="submit" aria-disabled={!canSave()} disabled={!canSave()} onClick={save}>
+                {existing ? "Save" : "Create"}
+              </button>
+            </footer>
+          </Show>
+
+          {/* ── Add / Edit condition ── */}
+          <Show when={view() === "condition"}>
+            <header class="ad-header" data-dialog-title>
+              {/* Back keeps an edited condition, drops a new one. */}
+              <button type="button" class="ad-icon-btn" data-name="back" aria-label="Back" onClick={() => (draft()?.saved ? applyDraft() : abortDraft())}>
+                {arrow("M11 3.5 5.5 9l5.5 5.5", true)}
+              </button>
+              <span class="ad-title">{draft()?.saved ? "Edit condition" : "Add condition"}</span>
+              <span class="ad-spacer" />
+              <button type="button" class="ad-icon-btn" data-name="close" aria-label="Close" onClick={() => props.onClose()}>
+                {closeIcon}
+              </button>
+            </header>
+            <div class="ad-body">{conditionEditor()}</div>
+            <footer class="ad-footer">
+              <Show when={draft()?.saved}>
+                <button type="button" class="ad-icon-btn ad-cond-remove" data-name="delete-condition" title="Delete condition" aria-label="Delete condition" onClick={() => removeCondition(draft()!.index)}>
+                  {trashIcon()}
+                </button>
+              </Show>
+              <span class="ad-spacer" />
+              <button type="button" class="ot-dlg-btn is-secondary" data-name="cancel" onClick={abortDraft}>Cancel</button>
+              <button type="button" class="ot-dlg-btn is-main is-neutral" data-name="submit" aria-disabled={!conditionValid()} disabled={!conditionValid()} onClick={applyDraft}>
+                {draft()?.saved ? "Apply" : "Add"}
+              </button>
+            </footer>
+          </Show>
+
+          {/* ── Edit message ── */}
+          <Show when={view() === "message"}>
+            {subHeader("Edit message")}
+            <div class="ad-body">
+              <label class="ad-field">
+                <span class="ad-label">Alert name</span>
+                <input class="ad-input" type="text" value={msg.draft().name} onInput={(e) => msg.edit({ name: e.currentTarget.value })} />
+              </label>
+              <Show when={!isCallsOnly()}>
+              <div class="ad-field">
+                <label class="ad-label" for="alert-message">Message</label>
+                <textarea id="alert-message" class="ad-input ad-textarea" data-name="alert-message-textarea" value={msg.draft().message} onInput={(e) => msg.edit({ message: e.currentTarget.value })} />
+                <div class="ad-message-buttons">
+                  <AdPlaceholders groups={placeholderMenu()} onPick={(v) => msg.edit({ message: appendPlaceholder(msg.draft().message, v) })} />
+                  <Show when={msg.draft().message !== preview()}>
+                    <button type="button" class="ad-small-btn is-icon" data-name="alert-message-reset-button" title="Reset to default" aria-label="Reset to default" onClick={() => msg.edit({ message: preview() })}>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+                        <path fill="currentColor" d="M10 6.13V8L6 5.5 10 3v2.1A5 5 0 1 1 4 10a.5.5 0 0 1 1 0 4 4 0 1 0 5-3.87Z" />
+                      </svg>
+                    </button>
+                  </Show>
+                </div>
+              </div>
+              </Show>
+            </div>
+            <footer class="ad-footer">
+              <span class="ad-spacer" />
+              <button type="button" class="ot-dlg-btn is-secondary" onClick={() => setView("main")}>Cancel</button>
+              <button
+                type="button"
+                class="ot-dlg-btn is-main is-neutral"
+                onClick={() => {
+                  msg.apply(preview(), isCallsOnly());
+                  setView("main");
+                }}
+              >
+                Apply
+              </button>
+            </footer>
+          </Show>
+
+          {/* ── Notifications ── */}
+          <Show when={view() === "notifications"}>
+            {subHeader("Notifications")}
+            <div class="ad-body">
+              <label class="ad-check">
+                <input type="checkbox" checked={notify.draft().popup} onChange={() => notify.edit({ popup: !notify.draft().popup })} />
+                <span class="ad-check-title">Show desktop notification</span>
+                <span class="ad-check-desc">Displays a notification of the operating system when your alert triggers.</span>
+              </label>
+              <label class="ad-check">
+                <input type="checkbox" checked={notify.draft().toast} onChange={() => notify.edit({ toast: !notify.draft().toast })} />
+                <span class="ad-check-title">Show toast notification</span>
+                <span class="ad-check-desc">Displays an onsite notification in the page corner.</span>
+              </label>
+              {/* Webhook — POSTs the fire payload as JSON (see data/alert-delivery). */}
+              <label class="ad-check">
+                <input type="checkbox" checked={notify.draft().webhookOn} onChange={() => notify.edit({ webhookOn: !notify.draft().webhookOn })} />
+                <span class="ad-check-title">Webhook URL</span>
+                <span class="ad-check-desc">Sends a POST request to your specified URL when your alert triggers.</span>
+              </label>
+              <Show when={notify.draft().webhookOn}>
+                <input
+                  class="ad-input ad-indent"
+                  type="url"
+                  value={notify.draft().webhookUrl}
+                  onInput={(e) => notify.edit({ webhookUrl: e.currentTarget.value })}
+                  placeholder="https://example.com/alert-hook"
+                  aria-label="Webhook URL"
+                  aria-invalid={!notify.draftWebhookValid() || undefined}
+                  title={notify.draftWebhookValid() ? undefined : "Enter an http:// or https:// URL"}
+                />
+              </Show>
+              <label class="ad-check">
+                <input type="checkbox" checked={notify.draft().soundOn} onChange={() => notify.edit({ soundOn: !notify.draft().soundOn })} />
+                <span class="ad-check-title">Play sound</span>
+                <span class="ad-check-desc">Plays an audio cue when your alert triggers.</span>
+              </label>
+              <Show when={notify.draft().soundOn}>
+                <div class="ad-pair ad-pair--sound ad-indent">
+                  <AdMenu variant="box" label="Sound" group={SOUND_GROUP} value={notify.draft().sound} options={SOUND_OPTIONS.filter((s) => s.key).map((s) => ({ value: s.key, label: s.label, play: () => previewSound(s.key) }))} onPick={(v) => notify.edit({ sound: v })} />
+                  <AdMenu variant="box" label="Sound duration" value={String(notify.draft().soundDuration)} options={SOUND_DURATIONS.map((d) => ({ value: String(d.value), label: d.label }))} onPick={(v) => notify.edit({ soundDuration: Number(v) })} />
+                </div>
+                <Show when={!alertSettings.soundEnabled()}>
+                  <div class="ad-hint ad-indent">Alert sounds are off in Settings: this alert fires without sound.</div>
+                </Show>
+              </Show>
+              <div class="ad-divider ad-sched-divider" />
+              <div class="ad-sched">
+                <span class="ad-check-title">Notification schedule</span>
+                <div class="ad-sched-control">
+                  <AdMenu variant="box" label="Notification schedule" value={schedulePreset(notify.draft().schedule)} options={scheduleOptions()} onPick={(v) => notify.pickSchedule(v as SchedulePreset)} />
+                  <Show when={notify.customSchedule()}>
+                    {(c) => (
+                      <div class="ad-sched-pop" role="dialog" aria-label="Custom schedule" data-name="custom-schedule-popover">
+                        <div class="ad-sched-pop-head">
+                          <button type="button" class="ad-icon-btn" aria-label="Back" onClick={() => notify.setCustomSchedule(null)}>
+                            {arrow("M11 3.5 5.5 9l5.5 5.5", true)}
+                          </button>
+                          <span class="ad-sched-pop-title">Custom schedule</span>
+                        </div>
+                        <div class="ad-sched-days">
+                          <For each={[1, 2, 3, 4, 5, 6, 7]}>
+                            {(d) => (
+                              <button
+                                type="button"
+                                class="ad-sched-day"
+                                classList={{ "is-on": c().days.includes(d) }}
+                                aria-pressed={c().days.includes(d)}
+                                onClick={() => notify.setCustomSchedule({ ...c(), days: c().days.includes(d) ? c().days.filter((x) => x !== d) : [...c().days, d].sort((a, b) => a - b) })}
+                              >
+                                {["", "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"][d]}
+                              </button>
+                            )}
+                          </For>
+                        </div>
+                        <div class="ad-sched-times">
+                          <input class="ad-input" type="time" aria-label="From" value={c().from} onInput={(e) => notify.setCustomSchedule({ ...c(), from: e.currentTarget.value || "00:00" })} />
+                          <span class="ad-suffix">—</span>
+                          <input class="ad-input" type="time" aria-label="To" value={c().to} onInput={(e) => notify.setCustomSchedule({ ...c(), to: e.currentTarget.value || "00:00" })} />
+                        </div>
+                        <button
+                          type="button"
+                          class="ot-dlg-btn is-main is-neutral ad-sched-set"
+                          disabled={c().days.length === 0}
+                          onClick={() => notify.setCustom()}
+                        >
+                          Set schedule
+                        </button>
+                      </div>
+                    )}
+                  </Show>
+                </div>
+              </div>
+              <div class="ad-check-desc ad-sched-desc">Notifications are muted outside this schedule.</div>
+            </div>
+            <footer class="ad-footer">
+              <span class="ad-spacer" />
+              <button type="button" class="ot-dlg-btn is-secondary" onClick={() => setView("main")}>Cancel</button>
+              <button
+                type="button"
+                class="ot-dlg-btn is-main is-neutral"
+                aria-disabled={!notify.draftWebhookValid()}
+                disabled={!notify.draftWebhookValid()}
+                onClick={() => {
+                  if (notify.apply()) setView("main");
+                }}
+              >
+                Apply
+              </button>
+            </footer>
+          </Show>
+        </div>
+      </div>
+    </Portal>
+  );
+}

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#
+# TradePanel launcher for Linux, macOS and Git Bash. The work is done by scripts/tradepanel.mjs.
+#
+#   ./tradepanel                     start the app (installs missing frontend dependencies)
+#   ./tradepanel --no-install        never install; report what is missing instead
+#   ./tradepanel -- --no-watch       arguments after -- go to `tauri dev`
+#
+set -euo pipefail
+
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "tradepanel: Node.js 22+ is required: https://nodejs.org" >&2
+  exit 1
+fi
+
+exec node "$root/scripts/tradepanel.mjs" "$@"

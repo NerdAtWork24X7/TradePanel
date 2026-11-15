@@ -6,12 +6,8 @@ __pycache__/
 *.so
 *.egg
 *.egg-info/
-dist/
 .eggs/
 pip-wheel-metadata/
-
-# PyInstaller work dir; backend/build/ itself holds the tracked backend.spec
-backend/build/work/
 
 # ── Virtual environments ─────────────────────────────────────────────────────
 .venv/
@@ -30,7 +26,7 @@ keys/
 *.pfx
 
 # ── Runtime data (generated at runtime) ─────────────────────────────────────
-data/
+/data/
 *.db
 *.sqlite
 *.sqlite3
@@ -62,24 +58,8 @@ desktop.ini
 # ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 
-# ── Temp generated artifacts (scripts themselves are kept) ───────────────────
+# ── Temp / build artifacts ───────────────────────────────────────────────────
 tmp/
-
-
-
-# ── Tauri / frontend build artifacts ─────────────────────────────────────────
-release/
 node_modules/
-frontend/dist/
-frontend/web/indicators/
-src-tauri/target/
-src-tauri/gen/
-src-tauri/backend-dist/
-src-tauri/ai-runtime/*
-!src-tauri/ai-runtime/README.md
-backend/build/dist/
-backend/build/work/
-backend/build/ai-staging/
-backend/build/ai-cache/
-.venv-build/
-backend/build/
+dist/
+target/

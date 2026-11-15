@@ -1,0 +1,317 @@
+/* Chart trading lines (Bar Replay paper trading): position / order / bracket
+   lines with their chips and axis labels, execution arrows; and the body of
+   the Cancel order / Close position dialogs. --c = the line colour. */
+
+.ot-trd-lines {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.ot-trd-row {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  height: 19px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+/* Line pieces between the chips and up to the price axis. */
+.ot-trd-seg {
+  flex: none;
+  width: 12px;
+  height: 1px;
+  background: var(--c);
+}
+
+.ot-trd-chip {
+  display: flex;
+  align-items: stretch;
+  height: 19px;
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid var(--c);
+  border-radius: 4px;
+  background: var(--ot-chart-bg);
+  color: var(--c);
+  font: 13px/18px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: ns-resize;
+  user-select: none;
+}
+.ot-trd-row.is-dragging .ot-trd-chip { cursor: grabbing; }
+
+/* The part of the line before the chips: only with Extended price lines. */
+.ot-trd-seg.is-hidden { visibility: hidden; }
+
+/* Limit line of a stop-limit order waiting for its stop: dotted. */
+.ot-trd-row.is-limit-line .ot-trd-seg {
+  height: 0;
+  background: none;
+  border-top: 1px dotted var(--c);
+}
+.ot-trd-chip.is-dotted-chip { border-style: dotted; }
+
+/* Single-button chips (reverse, TP / SL of the position). */
+.ot-trd-chip.is-button,
+.ot-trd-chip.is-dotted {
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  padding: 0 7px;
+  cursor: pointer;
+}
+.ot-trd-chip.is-dotted {
+  border-style: dotted;
+  border-width: 2px;
+}
+.ot-trd-chip.is-button:hover,
+.ot-trd-chip.is-dotted:hover {
+  background: color-mix(in srgb, var(--c) 16%, var(--ot-chart-bg));
+}
+.ot-trd-chip.is-position-chip { cursor: default; }
+
+.ot-trd-chip__part {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+/* (Tooltip wrappers sit between the parts: no sibling selector.) */
+.ot-trd-chip__part.is-text,
+.ot-trd-chip__part.is-close { border-left: 1px solid var(--c); }
+.ot-trd-chip__part.is-filled {
+  background: var(--c);
+  color: var(--color-white);
+}
+.ot-trd-chip__part.is-close {
+  padding: 0 7px;
+  cursor: pointer;
+}
+.ot-trd-chip__part.is-close:hover {
+  background: color-mix(in srgb, var(--c) 22%, var(--ot-chart-bg));
+}
+.ot-trd-chip.is-position-chip .ot-trd-chip__part.is-close {
+  background: color-mix(in srgb, var(--c) 18%, var(--ot-chart-bg));
+}
+.ot-trd-chip.is-position-chip .ot-trd-chip__part.is-close:hover {
+  background: color-mix(in srgb, var(--c) 34%, var(--ot-chart-bg));
+}
+
+/* Project order (the open ticket's order): half transparent but its send
+   button (reference app 3.4.1: chips, lines and labels at 50 %). */
+.ot-trd-row.is-project > :not(.is-send) { opacity: 0.5; }
+.ot-trd-chip.is-send {
+  align-items: center;
+  padding: 0 6px;
+  border-color: var(--c);
+  background: var(--c);
+  color: var(--color-white);
+  font-weight: 600;
+  cursor: pointer;
+}
+.ot-trd-chip.is-fixed { cursor: default; }
+button.ot-trd-chip__part { cursor: pointer; }
+.ot-trd-axis.is-faded { opacity: 0.5; }
+
+/* Price labels on the axis: filled (position) or outlined (orders, brackets). */
+.ot-trd-axis {
+  position: absolute;
+  height: 20px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  transform: translateY(-50%);
+  border: 1px solid var(--c);
+  border-radius: 3px;
+  background: var(--ot-chart-bg);
+  color: var(--c);
+  font: 12px/18px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ot-trd-axis.is-dotted { border-style: dotted; }
+.ot-trd-axis.is-filled {
+  background: var(--c);
+  color: var(--color-white);
+}
+
+/* Execution arrow (tip at the bar) and its "1 @ 651.42" label. */
+.ot-trd-exec {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform: translateX(-50%);
+  color: var(--c);
+  pointer-events: none;
+}
+.ot-trd-exec.is-sell {
+  flex-direction: column-reverse;
+  transform: translate(-50%, -100%);
+}
+.ot-trd-exec__text {
+  margin-top: 2px;
+  color: #b2b5be;
+  font: 12px/16px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
+  white-space: nowrap;
+}
+.ot-trd-exec.is-sell .ot-trd-exec__text { margin: 0 0 2px; }
+
+/* Cancel order / Close position dialog body. */
+.ot-trd-confirm {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 14px;
+  line-height: 18px;
+}
+.ot-trd-confirm__logo {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.ot-trd-confirm__logo.is-letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-brand);
+  color: var(--color-white);
+  font-weight: 600;
+}
+.ot-trd-confirm__text { display: flex; flex-direction: column; }
+
+/* Buy / Sell buttons under the series legend (reference app 3.4.1:
+   wrapper chart background at 50 %, 4 px 5 px, gap 8 px; buttons 34 px
+   high, radius 6, price 12 px 600 / 16 px, title 11 px / 12 px +0.4 px
+   uppercase (102 px at most); colours: red / blue 500, hover 600, pressed
+   700, text red / blue 50 on a dark chart, white on a light one; spread
+   10 px #dbdbdb / #0f0f0f; one-click quantity pill under it, 22 px, radius
+   6, 14 px / 18 px; presets chevron 30 px, 8 px after the buttons). */
+.ot-trd-buysell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 4px;
+  padding: 4px 5px;
+  background: color-mix(in srgb, var(--ot-chart-bg) 50%, transparent);
+  pointer-events: auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
+}
+.ot-trd-buysell__btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 62px;
+  height: 34px;
+  box-sizing: border-box;
+  padding: 0 10px 2px;
+  border: 1px solid var(--c);
+  border-radius: 6px;
+  background: var(--c);
+  color: var(--t);
+  cursor: pointer;
+}
+.ot-trd-buysell__btn.is-sell { --c: var(--color-ripe-red-500); --c-hover: var(--color-ripe-red-600); --c-active: var(--color-ripe-red-700); --t: var(--color-ripe-red-50); }
+.ot-trd-buysell__btn.is-buy { --c: var(--color-brand); --c-hover: var(--color-brand-hover); --c-active: var(--color-brand-active); --t: var(--color-ot-blue-50); }
+html.theme-light .ot-trd-buysell__btn { --t: var(--color-white); }
+@media (any-hover: hover) {
+  .ot-trd-buysell__btn:hover { background: var(--c-hover); border-color: var(--c-hover); }
+}
+.ot-trd-buysell__btn:active { background: var(--c-active); border-color: var(--c-active); }
+.ot-trd-buysell__price {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  font-feature-settings: "tnum", "lnum";
+}
+.ot-trd-buysell__title {
+  max-width: 102px;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 12px;
+  letter-spacing: 0.4px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ot-trd-buysell__mid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  max-height: 34px;
+}
+.ot-trd-buysell__spread {
+  min-width: 35px;
+  text-align: center;
+  font-size: 10px;
+  line-height: 10px;
+  color: var(--color-cold-gray-200);
+  font-feature-settings: "tnum", "lnum";
+}
+html.theme-light .ot-trd-buysell__spread { color: var(--color-cold-gray-900); }
+.ot-trd-buysell__qty {
+  align-self: stretch;
+  height: 22px;
+  box-sizing: border-box;
+  padding: 0 7px;
+  border: 1px solid var(--color-cold-gray-800);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ot-chart-bg) 80%, transparent);
+  color: var(--color-cold-gray-200);
+  font: 400 14px/18px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
+  font-feature-settings: "tnum", "lnum";
+  cursor: default;
+}
+@media (any-hover: hover) {
+  .ot-trd-buysell__qty:not(.is-active):hover { background: var(--color-cold-gray-800); }
+}
+.ot-trd-buysell__qty.is-active { border-color: var(--color-cold-gray-750); background: var(--color-cold-gray-750); }
+html.theme-light .ot-trd-buysell__qty { border-color: var(--color-cold-gray-100); color: var(--color-cold-gray-900); }
+@media (any-hover: hover) {
+  html.theme-light .ot-trd-buysell__qty:not(.is-active):hover { background: var(--color-cold-gray-100); }
+}
+html.theme-light .ot-trd-buysell__qty.is-active { border-color: var(--color-cold-gray-150); background: var(--color-cold-gray-150); }
+.ot-trd-buysell__presets {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 34px;
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid var(--color-cold-gray-750);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ot-chart-bg) 50%, transparent);
+  color: var(--color-cold-gray-200);
+  cursor: pointer;
+}
+html.theme-light .ot-trd-buysell__presets { border-color: var(--color-cold-gray-200); color: var(--color-cold-gray-900); }
+@media (any-hover: hover) {
+  .ot-trd-buysell__presets:hover { box-shadow: inset 0 0 0 40px var(--ot-tint-white-10); }
+  html.theme-light .ot-trd-buysell__presets:hover { box-shadow: inset 0 0 0 40px #1317220f; }
+}
+.ot-trd-buysell__presets.is-active { box-shadow: inset 0 0 0 40px var(--ot-tint-white-10); }
+html.theme-light .ot-trd-buysell__presets.is-active { box-shadow: inset 0 0 0 40px #1317220f; }
+
+/* Price under the pointer in the order ticket's DOM tab: a dashed line. */
+.ot-trd-domline {
+  position: absolute;
+  height: 0;
+  border-top: 1px dashed var(--c);
+  pointer-events: none;
+}

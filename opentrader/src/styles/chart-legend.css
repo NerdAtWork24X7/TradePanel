@@ -1,0 +1,777 @@
+/*
+ * `.ot-legend` — the data-window legend overlaid on the top-left of the main
+ * chart pane.
+ *
+ * The main source row is a SINGLE flex line: the title block (logo + symbol ·
+ * interval · exchange + hover action buttons) and the O/H/L/C + change sit
+ * side by side at the same baseline; the values wrap below only when the pane
+ * is too narrow (`wrappable` modifier).
+ *
+ * Anchored at the pane's top-left by ChartView (position:absolute). The wrapper
+ * keeps pointer-events off so the chart can be dragged underneath; the action
+ * buttons opt back in.
+ */
+/* The series row and the studies legend share one column anchored at the
+   pane's top-left (a single flex column), so a wrapped series row pushes the
+   studies down instead of overlapping them. Study panes get their own stack
+   at their top-left, same offsets (series logo at 9,7 and study titles at
+   x 9 from the pane corner). */
+.ot-legend-stack {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  pointer-events: none;
+}
+
+.ot-legend {
+  pointer-events: none;
+  user-select: none;
+  font-family: var(--font-family-base);
+  color: var(--color-main-text);
+}
+
+/* item — the single source row. */
+.ot-legend-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  min-height: 24px;
+  column-gap: 8px;
+  width: fit-content;
+}
+
+/* The legend is backed with the pane background at 50% (legendProperties
+   showBackground / backgroundTransparency 50) PER PART — titlesWrapper and
+   valuesWrapper each carry their own content-sized plate. A plate on the
+   whole row would stretch to the pane width once the values wrap and dim the
+   price labels under it. */
+.ot-legend-titles,
+.ot-legend-values {
+  background: color-mix(in srgb, var(--ot-chart-bg) 50%, transparent);
+  border-radius: 4px;
+}
+
+/* noWrapWrapper — title pieces + action buttons; never splits internally. */
+.ot-legend-nowrap {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* ---- Title block -------------------------------------------------------- */
+
+.ot-legend-titles {
+  display: flex;
+  align-items: center;
+  /* titlesWrapper plate: 24px tall around the 20px title pieces. */
+  min-height: 24px;
+  padding: 0 4px 0 1px;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 20px;
+  /* The title row is dimmer than the values (#B2B5BE on the dark theme;
+     values keep --color-main-text). */
+  color: var(--ot-legend-title-color);
+}
+
+/* The ACTIVE chart's legend title is brighter on the dark theme (#DBDBDB;
+   inactive charts keep #B2B5BE); #0F0F0F on the light theme. */
+.chart-grid-cell.is-active .ot-legend-titles {
+  color: var(--ot-legend-title-active-color);
+}
+
+.ot-legend-title-piece {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  column-gap: 4px;
+  min-height: 20px;
+}
+
+/* 18×18 letter-avatar — the first letter of the symbol stands in for a real
+   symbol logo (not wired yet). */
+.ot-legend-logo {
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+}
+/* Flag of an economic series, as a disc filling the logo. */
+.ot-legend-logo-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* Dot separator — every piece after the first is preceded by a centred
+   middle-dot sitting in a 12px gutter (withDot:not(:first-child)), on the
+   piece's start side (its right right to left). */
+.ot-legend-dot {
+  padding-inline-start: 12px;
+}
+.ot-legend-dot::before {
+  content: '·';
+  position: absolute;
+  inset-inline-start: 0;
+  width: 12px;
+  text-align: center;
+  font-size: 16px;
+}
+
+/* withAction title parts (Change symbol / Change interval): clickable in
+   the click-through legend, arrow cursor (cursor: default). */
+.ot-legend-with-action {
+  pointer-events: auto;
+  cursor: default;
+}
+
+/* ---- Action buttons (flag / link / eye / more) -------------------------- */
+
+.ot-legend-actions {
+  /* Revealed on hover (blockHidden buttons).  display:none (not just
+     opacity) so an unhovered legend keeps the values tight against the title;
+     hovering reveals the row and shifts the values right. */
+  display: none;
+  align-items: center;
+  margin-left: 2px;
+}
+.ot-legend-item:hover .ot-legend-actions {
+  display: flex;
+}
+
+.ot-legend-action {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--color-cold-gray-400);
+}
+.ot-legend-action:hover {
+  color: var(--color-main-text);
+}
+/* A flagged symbol keeps its flag lit (blue) even when not hovering. */
+.ot-legend-action.is-flagged {
+  color: var(--color-ot-blue-500);
+}
+
+/* Hidden main series (legend eye, dark theme): titles
+ * cold-gray-650, no values (ChartLegend), the action buttons stay shown. */
+.chart-grid-cell .ot-legend-item.is-disabled .ot-legend-titles {
+  color: var(--color-text-disabled);
+}
+.ot-legend-item.is-disabled .ot-legend-actions {
+  display: flex;
+}
+
+/* ---- Values line (OHLC + change) --------------------------------------- */
+
+.ot-legend-values {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.ot-legend-value-item {
+  display: inline-flex;
+  align-items: center;
+  /* inter-item gap (valueItem padding-right:6px). */
+  padding-right: 6px;
+}
+
+/* The O/H/L/C letters. */
+.ot-legend-value-title {
+  padding-right: 1px;
+  color: var(--color-main-text);
+}
+
+/* The numbers + the change item — coloured by direction. */
+.ot-legend-value-value,
+.ot-legend-change {
+  white-space: nowrap;
+}
+
+.ot-legend-up {
+  color: var(--color-growing);
+}
+.ot-legend-down {
+  color: var(--color-falling);
+}
+
+/* ---- Studies (indicator) legend ---------------------------------------- *
+ * Active studies stack in a `sourcesWrapper` under the main series row, one
+ * `item study` per study. No gap under the series row; the shared
+ * `.ot-legend-stack` column does the placement.                              */
+.ot-ind-legend {
+  pointer-events: none;
+  user-select: none;
+  font-family: var(--font-family-base);
+  display: flex;
+  flex-direction: column;
+}
+
+.ot-ind-legend-row {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  /* Title→values gap is 4px (`titlesWrapper` padding 0 4px 0 1px), not
+   * 8px. */
+  column-gap: 4px;
+  /* Opt the whole row back into pointer events (the wrapper turns them off so
+     the chart can be dragged through the empty legend area). Without this only
+     the action buttons are hoverable, so the gear/eye/trash appeared only when
+     the cursor was over their slot — not over the title. */
+  pointer-events: auto;
+  width: fit-content;
+  /* Same 50% pane-bg plate as the series row. */
+  background: color-mix(in srgb, var(--ot-chart-bg) 50%, transparent);
+  border-radius: 4px;
+}
+
+/* Study title — 13px/400 #dbdbdb, dimmed when the study is hidden. */
+.ot-ind-legend-title {
+  /* Title at x 9 from the pane corner (series logo also at 9). */
+  padding-left: 1px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+  color: var(--color-main-text);
+  white-space: nowrap;
+}
+.ot-ind-legend-row.is-hidden .ot-ind-legend-title {
+  color: var(--color-cold-gray-400);
+}
+
+/* Per-plot values, each coloured by its plot's own colour (inline style). */
+.ot-ind-legend-values {
+  display: flex;
+  align-items: center;
+  column-gap: 6px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+}
+.ot-ind-legend-val {
+  white-space: nowrap;
+}
+
+/* Values + hover toolbar share this relative box, so the toolbar floats over
+   the values instead of pushing them right. Anchored right after the title. */
+.ot-ind-legend-rest {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* Action buttons — a rounded pill revealed on row hover that OVERLAYS the
+   metric values (`.buttonsWrapper` is width:0 / z-index:2 so the buttons
+   overflow over the values; on hover the `.buttons` box gets opacity:1, a 4px
+   right-rounded corner, and the chart bg as background so the cover is
+   theme/custom-bg safe). Pinned to the left of the values box (= just after
+   the study title). */
+.ot-ind-legend-actions {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  padding: 0 2px;
+  border-radius: 4px;
+  /* Fallback if no chart bg is passed inline (kept opaque so values are hidden). */
+  background-color: var(--color-bg-secondary);
+  /* Hairline + soft shadow so the pill reads as a floating box even when its
+     fill matches the chart background (neutral in both themes). */
+  border: 1px solid rgba(127, 127, 127, 0.18);
+  box-shadow: 0 1px 4px var(--ot-shadow-35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.08s;
+}
+.ot-ind-legend-row:hover .ot-ind-legend-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.ot-ind-legend-action {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--color-cold-gray-400);
+}
+.ot-ind-legend-action:hover {
+  color: var(--color-main-text);
+}
+
+/* Market status pill (statusesWrapper 48×24, pill 18 px r9, item 18×18
+ * + 2 px end padding, tinted ::after overlay). */
+.ot-legend-statuses {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 4px;
+}
+.ot-legend-status-pill {
+  display: flex;
+  height: 18px;
+  border-radius: 9px;
+  overflow: hidden;
+  cursor: default;
+  pointer-events: auto;
+}
+.ot-legend-status-item {
+  position: relative;
+  display: flex;
+  width: 18px;
+  height: 18px;
+  padding: 0 1px;
+  z-index: 0;
+}
+.ot-legend-status-item::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-color: var(--status-overlay);
+}
+
+/* Strategy "Active strategy" status (the reference app 3.4.1: 26 x 24 wrapper,
+   padding-left 4px, 18 px pill, icon #82b1ff). */
+.ot-ind-legend-status {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 4px;
+}
+.ot-ind-legend-status-pill {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  color: var(--color-ot-blue-a100);
+}
+
+/* Compared-symbol row: the title changes the symbol on click. */
+.ot-ind-legend-title.is-clickable { cursor: pointer; }
+
+/* Selected study (title click / plot click): the buttons stay shown and the
+ * title + buttons are framed in blue (reference legend `selected`:
+ * ot-blue-700 on a dark chart, ot-blue-500 on a light one). */
+.ot-ind-legend-row.is-selected {
+  --ot-ind-selected-border: var(--color-ot-blue-700);
+}
+html.theme-light .ot-ind-legend-row.is-selected {
+  --ot-ind-selected-border: var(--color-ot-blue-500);
+}
+.ot-ind-legend-row.is-selected .ot-ind-legend-title {
+  position: relative;
+}
+.ot-ind-legend-row.is-selected .ot-ind-legend-title::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: -4px;
+  top: -4px;
+  bottom: -4px;
+  border: 1px solid var(--ot-ind-selected-border);
+  border-right: 0;
+  border-radius: 4px 0 0 4px;
+  pointer-events: none;
+}
+.ot-ind-legend-row.is-selected .ot-ind-legend-actions {
+  opacity: 1;
+  pointer-events: auto;
+  border-color: var(--ot-ind-selected-border);
+  border-left-width: 0;
+  border-radius: 0 4px 4px 0;
+  box-shadow: none;
+}
+
+/* Flagged symbol: the flag button stays shown (no hover needed), in the
+ * flag colour (reference legend `flagged`). */
+.ot-legend-item.is-flagged .ot-legend-actions {
+  display: flex;
+}
+.ot-legend-item.is-flagged:not(:hover) .ot-legend-action:not([data-action="flag"]) {
+  display: none;
+}
+
+/* Flag colour popup (FlagColorPopup): right of the flag button, centred on
+ * it, a left arrow, one row of colours. */
+.ot-flag-popup {
+  position: fixed;
+  z-index: 9500;
+  transform: translate(8px, -50%);
+  padding: 4px 6px;
+  background: var(--ot-popover-bg);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px var(--ot-shadow-35);
+}
+.ot-flag-popup-arrow {
+  position: absolute;
+  left: -5px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  background: var(--ot-popover-bg);
+  transform: rotate(45deg);
+}
+.ot-flag-popup-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* Linked chart (a syncing group): the link button stays shown. */
+.ot-legend-item.is-linked .ot-legend-actions {
+  display: flex;
+}
+.ot-legend-item.is-linked:not(:hover) .ot-legend-action:not([data-action="link"]):not([data-action="flag"]) {
+  display: none;
+}
+.ot-legend-item.is-linked:not(:hover):not(.is-flagged) .ot-legend-action[data-action="flag"] {
+  display: none;
+}
+.ot-legend-sync-emoji {
+  font-size: 15px;
+  line-height: 18px;
+}
+
+/* "Chart syncing" menu (ChartSyncMenu): uppercase 11 px title, one row of
+ * group icons (7 px padding, radius 4, hover / active background). */
+.ot-chart-sync-menu {
+  padding: 4px 8px;
+}
+.ot-chart-sync-title {
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 4px 0;
+  color: var(--color-text-secondary);
+}
+.ot-chart-sync-row {
+  display: flex;
+}
+.ot-chart-sync-item {
+  all: unset;
+  padding: 7px;
+  border-radius: 4px;
+  cursor: default;
+  display: inline-flex;
+}
+.ot-chart-sync-item:hover,
+.ot-chart-sync-item.is-active {
+  background-color: var(--color-popup-element-background-hover);
+}
+.ot-chart-sync-emoji {
+  font-size: 15px;
+  line-height: 18px;
+  width: 18px;
+  text-align: center;
+}
+
+/* Status of a study that failed (reference app 3.4.1, legend statuses):
+   18 px round pill after the title. Symbol that cannot be loaded: white cross on
+   the danger red; another error: red "!" on a light red overlay. */
+.ot-ind-legend-error-pill {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  cursor: default;
+  pointer-events: auto;
+}
+.ot-ind-legend-error-pill.is-invalidSymbol { color: var(--color-white); background-color: var(--color-ripe-red-500); }
+.ot-ind-legend-error-pill.is-invalidSymbol:hover { background-color: var(--color-ripe-red-400); }
+.ot-ind-legend-error-pill.is-invalidSymbol:active { background-color: var(--color-ripe-red-a400); }
+html.theme-light .ot-ind-legend-error-pill.is-invalidSymbol:hover { background-color: var(--color-ripe-red-600); }
+html.theme-light .ot-ind-legend-error-pill.is-invalidSymbol:active { background-color: var(--color-ripe-red-800); }
+.ot-ind-legend-error-pill.is-error { color: var(--color-ripe-red-a400); background-color: var(--ot-tint-red-20); }
+.ot-ind-legend-error-pill.is-error:hover { background-color: #f236454d; }
+.ot-ind-legend-error-pill.is-error:active { background-color: #f2364566; }
+html.theme-light .ot-ind-legend-error-pill.is-error { color: var(--color-ripe-red-800); background-color: #cc2f3c26; }
+html.theme-light .ot-ind-legend-error-pill.is-error:hover { background-color: #cc2f3c4d; }
+html.theme-light .ot-ind-legend-error-pill.is-error:active { background-color: #cc2f3c66; }
+
+/* Error panel under the pill: popup background, radius 6, shadow 0 2px 4px,
+   344 px at most, padding 11/16/10; icon 18 px, title 16/22 600, text 14/21. */
+.ot-study-error-panel {
+  position: fixed;
+  z-index: 1000;
+  max-width: 344px;
+  box-sizing: border-box;
+  border-radius: 6px;
+  background-color: var(--color-popup-background);
+  box-shadow: 0 2px 4px var(--ot-shadow-40);
+  color: var(--color-popup-element-text);
+}
+html.theme-light .ot-study-error-panel { box-shadow: 0 2px 4px var(--ot-shadow-20); }
+.ot-study-error-panel-body {
+  display: flex;
+  padding: 11px 16px 10px;
+}
+.ot-study-error-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 2px 6px 2px 0;
+  border-radius: 9px;
+}
+.ot-study-error-icon.is-invalidSymbol { color: var(--color-white); background-color: var(--color-ripe-red-500); }
+.ot-study-error-icon.is-error { color: var(--color-ripe-red-a400); background-color: var(--ot-tint-red-20); }
+html.theme-light .ot-study-error-icon.is-error { color: var(--color-ripe-red-800); background-color: #cc2f3c26; }
+.ot-study-error-desc {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.ot-study-error-title {
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.ot-study-error-title.is-invalidSymbol { color: var(--color-ripe-red-500); }
+.ot-study-error-title.is-error { color: var(--color-ripe-red-a400); }
+html.theme-light .ot-study-error-title.is-error { color: var(--color-ripe-red-800); }
+.ot-study-error-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 21px;
+  white-space: pre-wrap;
+}
+
+/* Study loading (reference legend `eyeLoading`): the eye button shows the eye's
+   outline with an arc turning once every 0.96 s; the values read "∅". */
+.ot-ind-legend-row.is-loading .ot-eye-loading-arc {
+  transform-origin: 9px 9px;
+  animation: ot-eye-loading 0.96s linear infinite;
+}
+@keyframes ot-eye-loading {
+  100% { transform: rotate(1turn); }
+}
+
+/* ---- Narrow charts: titles cut, buttons kept in view ------------------- *
+ * The legend stack is limited to the plot width (ChartView). Each source row
+ * stays within it: the title pieces shrink (symbol / exchange / study title
+ * cut with an ellipsis; at least 23 px of a series title piece and 15 px of a
+ * study title stay), the interval piece and the buttons do not. */
+.ot-legend,
+.ot-legend-source,
+.ot-ind-legend,
+.ot-legend-item,
+.ot-ind-legend-row {
+  max-width: 100%;
+}
+.ot-legend-nowrap {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+.ot-legend-titles {
+  flex: 1 1 0%;
+  max-width: fit-content;
+  min-width: 23px;
+  overflow: hidden;
+}
+.ot-legend-title-piece {
+  flex: 0 1 auto;
+  min-width: 23px;
+  overflow: hidden;
+}
+.ot-legend-title-piece.ot-legend-dot:not(.ot-legend-with-action) {
+  display: block;
+  line-height: 20px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ot-legend-title-piece.ot-legend-dot.ot-legend-with-action {
+  flex: 0 0 auto;
+  min-width: auto;
+}
+.ot-legend-symbol {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ot-ind-legend-title {
+  flex: 0 1 auto;
+  min-width: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ot-ind-legend-row {
+  flex-wrap: wrap;
+}
+.ot-ind-legend-rest {
+  max-width: 100%;
+}
+.ot-ind-legend-values {
+  flex-wrap: wrap;
+}
+
+/* Hidden study (eye) or study hidden on the interval: its crossed eye stays
+   shown right after the title without hover (no pill); hovered, every button
+   shows. The interval eye is orange (tan-orange-600). */
+.ot-ind-legend-row.is-eye-hidden:not(:hover):not(.is-selected) .ot-ind-legend-actions,
+.ot-ind-legend-row.is-off-interval:not(:hover):not(.is-selected) .ot-ind-legend-actions {
+  opacity: 1;
+  pointer-events: auto;
+  background: none !important;
+  border-color: transparent;
+  box-shadow: none;
+}
+.ot-ind-legend-row.is-eye-hidden:not(:hover):not(.is-selected) .ot-ind-legend-action,
+.ot-ind-legend-row.is-off-interval:not(:hover):not(.is-selected) .ot-ind-legend-action {
+  display: none;
+}
+.ot-ind-legend-row.is-eye-hidden:not(:hover):not(.is-selected) .ot-ind-legend-action[data-qa-id="legend-show-hide-action"],
+.ot-ind-legend-row.is-off-interval:not(:hover):not(.is-selected) .ot-ind-legend-action[data-qa-id="legend-interval-show-hide-action"] {
+  display: inline-flex;
+}
+.ot-ind-legend-action[data-qa-id="legend-interval-show-hide-action"] {
+  color: var(--color-tan-orange-600);
+}
+
+/* Source open in the OakScript editor (reference legend status "opened in editor"): 18 px braces pill
+   (content-tertiary-success-extra-bold) on a round positive overlay (3-light, hover 3-normal, active 3-bold);
+   its panel: title #089950, a "Go there now" button (primary neutral light button: 28 px, r8, padding 0 11,
+   14/18, 8 px below the text). */
+.ot-ind-legend-opened-pill {
+  position: relative;
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--color-content-tertiary-success-extra-bold);
+  cursor: default;
+  pointer-events: auto;
+}
+.ot-ind-legend-opened-pill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9px;
+  background-color: var(--color-overlay-positive-3-light);
+}
+.ot-ind-legend-opened-pill:hover::after { background-color: var(--color-overlay-positive-3-normal); }
+.ot-ind-legend-opened-pill:active::after { background-color: var(--color-overlay-positive-3-bold); }
+.ot-study-error-icon.is-opened {
+  color: var(--color-content-tertiary-success-extra-bold);
+  background-color: var(--color-overlay-positive-3-light);
+}
+.ot-study-error-title.is-opened { color: var(--color-forest-green-500); }
+.ot-study-status-actions { display: flex; }
+.ot-study-status-action {
+  box-sizing: border-box;
+  height: 28px;
+  max-width: 100%;
+  margin-top: 8px;
+  padding: 0 11px;
+  border: 1px solid var(--color-button-fill_border-primary-neutral-default);
+  border-radius: 8px;
+  background-color: var(--color-button-fill_border-primary-neutral-default);
+  color: var(--color-button-content-primary-neutral-default);
+  font: inherit;
+  font-size: 14px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+
+/* Indicators legend toggler (reference app 3.4.1): wrapper 3 px / 5 px,
+   button 21 px high, 1 px border, radius 3, the chart background at 80 %;
+   arrow box 27 px wide (19 px while collapsed with a count), turned up while
+   open; the count 13 / 16 px. */
+.ot-ind-legend-toggler-wrap {
+  display: flex;
+  align-items: center;
+  column-gap: 8px;
+  padding: 3px 5px;
+}
+.ot-ind-legend-toggler {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid var(--ot-legend-toggler-border);
+  border-radius: 3px;
+  color: var(--ot-legend-toggler-color);
+  cursor: default;
+  pointer-events: all;
+}
+@media (any-hover: hover) {
+  .ot-ind-legend-toggler:hover { color: var(--ot-legend-toggler-hover); }
+  .ot-ind-legend-toggler:hover::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 3px;
+    background-color: var(--ot-legend-toggler-overlay);
+  }
+}
+.ot-ind-legend-toggler-arrow {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 19px;
+  transform: rotate(-180deg);
+  transition: transform 0.1s cubic-bezier(0.06, 0.52, 1, 0.54);
+}
+.ot-ind-legend-toggler.is-closed .ot-ind-legend-toggler-arrow { transform: rotate(0deg); }
+.ot-ind-legend-toggler.is-closed:not(.is-single) .ot-ind-legend-toggler-arrow { width: 19px; }
+.ot-ind-legend-toggler-count {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  padding-right: 4px;
+  font-size: 13px;
+  line-height: 16px;
+}
+html.theme-dark {
+  --ot-legend-toggler-border: #2b2b2b;
+  --ot-legend-toggler-color: #dbdbdb;
+  --ot-legend-toggler-hover: #f2f2f2;
+  --ot-legend-toggler-overlay: rgba(255, 255, 255, 0.08);
+}
+html.theme-light {
+  --ot-legend-toggler-border: #dbdbdb;
+  --ot-legend-toggler-color: #0f0f0f;
+  --ot-legend-toggler-hover: #000;
+  --ot-legend-toggler-overlay: rgba(0, 0, 0, 0.06);
+}

@@ -1,0 +1,108 @@
+/*
+ * Chart-state registry — a narrow bridge that exposes per-symbol chart state
+ * which otherwise lives trapped inside ChartView's closure (the latest bar and
+ * the active indicators' current plot values).
+ *
+ * The alert engine (data/alert-engine.ts) needs these to evaluate indicator
+ * conditions ("SMA crossing price") and to know a charted symbol's latest
+ * price. ChartView registers a provider for its symbol on mount / symbol
+ * change and unregisters on cleanup.
+ *
+ * Drawing operands are NOT here: drawings persist to kv per symbol
+ * (window/drawings/persistence.ts), so the engine reads them directly and this
+ * registry stays limited to the closure-only state.
+ *
+ * Indicator alerts therefore only evaluate while the symbol is charted — the
+ * indicator values are computed by the chart. That's an accepted limit of the
+ * frontend-first engine; price/drawing alerts have no such requirement.
+ */
+import type { IndicatorLegendRow } from "../window/chart/indicators/indicator-controller";
+
+export type ChartStateProvider = {
+  /** Latest bar close for this symbol, or null when no bars are loaded. */
+  lastPrice: () => number | null;
+  /** Open epoch ms of the latest (in-progress) bar, or null. */
+  lastBarTime: () => number | null;
+  /** Active indicator legend rows valued at the latest bar. */
+  indicatorLegend: () => IndicatorLegendRow[];
+  /** Interval id of the chart ("5", "1D"). */
+  resolution: () => string;
+  /** Session of the chart: "RTH" (regular hours) or "ETH" (extended). */
+  session?: () => string;
+  /** The chart's bars, oldest first (the last one is the forming bar). */
+  bars: () => ChartBar[];
+  /** The symbols compared on the chart (alert sources). */
+  compares?: () => ChartCompareSource[];
+  /** The chart is switching symbol or interval: its bars are still the previous series'. */
+  loading?: () => boolean;
+};
+
+/** A symbol compared on a chart: full name, label "<description> (<exchange>)". */
+export type ChartCompareSource = { id: string; symbol: string; label: string; hidden: boolean; last: number | null };
+
+export type ChartBar = { time: number; open: number; high: number; low: number; close: number; volume?: number };
+
+const providers = new Map<string, ChartStateProvider>();
+
+export function registerChartState(symbol: string, p: ChartStateProvider): void {
+  providers.set(symbol.toUpperCase(), p);
+}
+
+export function unregisterChartState(symbol: string): void {
+  providers.delete(symbol.toUpperCase());
+}
+
+/** Indicator legend rows for a symbol, or [] when it isn't charted. */
+export function indicatorLegendFor(symbol: string): IndicatorLegendRow[] {
+  return providers.get(symbol.toUpperCase())?.indicatorLegend() ?? [];
+}
+
+/** The symbols compared on the chart of a symbol, or [] when it isn't charted. */
+export function chartComparesFor(symbol: string): ChartCompareSource[] {
+  return providers.get(symbol.toUpperCase())?.compares?.() ?? [];
+}
+
+/** A single indicator plot value (`plot` = plotConfig index), or null when
+ *  the study / plot / symbol is absent or the plot is hidden. */
+export function indicatorPlotValue(
+  symbol: string,
+  indicatorId: string,
+  plot = 0,
+): number | null {
+  const rows = indicatorLegendFor(symbol);
+  const row = rows.find((r) => r.id === indicatorId);
+  const v = row?.plots.find((p) => p.index === plot)?.value;
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** Bars of a symbol charted on `resolution` (and on `session`, when given),
+ *  or null when no chart shows it that way (or its bars are still loading). */
+export function chartBars(symbol: string, resolution: string, session?: string): ChartBar[] | null {
+  const p = providers.get(symbol.toUpperCase());
+  if (!p || p.resolution() !== resolution) return null;
+  if (session !== undefined && p.session && p.session() !== session) return null;
+  if (p.loading?.()) return null;
+  const bars = p.bars();
+  return bars.length ? bars : null;
+}
+
+/** Latest charted price for a symbol, or null when it isn't charted. */
+export function chartLastPrice(symbol: string): number | null {
+  return providers.get(symbol.toUpperCase())?.lastPrice() ?? null;
+}
+
+/** Latest charted bar-open time (epoch ms) for a symbol, or null. */
+export function chartLastBarTime(symbol: string): number | null {
+  return providers.get(symbol.toUpperCase())?.lastBarTime() ?? null;
+}
+
+/** Interval id of the chart showing a symbol, or null when it isn't charted. */
+export function chartResolution(symbol: string): string | null {
+  return providers.get(symbol.toUpperCase())?.resolution() ?? null;
+}
+
+/** Session of the chart showing a symbol ("RTH" / "ETH"), or null when it
+ *  isn't charted or does not tell. */
+export function chartSession(symbol: string): string | null {
+  return providers.get(symbol.toUpperCase())?.session?.() ?? null;
+}

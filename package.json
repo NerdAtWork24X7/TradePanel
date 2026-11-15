@@ -1,20 +1,16 @@
 {
   "name": "tradepanel-desktop",
   "private": true,
-  "version": "0.1.0",
-  "description": "TradePanel desktop shell (Tauri 2)",
+  "version": "0.4.24",
+  "description": "TradePanel on OpenTrader (Tauri 2 + SolidJS)",
   "scripts": {
-    "tauri": "tauri",
-    "dev": "tauri dev",
-    "build": "tauri build",
-    "frontend:dev": "npm --prefix frontend run dev",
-    "frontend:build": "npm --prefix frontend run build",
-    "ai:runtime": "node backend/scripts/build-ai-runtime.mjs",
-    "test:frontend": "npm --prefix frontend test",
-    "test:ai": "node --test tests/ai_rpc_smoke.mjs tests/ai_settings_service.test.mjs",
-    "typecheck": "npm --prefix frontend run typecheck"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "2.12.2"
+    "start": "node scripts/tradepanel.mjs",
+    "dev": "npm --prefix opentrader run tauri dev",
+    "build": "npm --prefix opentrader run tauri build",
+    "tauri": "npm --prefix opentrader run tauri",
+    "ot:install": "npm --prefix opentrader ci",
+    "ot:test": "npm --prefix opentrader test",
+    "ot:crypto": "node opentrader/scripts/install-crypto-plugin.mjs",
+    "ot:frontend:build": "npm --prefix opentrader run build"
   }
 }

@@ -1,0 +1,43 @@
+/*
+ * Inline editor for the text-annotation drawing family (text / note / comment /
+ * price-note / signpost / callout). Floats over the chart at the drawing's
+ * anchor; commits on Enter or blur, cancels on Escape (see DrawingsOverlay).
+ */
+.ot-drawing-text-input {
+  position: absolute;
+  /* Over the drawings layer (5). */
+  z-index: 6;
+  min-width: 80px;
+  padding: 3px 6px;
+  font-family: var(--font-family-base);
+  font-size: 13px;
+  line-height: 16px;
+  color: var(--color-main-text);
+  background-color: var(--ot-chart-bg);
+  border: 1px solid var(--color-brand);
+  border-radius: 4px;
+  outline: none;
+  box-shadow: 0 1px 6px var(--ot-shadow-40);
+}
+
+.ot-drawing-text-input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+/* Table cell editor: an unframed multi-line field laid over the active
+ * cell's text box (the cell keeps its background and blue border). */
+.ot-table-cell-input {
+  position: absolute;
+  z-index: 6;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  font-family: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}

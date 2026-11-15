@@ -1,0 +1,78 @@
+{
+  "id": "crypto",
+  "name": "Crypto markets & Hyperliquid",
+  "version": "1.1.0",
+  "publisher": "TradePanel",
+  "description": "Binance, Bybit, OKX, Coinbase, Kraken, KuCoin, Gate.io, Bitget and Hyperliquid market data, with a Hyperliquid perpetuals account for the order ticket. Hyperliquid starts on testnet.",
+  "api": 2,
+  "provides": [
+    "datafeed",
+    "broker"
+  ],
+  "exchanges": [
+    "BINANCE",
+    "BYBIT",
+    "OKX",
+    "COINBASE",
+    "KRAKEN",
+    "KUCOIN",
+    "GATEIO",
+    "BITGET",
+    "HYPERLIQUID"
+  ],
+  "runtime": {
+    "type": "process",
+    "entry": "plugin.py",
+    "args": []
+  },
+  "settings": [
+    {
+      "key": "network",
+      "label": "Hyperliquid network",
+      "type": "select",
+      "default": "testnet",
+      "options": [
+        {
+          "value": "testnet",
+          "label": "Testnet (recommended)"
+        },
+        {
+          "value": "live",
+          "label": "Live — real funds"
+        }
+      ],
+      "help": "Testnet uses Hyperliquid's test network. Live orders are still confirmed by OpenTrader before they are sent."
+    },
+    {
+      "key": "privateKey",
+      "label": "Hyperliquid wallet private key",
+      "type": "secret",
+      "default": "",
+      "help": "Stored in the operating system's credential store, never in the settings file. Use an API (agent) wallet rather than the main wallet where possible."
+    },
+    {
+      "key": "accountAddress",
+      "label": "Main wallet address",
+      "type": "text",
+      "default": "",
+      "help": "Only for an API (agent) wallet: the main account it acts for. Leave empty when the key above belongs to the trading account."
+    },
+    {
+      "key": "slippage",
+      "label": "Market order slippage (%)",
+      "type": "number",
+      "default": "0.5",
+      "help": "Hyperliquid has no native market order: a market order is an immediate-or-cancel limit at the mid price moved by this much."
+    },
+    {
+      "key": "pollSeconds",
+      "label": "Refresh (seconds)",
+      "type": "number",
+      "default": "3",
+      "help": "How often live quotes and the account are refreshed when a venue has no WebSocket (the plugin streams over WebSockets when it can)."
+    }
+  ],
+  "setup": "Market data works at once. To trade, open Settings > Plugins > Crypto markets & Hyperliquid > Settings, choose the network and paste the Hyperliquid wallet private key. Then open Trade > Connect broker and turn trading on.",
+  "homepage": "https://github.com/deepentropy/opentrader",
+  "platforms": []
+}

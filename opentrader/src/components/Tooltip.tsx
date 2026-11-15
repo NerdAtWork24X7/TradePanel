@@ -1,0 +1,163 @@
+/*
+ * Tooltip — hover label.
+ *
+ * Solid divergence from the React mock: React's version uses cloneElement
+ * to attach handlers directly to the child. Solid has no cloneElement, so
+ * we wrap children in a `display: contents` span that owns the listeners.
+ * That span has no layout box, so we measure
+ * `wrapper.firstElementChild.getBoundingClientRect()` for positioning.
+ *
+ * Visual spec:
+ *   13px / line-height 18px, 3px 8px padding, 2px radius,
+ *   --color-common-tooltip-bg / --color-common-tooltip-text,
+ *   4px margin from anchor, max-width 200/310/640.
+ */
+import { createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { Portal } from "solid-js/web";
+import { physicalSide } from "./reading-direction";
+
+/** Where the tooltip sits against its anchor; "start" / "end" follow the reading direction (left / right, right /
+ *  left right to left). The panels at a fixed side (drawing toolbar, right rail tabs) use left / right. */
+export type TooltipSide = "top" | "bottom" | "left" | "right" | "start" | "end";
+
+interface Props {
+  text: string;
+  /** "Alt + T", "Ctrl + Alt + H", ... — split on "+" into key caps. */
+  hotkey?: string;
+  /** Hotkey text template: `{N}` is the N-th key of `hotkey`, " + " draws a
+   *  plus sign, anything else stays plain text ("{0} + Click on the chart",
+   *  "Number or {0}"). Without it the keys are joined with " + ". */
+  hotkeyText?: string;
+  side?: TooltipSide;
+  delayMs?: number;
+  width?: "narrow" | "normal" | "wide";
+  /** Inline SVG markup drawn after the text, e.g. the sort-direction glyph of
+   *  the watchlist column headers ("Click to sort by Last ↑"). */
+  icon?: string;
+  /** 8px from the anchor instead of 4px. */
+  farther?: boolean;
+  children: JSX.Element;
+}
+
+/** Hotkey block: the template's `{N}` placeholders become key caps, then
+ *  every " + " becomes a plus sign. */
+function hotkeyParts(hotkey: string, template?: string): JSX.Element[] {
+  const keys = hotkey.split("+").map((k) => k.trim()).filter(Boolean);
+  const text = template ?? keys.map((_, i) => `{${i}}`).join(" + ");
+  return text
+    .split(/(\{\d+\}|\s\+\s)/)
+    .filter(Boolean)
+    .map((tok) => {
+      const m = /^\{(\d+)\}$/.exec(tok);
+      if (m) return <kbd class="ot-tooltip-hotkey-key">{keys[Number(m[1])] ?? ""}</kbd>;
+      if (/^\s\+\s$/.test(tok)) return <span class="ot-tooltip-hotkey-plus">+</span>;
+      return tok;
+    });
+}
+
+export function Tooltip(props: Props) {
+  const [anchor, setAnchor] = createSignal<DOMRect | null>(null);
+  let wrapper!: HTMLSpanElement;
+  let timer: number | null = null;
+  const clear = () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+  const show = () => {
+    const target = wrapper.firstElementChild as HTMLElement | null;
+    if (!target) return;
+    setAnchor(target.getBoundingClientRect());
+  };
+  const onEnter = () => {
+    clear();
+    timer = window.setTimeout(show, props.delayMs ?? 500);
+  };
+  const onLeave = () => {
+    clear();
+    setAnchor(null);
+  };
+  onCleanup(clear);
+
+  const side = () => physicalSide(props.side ?? "right");
+  const hasHotkey = () => !!(props.hotkey || props.hotkeyText);
+  const width = () => props.width ?? "normal";
+
+  /** After the tooltip paints, nudge it back inside the viewport if its measured
+   *  box overflows an edge (the CSS transforms make a pure-JS pre-calc awkward,
+   *  so we correct post-layout). Keeps right-rail tooltips fully on-screen. */
+  let tip: HTMLDivElement | undefined;
+  const clampIntoView = (el: HTMLDivElement) => {
+    tip = el;
+    queueMicrotask(() => {
+      if (!tip) return;
+      const r = tip.getBoundingClientRect();
+      const M = 4;
+      let dx = 0;
+      let dy = 0;
+      if (r.left < M) dx = M - r.left;
+      else if (r.right > window.innerWidth - M) dx = window.innerWidth - M - r.right;
+      if (r.top < M) dy = M - r.top;
+      else if (r.bottom > window.innerHeight - M) dy = window.innerHeight - M - r.bottom;
+      if (dx) tip.style.left = `${parseFloat(tip.style.left || "0") + dx}px`;
+      if (dy) tip.style.top = `${parseFloat(tip.style.top || "0") + dy}px`;
+    });
+  };
+
+  const style = (): JSX.CSSProperties => {
+    const r = anchor();
+    if (!r) return {};
+    const M = props.farther ? 8 : 4;
+    switch (side()) {
+      case "right":
+        return { left: `${r.right + M}px`, top: `${r.top + r.height / 2}px` };
+      case "left":
+        return { left: `${r.left - M}px`, top: `${r.top + r.height / 2}px` };
+      case "top":
+        return { left: `${r.left + r.width / 2}px`, top: `${r.top - M}px` };
+      case "bottom":
+        return { left: `${r.left + r.width / 2}px`, top: `${r.bottom + M}px` };
+    }
+  };
+
+  return (
+    <>
+      <span
+        ref={wrapper}
+        style={{ display: "contents" }}
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+        onFocusIn={onEnter}
+        onFocusOut={onLeave}
+      >
+        {props.children}
+      </span>
+      <Show when={anchor()}>
+        <Portal mount={document.body}>
+          <div
+            ref={clampIntoView}
+            role="tooltip"
+            class={`ot-tooltip ot-tooltip-${side()} ot-tooltip-${width()}${hasHotkey() ? " ot-tooltip-with-hotkey" : ""}`}
+            style={style()}
+          >
+            <span class="ot-tooltip-label">
+              {props.text}
+              <Show when={props.icon}>
+                {(icon) => (
+                  <>
+                    {" "}
+                    <span class="ot-tooltip-icon" innerHTML={icon()} />
+                  </>
+                )}
+              </Show>
+            </span>
+            <Show when={hasHotkey()}>
+              <span class="ot-tooltip-hotkey-block">{hotkeyParts(props.hotkey ?? "", props.hotkeyText)}</span>
+            </Show>
+          </div>
+        </Portal>
+      </Show>
+    </>
+  );
+}

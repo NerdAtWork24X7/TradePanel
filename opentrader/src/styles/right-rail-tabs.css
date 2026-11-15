@@ -1,0 +1,94 @@
+/*
+ * Right-rail tab strip — vertical column of widget switchers on the far
+ * right.
+ */
+
+/* Right-rail tab strip — the rail itself is 45 px wide with NO
+ * border-left (the chart pane provides its own visual edge); the inner
+ * toolbar adds 2 px top/bottom padding and align-centers the buttons. */
+.right-rail-tabs {
+  width: 45px;
+  flex-shrink: 0;
+  background-color: var(--ot-chart-bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2px 0;
+}
+
+/* An open panel is parted from the strip by a 1 px seam of the window background, like the reference app. Drawn
+ * inside the strip so the panel and buttons keep their sizes; physical left: the panel stays left of the strip. */
+.right-rail-container.has-panel .right-rail-tabs {
+  box-shadow: inset 1px 0 0 var(--color-widget-border);
+}
+
+.right-rail-tabs-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Right-rail tab — dimensions only; the rounded pill comes from the shared
+ * `.ot-toolbar-button` base, with
+ * `--ot-toolbar-explicit-hover-margin: 3px` and `border-radius: 8px`. */
+.right-rail-tab {
+  width: 44px;
+  height: 44px;
+  --ot-tb-pill-inset: 3px;
+  --ot-tb-pill-radius: 8px;
+}
+/* A collapsed panel's button: a 4 px dot at its left edge (the reference app). */
+.right-rail-tab.is-collapsed {
+  position: relative;
+}
+.right-rail-tab.is-collapsed::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 2px);
+  left: 1px; /* physical: toward the panel, which stays left of the strip (#290) */
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: var(--color-container-fill-secondary-neutral);
+}
+.right-rail-tabs-group > * + * {
+  margin-top: 2px;
+}
+/* Between the group stuck to the top and the one stuck to the bottom. */
+.right-rail-tabs-spacer {
+  flex: 1 1 auto;
+  min-height: 8px;
+}
+
+/* Dragging a button: the slot it lands in, and the button under the pointer. */
+.right-rail-tabs.is-dragging .right-rail-tab {
+  pointer-events: none;
+}
+.right-rail-drop-slot {
+  box-sizing: border-box;
+  width: 38px;
+  height: 38px;
+  margin: 3px;
+  border: 1px dashed var(--color-text-secondary);
+  border-radius: 8px;
+  background: var(--color-container-fill-primary-neutral-light);
+}
+.right-rail-tabs-group > * + .right-rail-drop-slot {
+  margin-top: 5px;
+}
+.right-rail-ghost {
+  position: fixed;
+  z-index: 2000;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--color-bg-primary);
+  box-shadow: 0 2px 8px var(--ot-shadow-40);
+  color: var(--color-text-primary);
+  /* See-through: the drop slot under the pointer shows. */
+  opacity: 0.55;
+  pointer-events: none;
+}

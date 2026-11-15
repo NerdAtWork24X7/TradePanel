@@ -1,0 +1,241 @@
+name: Release
+
+# Builds the OpenTrader installers for Windows, macOS and Linux.
+#   - Called by the Prepare release workflow with its new tag, or on a pushed
+#     version tag (git tag v0.1.0 && git push origin v0.1.0): creates a draft
+#     GitHub Release for the tag with notes from scripts/release-notes.mjs,
+#     builds all three into it, and publishes it once all three succeeded.
+#   - Manual run (Actions tab -> "Run workflow"): builds all three and uploads
+#     the installers as workflow artifacts only. No release is created.
+#
+# Outputs: Windows .exe (NSIS) + .msi, macOS universal .dmg + .app,
+# Linux .AppImage + .deb + .rpm, named OpenTrader_<platform>_<arch>.<ext>.
+# Plus the in-app update files (src-tauri/src/app_update.rs): a .sig per
+# updater bundle and latest.json in the release. Installed apps read
+# releases/latest/download/latest.json, so an update reaches users only once
+# the release is published (publish job).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Version tag to release (v<tauri.conf.json version>)'
+        type: string
+        required: true
+
+env:
+  # Tag to release: empty on a manual run (build only).
+  TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name || '') }}
+
+jobs:
+  # Draft release with its notes, created once so the three builds upload to
+  # the same release. Reused when the workflow is re-run for the tag.
+  draft:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.draft.outputs.id }}
+    steps:
+      - name: Checkout OpenTrader
+        if: env.TAG != ''
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0         # tags, for the commits since the previous one
+          fetch-tags: true
+
+      - name: Create draft release
+        if: env.TAG != ''
+        id: draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/release-notes.mjs "$TAG" > notes.md
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n1)
+          if [ -z "$id" ]; then
+            id=$(gh api "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$TAG" -f name="OpenTrader $TAG" -F body=@notes.md -F draft=true --jq .id)
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: draft
+    permissions:
+      contents: write            # upload the installers to the draft release
+    strategy:
+      fail-fast: false           # one OS failing must not cancel the others
+      matrix:
+        include:
+          - platform: macos-latest       # Apple Silicon runner, builds a universal binary
+            args: '--target universal-apple-darwin'
+          - platform: ubuntu-22.04       # 22.04 ships webkit2gtk 4.1 (Tauri v2)
+            args: ''
+          - platform: windows-latest
+            args: ''
+    runs-on: ${{ matrix.platform }}
+    env:
+      # Compiled into the app by src-tauri/build.rs. Without it the app has no
+      # market data. Set it in Settings -> Secrets and variables -> Actions.
+      OPENTRADER_GATEWAY_TOKEN: ${{ secrets.OPENTRADER_GATEWAY_TOKEN }}
+      # Signs the in-app update files (bundle.createUpdaterArtifacts). The
+      # public half is plugins.updater.pubkey in tauri.conf.json. Without the
+      # key the build fails, and with another key installed apps reject the
+      # update.
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # Anonymous usage statistics (src/data/analytics.ts): the analytics
+      # project key, compiled into the frontend. Without it they are off.
+      VITE_POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
+
+    steps:
+      # Two checkouts side by side, the layout vite.config.ts expects:
+      #   opentrader/                  this repo
+      #   lightweight-charts-drawing/  the drawing core
+      - name: Checkout OpenTrader
+        uses: actions/checkout@v7
+        with:
+          path: opentrader
+          ref: ${{ env.TAG || github.ref }}
+
+      # Drawing core release OpenTrader is tested against: package.json
+      # config.drawingRef (bumped by scripts/release-bump.mjs).
+      - name: Read drawing core ref
+        id: refs
+        shell: bash
+        working-directory: opentrader
+        run: echo "drawing=$(node -p "require('./package.json').config.drawingRef")" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout drawing core
+        uses: actions/checkout@v7
+        with:
+          repository: deepentropy/lightweight-charts-drawing
+          ref: ${{ steps.refs.outputs.drawing }}
+          path: lightweight-charts-drawing
+
+      - name: Check secrets and version
+        shell: bash
+        working-directory: opentrader
+        run: |
+          if [ -z "$OPENTRADER_GATEWAY_TOKEN" ]; then
+            echo "::error::OPENTRADER_GATEWAY_TOKEN secret is not set: the app would have no market data."
+            exit 1
+          fi
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ] || [ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD secrets are not set: the update files cannot be signed."
+            exit 1
+          fi
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ -n "$TAG" ] && [ "$TAG" != "v$version" ]; then
+            echo "::error::Tag $TAG does not match tauri.conf.json version $version (expected v$version)."
+            exit 1
+          fi
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # macOS universal build needs both architectures
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'opentrader/src-tauri -> target'
+
+      - name: Install Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: 'npm'
+          cache-dependency-path: opentrader/package-lock.json
+
+      # System libraries Tauri v2 needs to build on Linux.
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf \
+            build-essential \
+            curl wget file
+
+      - name: Install npm dependencies
+        working-directory: opentrader
+        run: npm ci
+
+      # src/bindings.ts is generated by tauri-specta and gitignored. A release
+      # build never writes it (only debug runs do), and the frontend imports it,
+      # so generate it before the frontend build.
+      - name: Generate TypeScript bindings
+        working-directory: opentrader/src-tauri
+        run: cargo test --lib export_bindings
+
+      # Builds the SolidJS frontend (beforeBuildCommand) then the Tauri bundles.
+      # With a tag, tauri-action uploads the installers and latest.json to the
+      # draft release. On a manual run releaseId is empty, so it only builds.
+      - name: Build Tauri bundles
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The frontend build peaked at 1.5-2 GB of JS heap (01/10/2026); with the
+          # indicator library's live runs (~20 MB bundles, in the window and in
+          # the study worker) it ran out at 4 GB on the Linux and macOS runners
+          # (06/11/2026, #258). The macOS runner has 7 GB of memory.
+          NODE_OPTIONS: --max-old-space-size=6144
+        with:
+          projectPath: opentrader
+          releaseId: ${{ needs.draft.outputs.release_id }}
+          args: ${{ matrix.args }}
+          # Version-free names, so the README can link to
+          # releases/latest/download/<name> (e.g. OpenTrader_windows_x64-setup.exe).
+          assetNamePattern: '[name]_[platform]_[arch][setup][ext]'
+          # latest.json has one entry per installer (windows-x86_64-nsis / -msi),
+          # and the app picks the one it was installed with. This sets only the
+          # plain windows-x86_64 fallback: the NSIS installer (README download).
+          updaterJsonPreferNsis: true
+
+      # Manual runs only: with a tag the installers are already in the draft
+      # release, and a second copy would count against the artifact storage quota.
+      - name: Upload installers
+        if: env.TAG == ''
+        uses: actions/upload-artifact@v7
+        with:
+          retention-days: 7
+          name: opentrader-${{ matrix.platform }}
+          if-no-files-found: warn
+          path: |
+            opentrader/src-tauri/target/release/bundle/**
+            opentrader/src-tauri/target/universal-apple-darwin/release/bundle/**
+
+  # All three installers are in: publish, so installed apps get the update.
+  publish:
+    needs: [draft, build]
+    if: needs.draft.outputs.release_id != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/${{ needs.draft.outputs.release_id }}" -F draft=false -f make_latest=true --silent
+
+  # The web version (demo.opentrader.markets) follows each release.
+  web:
+    needs: [draft, publish]
+    if: needs.draft.outputs.release_id != ''
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/web-image.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+      push: false
+      deploy: true
+    secrets: inherit

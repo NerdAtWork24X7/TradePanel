@@ -1,0 +1,93 @@
+/*
+ * `.ot-chart-ctx-menu` — the chart right-click context menu.  Metrics:
+ *   container  bg #1f1f1f, color #dbdbdb, 14px text, radius 6px,
+ *              shadow 0 2px 4px rgba(0,0,0,.4)
+ *   row        height 32px, icon cell 36px
+ */
+.ot-chart-ctx-menu {
+  position: fixed;
+  z-index: 9500;
+  min-width: 180px;
+  padding: 4px 0;
+  background: var(--ot-popover-bg);
+  color: var(--color-main-text);
+  border-radius: 6px;
+  box-shadow: 0 2px 4px var(--ot-shadow-40);
+  font-family: var(--font-family-base);
+  font-size: 14px;
+  user-select: none;
+}
+
+.ot-chart-ctx-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--color-divider);
+}
+
+.ot-chart-ctx-item {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding-inline-end: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ot-chart-ctx-item:hover,
+.ot-chart-ctx-item.is-active {
+  background-color: var(--color-popup-element-background-hover);
+}
+.ot-chart-ctx-item.is-disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ot-chart-ctx-item.is-disabled:hover {
+  background: transparent;
+}
+
+/* 36px icon cell — reserved even when an item has no leading icon, so labels
+   stay aligned. */
+.ot-chart-ctx-icon {
+  flex: 0 0 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-main-text);
+}
+
+.ot-chart-ctx-label {
+  flex: 1 1 auto;
+}
+
+/* Remove button of a removable row (saved chart templates), shown on hover. */
+.ot-chart-ctx-remove {
+  all: unset;
+  margin-inline-start: auto;
+  padding-inline-start: 12px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-secondary);
+  visibility: hidden;
+  cursor: default;
+}
+.ot-chart-ctx-item:hover .ot-chart-ctx-remove {
+  visibility: visible;
+}
+.ot-chart-ctx-remove:hover {
+  color: var(--color-text-primary);
+}
+
+.ot-chart-ctx-shortcut {
+  margin-inline-start: 24px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.ot-chart-ctx-arrow {
+  margin-inline-start: 12px;
+  color: var(--color-cold-gray-400);
+}
+
+/* Submenu (Chart template) is a second floating menu; narrower than the root. */
+.ot-chart-ctx-submenu {
+  min-width: 120px;
+}

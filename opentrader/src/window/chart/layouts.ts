@@ -1,0 +1,398 @@
+/*
+ * Multi-chart layout templates.
+ *
+ * The layout-setup menu exposes tile variants whose ids look like
+ * `layouts-list-item-<token>`.  The trailing
+ * <token> matches the `layout` field of the persisted ChartLayout content
+ * blob.
+ *
+ * Each entry in LAYOUT_SPECS describes the geometry needed to render the
+ * template via CSS Grid:
+ *   - `cols`/`rows`: grid track counts (drive grid-template-columns/rows
+ *     as `repeat(N, 1fr)`).
+ *   - `cells`: one entry per chart pane.  When `col`/`row` is set it's
+ *     applied as the cell's `gridColumn` / `gridRow` (so spans, manual
+ *     positions, and explicit line ranges work).  When omitted, cells flow
+ *     in document order via the grid's auto-placement.
+ *
+ * Geometries were lifted from the in-app menu thumbnails (the SVGs under
+ * src/assets/icons/menu-layout-setup-layouts-list-item-*.svg).  Naming
+ * conventions:
+ *   - `Nh` = N columns × 1 row (horizontal strip).
+ *   - `Nv` = 1 column × N rows (vertical strip).
+ *   - `Ns` = 1 big left + N-1 stacked right (sidebar).
+ *   - `Ns-l` = mirror of `Ns` (N-1 stacked left + 1 big right).
+ *   - `a-b` (and `a-b-c…`) = each segment is a row; first row has `a`
+ *     panes, second row `b` panes, etc., split into equal columns per
+ *     row.  Row heights are equal.
+ *   - `NcM` = grid with N total cells, M per row in the two-row grids
+ *     (`10c5` … `16c8`), M per column in `12c4` / `16c4`.
+ *   - `2-2`/`2-2-l`/`2-2-r`/`2-3-l`/`2-3-r` = hybrid sidebars (see specs).
+ *
+ * `expr` is the same geometry as a split tree (see layout-sizes.ts): it
+ * places the cells and carries the draggable splitters between them.
+ *
+ * The cell index is the chart number: a template change keeps the first
+ * charts and adds the missing ones at the end.  Most templates number their
+ * charts in reading order; the two-row grids and `12c4` / `16c4` number them
+ * by column, the mirrored sidebars start with the large chart and `2-1` ends
+ * with the top-right one (LAYOUT_NUMBERING 2, see `renumberCharts`).
+ */
+import { cellRects, initialSizing, type LayoutExpr, type LayoutNode } from './layout-sizes';
+
+export type CellSpec = {
+  /** CSS `gridColumn` value (e.g. "2", "1 / 3", "1 / span 2").  Omit to let
+   *  the grid auto-flow this cell. */
+  col?: string;
+  /** CSS `gridRow` value.  Same rules as `col`. */
+  row?: string;
+};
+
+export type LayoutSpec = {
+  cols: number;
+  rows: number;
+  cells: CellSpec[];
+  /** Split tree over the cell indexes. */
+  expr: LayoutExpr;
+};
+
+/* `count` cells from `first`, side by side ("h") or stacked ("v"); one cell
+ * is the cell itself. */
+function strip(dir: 'h' | 'v', first: number, count: number): LayoutExpr {
+  if (count === 1) return first;
+  return [dir, ...Array.from({ length: count }, (_, i) => first + i)] as LayoutNode;
+}
+
+/* Build a uniform grid of `cols × rows`, all cells auto-placed.  When
+ * `count` is set it overrides the cell count (e.g. for a sparse grid). */
+function grid(cols: number, rows: number, count?: number): LayoutSpec {
+  return {
+    cols,
+    rows,
+    cells: Array.from({ length: count ?? cols * rows }, () => ({})),
+    expr: rows === 1
+      ? strip('h', 0, cols)
+      : (['v', ...Array.from({ length: rows }, (_, r) => strip('h', r * cols, cols))] as LayoutNode),
+  };
+}
+
+/* Uniform grid of `cols × rows` numbered by column: top to bottom, then the
+ * next column. */
+function gridByColumn(cols: number, rows: number): LayoutSpec {
+  return {
+    cols,
+    rows,
+    cells: Array.from({ length: cols * rows }, (_, i) => ({ col: `${Math.floor(i / rows) + 1}`, row: `${(i % rows) + 1}` })),
+    expr: ['v', ...Array.from({ length: rows }, (_, r) =>
+      ['h', ...Array.from({ length: cols }, (_, c) => c * rows + r)] as LayoutNode)] as LayoutNode,
+  };
+}
+
+/* Sidebar layouts — one full-height column on `side`, the other column
+ * split into `stack` equal stacked panes.  Pane count = stack + 1.  With
+ * `largeFirst` the full-height chart of a right sidebar is the first one. */
+function sidebar(side: 'L' | 'R', stack: number, largeFirst = false): LayoutSpec {
+  const cells: CellSpec[] = [];
+  if (side === 'L') {
+    cells.push({ col: '1', row: `1 / span ${stack}` });
+    for (let i = 1; i <= stack; i++) cells.push({ col: '2', row: `${i}` });
+  } else if (largeFirst) {
+    cells.push({ col: '2', row: `1 / span ${stack}` });
+    for (let i = 1; i <= stack; i++) cells.push({ col: '1', row: `${i}` });
+  } else {
+    for (let i = 1; i <= stack; i++) cells.push({ col: '1', row: `${i}` });
+    cells.push({ col: '2', row: `1 / span ${stack}` });
+  }
+  const expr: LayoutNode =
+    side === 'L' ? ['h', 0, strip('v', 1, stack)]
+    : largeFirst ? ['h', strip('v', 1, stack), 0]
+    : ['h', strip('v', 0, stack), stack];
+  return { cols: 2, rows: stack, cells, expr };
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b);
+}
+function lcm(a: number, b: number): number {
+  return (a * b) / gcd(a, b);
+}
+
+/* Row-decomposed layouts (`a-b`, `a-b-c`, …).  Each segment is a row of
+ * equal-width panes; the grid uses LCM of segment widths so every pane is
+ * an integer span.  Row heights are equal. */
+function rowSplit(...rowCounts: number[]): LayoutSpec {
+  const cols = rowCounts.reduce((acc, n) => lcm(acc, n), 1);
+  const cells: CellSpec[] = [];
+  rowCounts.forEach((n, rIdx) => {
+    const span = cols / n;
+    for (let i = 0; i < n; i++) {
+      cells.push({
+        col: `${i * span + 1} / span ${span}`,
+        row: `${rIdx + 1}`,
+      });
+    }
+  });
+  let first = 0;
+  const expr = ['v', ...rowCounts.map((n) => {
+    const row = strip('h', first, n);
+    first += n;
+    return row;
+  })] as LayoutNode;
+  return { cols, rows: rowCounts.length, cells, expr };
+}
+
+/* The 55 templates exposed by the layout-setup dropdown. */
+export const LAYOUT_SPECS = {
+  // Single pane.
+  's': grid(1, 1),
+
+  // 2-pane.
+  '2h': grid(2, 1),
+  '2v': grid(1, 2),
+
+  // 3-pane.
+  '3h': grid(3, 1),
+  '3v': grid(1, 3),
+  '3s': sidebar('L', 2),
+  '3r': sidebar('R', 2),
+  // 2-1: the bottom chart is the second one, the top-right one the third.
+  '2-1': {
+    cols: 2,
+    rows: 2,
+    cells: [
+      { col: '1', row: '1' },
+      { col: '1 / span 2', row: '2' },
+      { col: '2', row: '1' },
+    ],
+    expr: ['v', ['h', 0, 2], 1],
+  },
+  '1-2': rowSplit(1, 2),
+
+  // 4-pane.
+  '4': gridByColumn(2, 2),
+  '4v': grid(1, 4),
+  '4h': grid(4, 1),
+  '4s': sidebar('L', 3),
+  '4s-l': sidebar('R', 3, true),
+  '1-3': rowSplit(1, 3),
+  '3-1': rowSplit(3, 1),
+  // 2-2: 2 cols on a half-height top row, then two stacked full-width rows.
+  '2-2': {
+    cols: 2,
+    rows: 4,
+    cells: [
+      { col: '1', row: '1 / span 2' },
+      { col: '2', row: '1 / span 2' },
+      { col: '1 / span 2', row: '3' },
+      { col: '1 / span 2', row: '4' },
+    ],
+    expr: ['v', ['h', 0, 1], ['v', 2, 3]],
+  },
+  // 2-2-l: 2 full-height left cols + 2 stacked right cells.
+  '2-2-l': {
+    cols: 3,
+    rows: 2,
+    cells: [
+      { col: '1', row: '1 / span 2' },
+      { col: '2', row: '1 / span 2' },
+      { col: '3', row: '1' },
+      { col: '3', row: '2' },
+    ],
+    expr: ['h', 0, 1, ['v', 2, 3]],
+  },
+  // 2-2-r: mirror of 2-2-l.
+  '2-2-r': {
+    cols: 3,
+    rows: 2,
+    cells: [
+      { col: '1', row: '1' },
+      { col: '1', row: '2' },
+      { col: '2', row: '1 / span 2' },
+      { col: '3', row: '1 / span 2' },
+    ],
+    expr: ['h', ['v', 0, 1], 2, 3],
+  },
+
+  // 5-pane.
+  '1-4': rowSplit(1, 4),
+  '5h': grid(5, 1),
+  '5v': grid(1, 5),
+  '5s': sidebar('L', 4),
+  '5s-l': sidebar('R', 4, true),
+  '2-3': rowSplit(2, 3),
+  '3-2': rowSplit(3, 2),
+  '4-1': rowSplit(4, 1),
+  // 2-3-l: 2 full-height left cols + 3 stacked right cells.
+  '2-3-l': {
+    cols: 3,
+    rows: 3,
+    cells: [
+      { col: '1', row: '1 / span 3' },
+      { col: '2', row: '1 / span 3' },
+      { col: '3', row: '1' },
+      { col: '3', row: '2' },
+      { col: '3', row: '3' },
+    ],
+    expr: ['h', 0, 1, ['v', 2, 3, 4]],
+  },
+  '2-3-r': {
+    cols: 3,
+    rows: 3,
+    cells: [
+      { col: '1', row: '1' },
+      { col: '1', row: '2' },
+      { col: '1', row: '3' },
+      { col: '2', row: '1 / span 3' },
+      { col: '3', row: '1 / span 3' },
+    ],
+    expr: ['h', ['v', 0, 1, 2], 3, 4],
+  },
+
+  // 6-pane.
+  '6': gridByColumn(3, 2),
+  '6h': grid(6, 1),
+  '6v': grid(1, 6),
+  '6c': grid(2, 3),
+  '2-4': rowSplit(2, 4),
+  '4-2': rowSplit(4, 2),
+
+  // 7-pane.
+  '4-3': rowSplit(4, 3),
+  '7h': grid(7, 1),
+  '7s': sidebar('L', 6),
+
+  // 8-pane.
+  '8': gridByColumn(4, 2),
+  '8c': grid(2, 4),
+  '8h': grid(8, 1),
+  '8v': grid(1, 8),
+
+  // 9-pane.
+  '9s': grid(3, 3),
+  '5-4': rowSplit(5, 4),
+  '9h': grid(9, 1),
+  '9v': grid(1, 9),
+
+  // 10-pane.
+  '10c5': gridByColumn(5, 2),
+  '10h': grid(10, 1),
+  '10v': grid(1, 10),
+
+  // 12-pane.
+  '12c6': gridByColumn(6, 2),
+  '12c4': gridByColumn(3, 4),
+  '12h': grid(12, 1),
+
+  // 14-pane.
+  '14c7': gridByColumn(7, 2),
+
+  // 16-pane.
+  '16c8': gridByColumn(8, 2),
+  '16c4': gridByColumn(4, 4),
+} as const satisfies Record<string, LayoutSpec>;
+
+export type LayoutId = keyof typeof LAYOUT_SPECS;
+
+export const DEFAULT_LAYOUT: LayoutId = 's';
+
+const ALL_LAYOUT_IDS = new Set<string>(Object.keys(LAYOUT_SPECS));
+
+/** Revision of the chart numbering inside the templates, stamped on tabs and
+ *  saved layouts (absent = 1, every template in reading order). */
+export const LAYOUT_NUMBERING = 2;
+
+/* Reading-order index → index by column, for a grid of `cols × rows`. */
+function byColumn(cols: number, rows: number): number[] {
+  return Array.from({ length: cols * rows }, (_, i) => (i % cols) * rows + Math.floor(i / cols));
+}
+
+/* Templates renumbered by LAYOUT_NUMBERING 2: index before → index now.
+ * `12c4` was 3 rows of 4: its charts keep their reading order. */
+const RENUMBERED: Partial<Record<LayoutId, number[]>> = {
+  '4': byColumn(2, 2),
+  '6': byColumn(3, 2),
+  '8': byColumn(4, 2),
+  '10c5': byColumn(5, 2),
+  '12c6': byColumn(6, 2),
+  '14c7': byColumn(7, 2),
+  '16c8': byColumn(8, 2),
+  '12c4': byColumn(3, 4),
+  '16c4': byColumn(4, 4),
+  '2-1': [0, 2, 1],
+  '4s-l': [1, 2, 3, 0],
+  '5s-l': [1, 2, 3, 4, 0],
+};
+
+/** Stored charts of a tab / saved layout brought to the current numbering, so
+ *  that every chart stays at its place on screen.  Returns `state` itself when
+ *  it is already current. */
+export function renumberCharts<T extends { layout?: unknown; panes?: unknown; activePane?: unknown; numbering?: unknown }>(state: T): T {
+  if (!state || typeof state !== 'object' || state.numbering === LAYOUT_NUMBERING) return state;
+  const map = RENUMBERED[state.layout as LayoutId];
+  const panes = state.panes;
+  if (!map || !Array.isArray(panes) || panes.length !== map.length) return { ...state, numbering: LAYOUT_NUMBERING };
+  const next = new Array(panes.length);
+  map.forEach((to, from) => { next[to] = panes[from]; });
+  const active = state.activePane;
+  return {
+    ...state,
+    panes: next,
+    activePane: typeof active === 'number' && Number.isInteger(active) && active >= 0 && active < map.length ? map[active] : active,
+    numbering: LAYOUT_NUMBERING,
+  };
+}
+
+/** Number of chart panes the template renders. */
+export function paneCount(id: LayoutId): number {
+  return LAYOUT_SPECS[id].cells.length;
+}
+
+/** Chart indexes in reading order (top to bottom, then left to right), the
+ *  order Tab / Shift+→ walk through.  Boxes come from equal splits: the
+ *  splitter sizes do not change the order. */
+export function readingOrder(id: LayoutId): number[] {
+  const expr = LAYOUT_SPECS[id].expr;
+  const rects = cellRects(expr, { left: 0, top: 0, width: 256, height: 256 }, 0, initialSizing(expr));
+  return rects.map((_, i) => i).sort((a, b) => rects[a].top - rects[b].top || rects[a].left - rects[b].left);
+}
+
+/** Chart after (or before, `back`) `current` in reading order, wrapping
+ *  around. */
+export function adjacentChart(id: LayoutId, current: number, back: boolean): number {
+  const order = readingOrder(id);
+  const at = order.indexOf(current);
+  if (at < 0) return current;
+  return order[(at + (back ? order.length - 1 : 1)) % order.length];
+}
+
+/* Translate the menu's variant id (`layouts-list-item-<token>`) to the
+ * layout token used as the LAYOUT_SPECS key.  Unknown tokens fall back to
+ * the default single-pane layout — keeps the menu responsive even if a new
+ * variant ships before this map is updated. */
+export function layoutFromVariantId(variantId: string): LayoutId {
+  const m = /^layouts-list-item-(.+)$/.exec(variantId);
+  if (!m) return DEFAULT_LAYOUT;
+  const token = m[1];
+  return ALL_LAYOUT_IDS.has(token) ? (token as LayoutId) : DEFAULT_LAYOUT;
+}
+
+/** Inverse — the variant id that should appear selected for a given layout.
+ *  Used by the menu to highlight the active template tile. */
+export function variantIdForLayout(layout: LayoutId): string {
+  return `layouts-list-item-${layout}`;
+}
+
+/* Icon name shown on the header toolbar's layout-setup button, swapped to
+ * match the active layout (with layout="3s" the button renders
+ * menu-layout-setup-layouts-list-item-3s.svg).
+ *
+ * Most variants use a per-id variant icon; the two exceptions ride on the
+ * parent group icon because they have no variant-specific SVG:
+ *   - 's'   → menu-layout-setup-1
+ *   - '14c7' → menu-layout-setup-14
+ */
+export function iconNameForLayout(layout: LayoutId): string {
+  if (layout === 's') return 'menu-layout-setup-1';
+  if (layout === '14c7') return 'menu-layout-setup-14';
+  return `menu-layout-setup-layouts-list-item-${layout}`;
+}

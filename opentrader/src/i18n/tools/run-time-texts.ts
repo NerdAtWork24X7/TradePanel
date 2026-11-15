@@ -1,0 +1,128 @@
+/*
+ * Texts the interface shows that the extractor can't find in the code: written by a library, or held where the
+ * scanner doesn't look (a tuple, a field read by another module). The catalog lists them from here; each group says
+ * where the text comes from, and a text leaves this list when its source no longer shows it.
+ */
+import type { FoundText } from "./catalog";
+
+const GROUPS: Record<string, string[]> = {
+  "drawing library, labels translated by i18n/drawing-labels.ts": [
+    "Left Shoulder",
+    "Head",
+    "Right Shoulder",
+    "SUCCESS",
+    "FAILURE",
+    "Target",
+    "Stop",
+    "Amount",
+    "Open PnL",
+    "Closed PnL",
+    "PnL",
+    "Qty",
+    "Risk/reward ratio",
+  ],
+  "indicator library, text the studies draw": [
+    "Avgs",
+    "Pos%",
+    "Zero line",
+    "No gaps found on the current chart.",
+    "The cause could be that some exchanges align the open of new bars on the close of the previous one, resulting in charts with no gaps. Alternatively, your Minimal Deviation might be too high.",
+  ],
+  "data/alert-condition.ts, band operators (bandOperatorLabel) and OPERATOR_LABELS": [
+    "Entering Channel",
+    "Exiting Channel",
+    "Inside Channel",
+    "Outside Channel",
+    "Entering rectangle",
+    "Exiting rectangle",
+    "Inside rectangle",
+    "Outside rectangle",
+    "alert() function calls only",
+  ],
+  "window/trading/ticket-labels.ts and TicketFields.tsx, order ticket fields": [
+    "Cash amount you will gain if the take profit is executed",
+    "Cash amount you will lose if the stop loss is executed",
+    "Percentage of equity you will gain if the take profit is executed",
+    "Percentage of equity you will lose if the stop loss is executed",
+    "Reward % balance",
+    "Risk % balance",
+    "Shares",
+    "Units",
+    "Limit price",
+    "Stop price",
+  ],
+  "data/trading/replay-account.ts, order comments and rejections": ["Close position (partial)", "Invalid quantity"],
+  "window/trading/AccountManager.tsx, the account bar's value explanations (a tuple)": ["The margin your open positions hold", "What is left for new orders"],
+  "window/oakscript and chart/indicators, script and study errors shown in the console and on the chart": [
+    "Protocol mismatch.",
+    "Script no longer exists.",
+    "Script transform failed.",
+    "The script must declare strategy() and run its logic in strategy.eachBar().",
+    "This symbol doesn't exist, please pick another one.",
+  ],
+  "window/drawings/DrawingToolbar.tsx, magnet modes": ["Weak magnet", "Strong magnet"],
+  "volume profile, rows layout option": ["Number Of Rows"],
+  // The words too: a sense falls back to its word ("right" is already the side).
+  "data/providers/gateway.ts TYPE_LABELS and data/symbol-search.ts, the market type of a symbol search row": [
+    "stock",
+    "dr",
+    "etf",
+    "etn",
+    "fund",
+    "preferred",
+    "unit",
+    "structured",
+    "bond",
+    "index",
+    "futures",
+    "forex",
+    "crypto",
+    "options",
+    "warrant",
+    "stock|market",
+    "dr|market",
+    "etf|market",
+    "etn|market",
+    "fund|market",
+    "preferred|market",
+    "warrant|market",
+    "right|market",
+    "unit|market",
+    "structured|market",
+    "bond|market",
+    "index|market",
+    "futures|market",
+    "forex|market",
+    "crypto|market",
+    "options|market",
+  ],
+  // "Money" is also the profit and loss shown as an amount (chart settings), "Trade" the header's trading button: the
+  // categories have their own sense.
+  "data/datafeed.ts ECONOMIC_CATEGORIES, the symbol search's economic categories": [
+    "GDP",
+    "Labor",
+    "Prices",
+    "Health",
+    "Money|economy",
+    "Trade|economy",
+    "Government",
+    "Business",
+    "Consumer",
+    "Housing",
+    "Taxes",
+  ],
+  "data/chart-properties.ts, Scales > Time hours format (written like an id, the scanner leaves them)": ["24-hours", "12-hours"],
+  "data/community/api.ts, the errors the community panel shows when the server can't be reached (offline, or online but no answer)": [
+    "Community is unreachable. Check your connection.",
+    "The community server is not responding. Try again later.",
+  ],
+  // "Update" is also the verb of a button: a reply kind of a community post is a noun.
+  "community-shared/post-thread.ts KIND_LABEL, the kind of a reply to a community post": ["Update|post"],
+  "data/screener-catalog.ts DEFAULT_SCREEN_TITLE and data/oakscript-store.ts DEFAULT_SCRIPT_NAME, a new screen's and script's name, translated while it is unchanged": [
+    "Untitled screen",
+    "Untitled script",
+  ],
+  "window/right-rail/AlertsPanel.tsx, the Log tab (SegmentedControl sense)": ["Log|history"],
+};
+
+export const RUN_TIME_TEXTS: FoundText[] = Object.entries(GROUPS).flatMap(([at, texts]) => texts.map((text) => ({ text, at: `run time: ${at}` })));

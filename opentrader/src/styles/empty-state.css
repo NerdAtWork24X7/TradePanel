@@ -1,0 +1,12 @@
+/*
+ * `.ot-empty-state` — centred, dimmed, italic placeholder text shown when
+ * a panel has no rows to display.  Used by Alerts (no events), Object
+ * Tree (data window pending), Symbol Search (no results).
+ */
+.ot-empty-state {
+  padding: 32px 16px;
+  text-align: center;
+  font-style: italic;
+  font-size: 12px;
+  color: var(--color-content-primary-neutral);
+}

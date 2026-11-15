@@ -1,0 +1,41 @@
+// The web version on Cloudflare: static frontend + one server container.
+// Deployed by .github/workflows/web-image.yml (needs Docker to build the image).
+// Secret: OPENTRADER_GATEWAY_TOKEN (`wrangler secret put`).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "opentrader-web",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  // The public address (Cloudflare creates its DNS record and certificate).
+  "routes": [{ "pattern": "demo.opentrader.markets", "custom_domain": true }],
+  "assets": {
+    "directory": "../../dist-web",
+    "binding": "ASSETS",
+    // The app has one page, "/": any other address is "not found" (src/index.ts).
+    "not_found_handling": "none",
+    "run_worker_first": ["/api/*", "/ingest/*"]
+  },
+  "containers": [
+    {
+      "class_name": "OpenTraderServer",
+      "image": "../../src-tauri/crates/server/Dockerfile",
+      "image_build_context": "../..",
+      "instance_type": "basic",
+      // 2: a renamed instance (see INSTANCE) starts while the old one winds down.
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "SERVER", "class_name": "OpenTraderServer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["OpenTraderServer"] }],
+  // No keep-awake ping: the container stops when idle (#251). Empty, so a deploy removes the old one.
+  "triggers": { "crons": [] },
+  "vars": {
+    "PUBLIC_ORIGIN": "https://demo.opentrader.markets,https://opentrader-web.cloudflare-breeder165.workers.dev",
+    // The gateway's BLOCKED_ASNS: those networks get no API and their usage statistics are dropped.
+    "BLOCKED_ASNS": "31898,32934,45102,3258"
+  },
+  "observability": { "enabled": true }
+}

@@ -1,0 +1,532 @@
+/*
+ * Strategy Tester — the reference desktop app 3.4.1 footer report panel
+ * (.tmp/backtester/design/doc/STRATEGY-TESTER-DESIGN-3.4.1.md).
+ *
+ * Shown under the chart while the active chart holds a strategy, Bar Replay
+ * is on, the trade journal is open or a broker plugin is connected (its account
+ * manager, #315): a 38 px
+ * footer bar with one tab per strategy (icon + short title + caret menu) and
+ * Collapse / Maximize buttons, then the report (toolbar + Metrics or Trades
+ * view). Clicking the active tab closes (collapses) the report.
+ *
+ * The report is the one computed for the active chart (strategy-tester-store,
+ * written by the strategy registry entries when the backtest worker answers).
+ */
+import { Show, For, createEffect, createMemo, createSignal, on } from "solid-js";
+import { Icon } from "../../components/Icon";
+import { Tooltip } from "../../components/Tooltip";
+import { Popover, PopItem, PopDivider } from "../screener/Popover";
+import { strategyTester } from "../../data/strategy-tester-store";
+import { getStrategyEntry, hasHistoryTickOption, strategyDefKeyOf, strategyDefaults, strategyKeyOf } from "../chart/indicators/strategy-entries";
+import { STRATEGIES } from "../../backtester/strategies";
+import { ReportToolbar } from "./ReportToolbar";
+import { KeyStatsInline, MetricsView } from "./MetricsView";
+import { TradesView } from "./TradesView";
+import { ReplayTradingReport } from "../replay/ReplayTradingReport";
+import { TradeJournalView } from "../trade-journal/TradeJournalView";
+import { JournalMenu } from "../trade-journal/JournalMenu";
+import { ImportTradesHost } from "../trade-journal/ImportTradesDialog";
+import { tradeJournal } from "../../data/trade-journal";
+import { replayStarted } from "../../data/replay";
+import { tradingUi } from "../../data/trading/trading-ui";
+import { pluginBroker } from "../../data/trading/plugin-broker";
+import { AccountManager, AccountTabTitle } from "../trading/AccountManager";
+import { replayBroker } from "../../data/trading/replay-broker";
+import { cachedSymbolSessions, symbolSessions } from "../../data/session";
+import { DEFAULT_SYMBOL, type BacktestReport } from "../../backtester/types";
+import { REPLAY_TABS, STRATEGY_TABS, reportSheets, reportXlsxFileName, type ReportTab } from "./xlsx-report";
+import { buildXlsx } from "./xlsx-writer";
+
+/** Tab id of the Replay Trading tab (strategy tabs use their study ids). */
+const REPLAY_TAB = "replay-trading";
+/** Tab id of the trade journal tab. */
+const JOURNAL_TAB = "trade-journal";
+/** Tab id of the connected broker's account manager. */
+const ACCOUNT_TAB = "broker-account";
+/** The tabs that are not strategies. */
+const OWN_TABS = [REPLAY_TAB, JOURNAL_TAB, ACCOUNT_TAB];
+
+/** Report content height when the panel opens (MEASURED: 275 px under the 38 px bar). */
+const DEFAULT_HEIGHT = 275;
+const MIN_HEIGHT = 120;
+const CHART_MIN = 150;
+const FOOTER = 38;
+
+type Props = {
+  /** Strategy study ids (`strategy:<key>`) on the active chart, in legend order. */
+  strategyIds: string[];
+  /** Interval of the active chart (intraday dates show the time). */
+  intraday: boolean;
+  /** Interval of the active chart in seconds (equity chart Whitespaces). */
+  intervalSec: number;
+  /** Active chart interval ("5", "1D"...) and symbol (EXCHANGE:TICKER): CSV export. */
+  interval: string;
+  symbol: string;
+  /** Open the strategy settings; `tab` forces a tab (report toolbar gear = Properties). */
+  onSettings: (id: string, tab?: "properties") => void;
+  onAddStrategy: () => void;
+  /** Merge strategy property overrides (e.g. initial capital) into the study. */
+  onPatchProperties: (id: string, patch: Record<string, unknown>) => void;
+  /** Current property overrides of a study. */
+  properties: (id: string) => Record<string, unknown>;
+  /** Jump the chart to a bar time (UNIX seconds). */
+  onShowOnChart: (timeSec: number) => void;
+  /** Show a symbol on the active chart (an account manager row). */
+  onSymbol: (symbol: string) => void;
+  /** The Replay Trading tab exists (the Bar Replay toolbar shows). */
+  replayTab?: boolean;
+  /** Chart type of the active chart (synthetic types: no High detalization, no history ticks). */
+  chartStyle?: string;
+  /** Chart time zone: its menu label and the IANA zone it shows (trade journal). */
+  timeZone: { label: string; iana: string };
+};
+
+export function StrategyTesterPanel(props: Props) {
+  let rootRef: HTMLElement | undefined;
+  /** A broker plugin is connected: its account manager is a tab. */
+  const accountShown = () => !!pluginBroker.status()?.active;
+  const [selected, setSelected] = createSignal<string | null>(null);
+  const [menuFor, setMenuFor] = createSignal<{ id: string; anchor: HTMLElement } | null>(null);
+
+  // Keep a valid selection: the last strategy added when the current one left
+  // (the Replay Trading tab while it exists and no strategy is left).
+  createEffect(() => {
+    const ids = props.strategyIds;
+    const cur = selected();
+    if (cur === REPLAY_TAB && props.replayTab) return;
+    if (cur === JOURNAL_TAB && tradeJournal.open()) return;
+    if (cur === ACCOUNT_TAB && accountShown()) return;
+    if (!cur || !ids.includes(cur))
+      setSelected(ids[ids.length - 1] ?? (props.replayTab ? REPLAY_TAB : tradeJournal.open() ? JOURNAL_TAB : accountShown() ? ACCOUNT_TAB : null));
+  });
+  // The account manager tab comes forward when a broker is connected (Trade > Account manager asks for it too).
+  createEffect(
+    on(accountShown, (shown, was) => {
+      if (shown && !was) setSelected(ACCOUNT_TAB);
+    }),
+  );
+  createEffect(
+    on(
+      tradingUi.accountRequest,
+      () => {
+        if (!accountShown()) return;
+        setSelected(ACCOUNT_TAB);
+        strategyTester.setCollapsed(false);
+      },
+      { defer: true },
+    ),
+  );
+  // The trade journal tab is brought forward when it opens.
+  createEffect(
+    on(tradeJournal.open, (shown, was) => {
+      if (shown && !was) {
+        setSelected(JOURNAL_TAB);
+        strategyTester.setCollapsed(false);
+      }
+    }),
+  );
+  // The Replay Trading tab is brought forward when it appears (the reference app's
+  // setAsActive) and on "Open full report".
+  const showReplayTab = () => {
+    setSelected(REPLAY_TAB);
+    strategyTester.setCollapsed(false);
+  };
+  createEffect(
+    on(
+      () => !!props.replayTab,
+      (shown, was) => {
+        if (shown && !was) showReplayTab();
+      },
+    ),
+  );
+  createEffect(
+    on(
+      tradingUi.reportRequest,
+      () => {
+        if (props.replayTab) showReplayTab();
+      },
+      { defer: true },
+    ),
+  );
+
+  const title = (id: string) => {
+    const def = STRATEGIES.find((s) => s.key === strategyDefKeyOf(id));
+    const entry = getStrategyEntry(id) as { name?: string; shortName?: string } | undefined;
+    return def?.shortTitle ?? entry?.shortName ?? entry?.name ?? id;
+  };
+  const run = createMemo(() => {
+    const id = selected();
+    return id && !OWN_TABS.includes(id) ? strategyTester.run(strategyTester.activeChartId(), strategyKeyOf(id)) : undefined;
+  });
+
+  /** "Download data as XLSX": the report's workbook (the reference app's
+   *  sheets, see xlsx-report.ts). */
+  const reportOf = (id: string): BacktestReport | null =>
+    id === REPLAY_TAB ? replayBroker.report() : strategyTester.run(strategyTester.activeChartId(), strategyKeyOf(id))?.report ?? null;
+  async function downloadXlsx(id: string) {
+    const report = reportOf(id);
+    if (!report) return;
+    const sym = props.symbol ?? "";
+    const sessions = cachedSymbolSessions(sym) ?? (sym ? await symbolSessions(sym).catch(() => null) : null);
+    const tabs: ReportTab[] = id === REPLAY_TAB ? REPLAY_TABS : STRATEGY_TABS;
+    const sheets = reportSheets(
+      {
+        report,
+        symbol: sym,
+        interval: props.interval,
+        timeZone: sessions?.timeZone ?? DEFAULT_SYMBOL.timezone,
+        mintick: sessions?.mintick ?? DEFAULT_SYMBOL.mintick,
+        pointValue: DEFAULT_SYMBOL.pointValue,
+        priceCurrency: report.currency,
+      },
+      tabs,
+    );
+    const blob = new Blob([buildXlsx(sheets)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = reportXlsxFileName(id === REPLAY_TAB ? "Replay Trading" : title(id), sym);
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  const contentHeight = () => strategyTester.height() || DEFAULT_HEIGHT;
+  const maxContent = () => Math.max(MIN_HEIGHT, (rootRef?.parentElement?.clientHeight ?? 0) - CHART_MIN - FOOTER);
+
+  function beginResize(e: MouseEvent) {
+    if (strategyTester.collapsed() || strategyTester.maximized()) return;
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = contentHeight();
+    const maxH = maxContent();
+    const next = (ev: MouseEvent) => Math.min(maxH, Math.max(MIN_HEIGHT, startH + (startY - ev.clientY)));
+    const onMove = (ev: MouseEvent) => strategyTester.setHeight(next(ev), false);
+    const onUp = (ev: MouseEvent) => {
+      strategyTester.setHeight(next(ev), true);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+    };
+    document.body.style.cursor = "ns-resize";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  const style = () => {
+    if (strategyTester.maximized()) return { height: "100%" };
+    if (strategyTester.collapsed()) return { height: `${FOOTER}px` };
+    return { height: `${FOOTER + contentHeight()}px` };
+  };
+
+  const onTabClick = (id: string) => {
+    if (id === selected() && !strategyTester.collapsed()) {
+      strategyTester.setCollapsed(true);
+      strategyTester.setMaximized(false);
+      return;
+    }
+    setSelected(id);
+    strategyTester.setCollapsed(false);
+  };
+
+  return (
+    <Show when={props.strategyIds.length > 0 || props.replayTab || tradeJournal.open() || accountShown()}>
+      <section
+        ref={rootRef}
+        class="st-panel"
+        classList={{ "is-collapsed": strategyTester.collapsed(), "is-maximized": strategyTester.maximized() }}
+        style={style()}
+        data-name="strategy-tester"
+        aria-label="Strategy report"
+      >
+        <Show when={!strategyTester.collapsed() && !strategyTester.maximized()}>
+          <div class="st-resize-handle" onMouseDown={beginResize} />
+        </Show>
+
+        {/* Footer bar: strategy tabs | Collapse / Maximize */}
+        <div class="st-footer" id="footer-chart-panel">
+          <div class="st-tabbar">
+            <div class="st-tabs" role="tablist">
+              <Show when={props.replayTab}>
+                {(() => {
+                  const active = () => selected() === REPLAY_TAB && !strategyTester.collapsed();
+                  let caretRef: HTMLButtonElement | undefined;
+                  return (
+                    <div class="st-tab rt-tab" classList={{ "is-active": active() }} role="tab" aria-selected={active()} data-name="replay-trading-tab">
+                      <Tooltip text={active() ? "Close Replay Trading" : "Open Replay Trading"} side="top">
+                        <button type="button" class="st-tab-btn" onClick={() => onTabClick(REPLAY_TAB)}>
+                          <span class="st-tab-icon rt-tab-icon">
+                            <Icon name="replay-status" size={18} />
+                            <Show when={replayStarted()}>
+                              <span class="rt-tab-dot" />
+                            </Show>
+                          </span>
+                          <span class="st-tab-title">Replay Trading</span>
+                        </button>
+                      </Tooltip>
+                      <Tooltip text="Open context menu" side="top">
+                        <button
+                          type="button"
+                          ref={caretRef}
+                          class="st-tab-caret"
+                          classList={{ "is-open": menuFor()?.id === REPLAY_TAB }}
+                          aria-label="Open context menu"
+                          onClick={() => setMenuFor(menuFor()?.id === REPLAY_TAB ? null : { id: REPLAY_TAB, anchor: caretRef! })}
+                        >
+                          <Icon name="st-footer-tab-caret" />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  );
+                })()}
+              </Show>
+              <Show when={accountShown()}>
+                {(() => {
+                  const active = () => selected() === ACCOUNT_TAB && !strategyTester.collapsed();
+                  return (
+                    <div class="st-tab" classList={{ "is-active": active() }} role="tab" aria-selected={active()} data-name="broker-account-tab">
+                      <Tooltip text={active() ? "Close account manager" : "Open account manager"} side="top">
+                        <button type="button" class="st-tab-btn" onClick={() => onTabClick(ACCOUNT_TAB)}>
+                          <span class="st-tab-icon">
+                            <span class="trd-status-dot" classList={{ "is-ok": pluginBroker.connected(), "is-failed": !pluginBroker.connected() }} />
+                          </span>
+                          <span class="st-tab-title">
+                            <AccountTabTitle />
+                          </span>
+                        </button>
+                      </Tooltip>
+                    </div>
+                  );
+                })()}
+              </Show>
+              <Show when={tradeJournal.open()}>
+                {(() => {
+                  const active = () => selected() === JOURNAL_TAB && !strategyTester.collapsed();
+                  let caretRef: HTMLButtonElement | undefined;
+                  return (
+                    <div class="st-tab" classList={{ "is-active": active() }} role="tab" aria-selected={active()} data-name="trade-journal-tab">
+                      <Tooltip text={active() ? "Close trade journal" : "Open trade journal"} side="top">
+                        <button type="button" class="st-tab-btn" onClick={() => onTabClick(JOURNAL_TAB)}>
+                          <span class="st-tab-icon">
+                            <Icon name="st-footer-tab-journal" size={24} />
+                          </span>
+                          <span class="st-tab-title">Trade journal</span>
+                        </button>
+                      </Tooltip>
+                      <Tooltip text="Open context menu" side="top">
+                        <button
+                          type="button"
+                          ref={caretRef}
+                          class="st-tab-caret"
+                          classList={{ "is-open": menuFor()?.id === JOURNAL_TAB }}
+                          aria-label="Open context menu"
+                          onClick={() => setMenuFor(menuFor()?.id === JOURNAL_TAB ? null : { id: JOURNAL_TAB, anchor: caretRef! })}
+                        >
+                          <Icon name="st-footer-tab-caret" />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  );
+                })()}
+              </Show>
+              <For each={props.strategyIds}>
+                {(id) => {
+                  const active = () => id === selected() && !strategyTester.collapsed();
+                  let caretRef: HTMLButtonElement | undefined;
+                  return (
+                    <div class="st-tab" classList={{ "is-active": active() }} role="tab" aria-selected={active()}>
+                      {/* "Close strategy report" while this tab's report shows
+                          (panel open, tab active), else "Open strategy report". */}
+                      <Tooltip text={active() ? "Close strategy report" : "Open strategy report"} side="top">
+                        <button type="button" class="st-tab-btn" onClick={() => onTabClick(id)}>
+                          <span class="st-tab-icon"><Icon name="st-footer-tab-strategy-icon" size={24} /></span>
+                          <span class="st-tab-title">{title(id)}</span>
+                        </button>
+                      </Tooltip>
+                      <Tooltip text="Open context menu" side="top">
+                        <button
+                          type="button"
+                          ref={caretRef}
+                          class="st-tab-caret"
+                          classList={{ "is-open": menuFor()?.id === id }}
+                          aria-label="Open context menu"
+                          onClick={() => setMenuFor(menuFor()?.id === id ? null : { id, anchor: caretRef! })}
+                        >
+                          <Icon name="st-footer-tab-caret" />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  );
+                }}
+              </For>
+            </div>
+          </div>
+          <div class="st-footer-buttons">
+            <Tooltip text={strategyTester.collapsed() ? "Open panel" : "Collapse panel"} side="top">
+              <button
+                type="button"
+                class="st-footer-btn"
+                aria-label={strategyTester.collapsed() ? "Open panel" : "Collapse panel"}
+                onClick={() => {
+                  const c = !strategyTester.collapsed();
+                  strategyTester.setCollapsed(c);
+                  if (c) strategyTester.setMaximized(false);
+                }}
+              >
+                <Icon name={strategyTester.collapsed() ? "st-footer-collapsed-visibility" : "st-footer-normal-visibility"} size={28} />
+              </button>
+            </Tooltip>
+            <Tooltip text={strategyTester.maximized() ? "Restore panel" : "Maximize panel"} side="top">
+              <button
+                type="button"
+                class="st-footer-btn"
+                aria-label={strategyTester.maximized() ? "Restore panel" : "Maximize panel"}
+                onClick={() => {
+                  const m = !strategyTester.maximized();
+                  strategyTester.setMaximized(m);
+                  if (m) strategyTester.setCollapsed(false);
+                }}
+              >
+                <Icon name={strategyTester.maximized() ? "st-footer-maximized-maximize" : "st-footer-normal-maximize"} size={28} />
+              </button>
+            </Tooltip>
+          </div>
+        </div>
+
+        <Show when={!strategyTester.collapsed()}>
+          <div class="st-report">
+            <Show when={selected() === REPLAY_TAB}>
+              <ReplayTradingReport
+                intraday={props.intraday}
+                intervalSec={props.intervalSec}
+                interval={props.interval}
+                symbol={props.symbol}
+                height={strategyTester.maximized() ? Infinity : contentHeight()}
+                onShowOnChart={props.onShowOnChart}
+              />
+            </Show>
+            <Show when={selected() === JOURNAL_TAB && tradeJournal.open()}>
+              <TradeJournalView timeZone={props.timeZone.iana} />
+            </Show>
+            <Show when={selected() === ACCOUNT_TAB && accountShown()}>
+              <AccountManager onSymbol={props.onSymbol} height={strategyTester.maximized() ? Infinity : contentHeight()} />
+            </Show>
+            <Show when={!OWN_TABS.includes(selected() ?? "") && selected()}>
+              {(id) => (
+                <>
+                  <Show
+                    when={strategyTester.equityExpanded() && strategyTester.view() === "metrics" && run()?.report}
+                    fallback={
+                      <ReportToolbar
+                        report={run()?.report ?? null}
+                        properties={props.properties(id())}
+                        onPatchProperties={(patch) => props.onPatchProperties(id(), patch)}
+                        onSettings={() => props.onSettings(id(), "properties")}
+                        symbol={props.symbol}
+                        interval={props.interval}
+                        chartStyle={props.chartStyle}
+                        defaults={strategyDefaults(id())}
+                        historyTicks={hasHistoryTickOption(id())}
+                        strategyName={title(id())}
+                      />
+                    }
+                  >
+                    {(report) => <KeyStatsInline report={report()} />}
+                  </Show>
+                  <div class="st-report-body">
+                    <Show
+                      when={run()?.report}
+                      fallback={
+                        <Show when={run()?.status === "error"}>
+                          <div class="st-report-message">{run()?.error?.message}</div>
+                        </Show>
+                      }
+                    >
+                      {(report) => (
+                        <Show
+                          when={strategyTester.view() === "metrics"}
+                          fallback={
+                            <TradesView
+                              report={report()}
+                              intraday={props.intraday}
+                              onShowOnChart={props.onShowOnChart}
+                              title={title(id())}
+                              symbol={props.symbol}
+                              interval={props.interval}
+                            />
+                          }
+                        >
+                          <MetricsView report={report()} intraday={props.intraday} intervalSec={props.intervalSec} onShowOnChart={props.onShowOnChart} symbol={props.symbol} />
+                        </Show>
+                      )}
+                    </Show>
+                  </div>
+                </>
+              )}
+            </Show>
+          </div>
+        </Show>
+
+        <Show when={menuFor()?.id === REPLAY_TAB ? menuFor() : null}>
+          {(m) => (
+            <Popover anchor={m().anchor} onClose={() => setMenuFor(null)} class="st-tab-menu" offset={{ x: 0, y: 4 }}>
+              <PopItem
+                title="Settings…"
+                icon="st-toolbar-settings"
+                disabled={!replayStarted()}
+                onClick={() => {
+                  setMenuFor(null);
+                  tradingUi.openReplaySettings();
+                }}
+              />
+              <PopItem
+                title="Download data as XLSX"
+                icon="st-trades-download-csv"
+                disabled={!replayBroker.report()}
+                onClick={() => {
+                  setMenuFor(null);
+                  void downloadXlsx(REPLAY_TAB);
+                }}
+              />
+            </Popover>
+          )}
+        </Show>
+        <Show when={menuFor()?.id === JOURNAL_TAB ? menuFor() : null}>
+          {(m) => <JournalMenu anchor={m().anchor} onClose={() => setMenuFor(null)} />}
+        </Show>
+        <Show when={tradeJournal.open()}>
+          <ImportTradesHost defaultSymbol={props.symbol} chartTimeZone={props.timeZone} />
+        </Show>
+        <Show when={!OWN_TABS.includes(menuFor()?.id ?? "") ? menuFor() : null}>
+          {(m) => (
+            <Popover anchor={m().anchor} onClose={() => setMenuFor(null)} class="st-tab-menu" offset={{ x: 0, y: 4 }}>
+              <PopItem
+                title="Settings…"
+                onClick={() => {
+                  const id = m().id; // read before closing: the menu's accessor goes stale
+                  setMenuFor(null);
+                  props.onSettings(id);
+                }}
+              />
+              <PopItem
+                title="Download data as XLSX"
+                disabled={!reportOf(m().id)}
+                onClick={() => {
+                  const id = m().id;
+                  setMenuFor(null);
+                  void downloadXlsx(id);
+                }}
+              />
+              <PopDivider />
+              <PopItem
+                title="Add strategy…"
+                onClick={() => {
+                  setMenuFor(null);
+                  props.onAddStrategy();
+                }}
+              />
+            </Popover>
+          )}
+        </Show>
+      </section>
+    </Show>
+  );
+}

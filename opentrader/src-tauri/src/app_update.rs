@@ -1,0 +1,534 @@
+/*
+ * In-app update, after the reference desktop app's AutoUpdateService (capture and
+ * rules: .tmp/app-update/doc).
+ *
+ *  - Check at startup, then every hour (the reference app's appinstaller HoursBetweenUpdateChecks
+ *    = 1), and again when Settings > About opens. Not on Linux (the reference app skips it too).
+ *  - A found update is downloaded silently (signature checked by the updater
+ *    plugin). The user is told only when it is ready to install. The download
+ *    is also kept on disk, so a later launch does not download it again (its
+ *    signature is checked again before use).
+ *  - Install on request ("Relaunch to update"): every window first writes its
+ *    pending settings, then the settings store and the window session go to
+ *    disk, then the installer runs and starts the new version.
+ *  - Install on a normal quit when an update is ready, without starting the app
+ *    again (the reference app relaunches only when the user asked for it).
+ *  - The installer runs silently (`installMode: quiet`, per-user install: no
+ *    window, no elevation). User data lives outside the install folder
+ *    (%APPDATA%\<identifier>), so the installer never touches it.
+ *  - Not in the reference app, for an app left open for days: a ready update
+ *    installs by itself (and the app starts again) once nobody has used the
+ *    app for `IDLE_BEFORE_INSTALL` and the update has waited
+ *    `READY_BEFORE_IDLE_INSTALL` with no alert on. When the gateway no longer
+ *    serves this version (`gateway::update_required`: the market data has
+ *    stopped), only the idle time holds it back; every window shows it
+ *    (`updateRequired`) and a check starts at once.
+ *
+ * One state for the whole app; windows follow it through `AppUpdateStatus`.
+ */
+use std::collections::HashSet;
+use opentrader_core::sync::LockExt;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+use base64::Engine as _;
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_store::StoreExt;
+use tauri_plugin_updater::{Update, Updater, UpdaterExt};
+use tauri_specta::Event;
+
+/// The reference app's statuses (`system-requirements-unmet` is macOS-only in the reference app and has no
+/// source here).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum UpdateState {
+    UpToDate,
+    Checking,
+    Downloading,
+    ReadyToInstall,
+    Installing,
+    Error,
+}
+
+/// Current update state, sent to every window on each change.
+#[derive(Clone, Debug, Serialize, Deserialize, specta::Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdateStatus {
+    pub state: UpdateState,
+    /// The new version while downloading / ready / installing.
+    pub version: Option<String>,
+    /// The gateway no longer serves this version: market data has stopped
+    /// until the app is updated.
+    pub update_required: bool,
+}
+
+/// Sent to every window right before the app exits (an update installs, or
+/// Exit in the main menu): write pending settings now, then call
+/// `app_settings_flushed`.
+#[derive(Clone, Debug, Serialize, Deserialize, specta::Type, Event)]
+pub struct BeforeExit {
+    /// The version about to install; None when the app just quits.
+    pub update: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildInfo {
+    pub version: String,
+    /// `YYYY-MM-DD` (UTC).
+    pub build_date: String,
+}
+
+pub struct AppUpdate {
+    status: Mutex<AppUpdateStatus>,
+    /// The downloaded, verified update.
+    ready: Mutex<Option<(Update, Vec<u8>)>>,
+    flushed: Mutex<HashSet<String>>,
+    flushed_notify: tokio::sync::Notify,
+    /// The ready version and since when it waits.
+    ready_since: Mutex<Option<(String, Instant)>>,
+    /// Last use of the app (any window, see `app_user_active`).
+    last_active: Mutex<Instant>,
+    /// An alert is on (`app_set_alerts_active`).
+    alerts_active: AtomicBool,
+    required: AtomicBool,
+}
+
+impl Default for AppUpdate {
+    fn default() -> Self {
+        Self {
+            status: Mutex::new(AppUpdateStatus { state: UpdateState::UpToDate, version: None, update_required: false }),
+            ready: Mutex::new(None),
+            flushed: Mutex::new(HashSet::new()),
+            flushed_notify: tokio::sync::Notify::new(),
+            ready_since: Mutex::new(None),
+            last_active: Mutex::new(Instant::now()),
+            alerts_active: AtomicBool::new(false),
+            required: AtomicBool::new(false),
+        }
+    }
+}
+
+const CHECK_EVERY: Duration = Duration::from_secs(60 * 60);
+/// Nobody used the app for this long: a ready update may install by itself.
+const IDLE_BEFORE_INSTALL: Duration = Duration::from_secs(2 * 60 * 60);
+/// How long a ready update waits for the user before installing when idle.
+const READY_BEFORE_IDLE_INSTALL: Duration = Duration::from_secs(3 * 24 * 60 * 60);
+/// How often the idle install looks.
+const IDLE_CHECK_EVERY: Duration = Duration::from_secs(5 * 60);
+/// Longest wait for the windows to write their settings before installing.
+const FLUSH_TIMEOUT: Duration = Duration::from_secs(3);
+/// The settings store file (src/data/kv.ts STORE_FILE).
+const STORE_FILE: &str = "opentrader.json";
+
+/// Release builds on Windows / macOS. A dev build checks only with
+/// `OPENTRADER_DEV_UPDATE=1` (the reference app's forceDevUpdate).
+fn enabled() -> bool {
+    if cfg!(target_os = "linux") {
+        return false;
+    }
+    !cfg!(debug_assertions) || std::env::var_os("OPENTRADER_DEV_UPDATE").is_some()
+}
+
+fn updater(app: &AppHandle) -> Result<Updater, String> {
+    #[allow(unused_mut)]
+    let mut builder = app.updater_builder();
+    // Dev builds may point at a local latest.json (the reference app's dev-app-update.yml).
+    #[cfg(debug_assertions)]
+    if let Ok(url) = std::env::var("OPENTRADER_UPDATE_ENDPOINT") {
+        let url = url.parse().map_err(|e| format!("OPENTRADER_UPDATE_ENDPOINT: {e}"))?;
+        builder = builder.endpoints(vec![url]).map_err(|e| e.to_string())?;
+    }
+    if let Some(proxy) = opentrader_core::net::proxy_url() {
+        builder = builder.proxy(proxy);
+    }
+    builder.build().map_err(|e| e.to_string())
+}
+
+fn set_status(app: &AppHandle, state: UpdateState, version: Option<String>) {
+    let update = app.state::<AppUpdate>();
+    let status = AppUpdateStatus { state, version, update_required: update.required.load(Ordering::Relaxed) };
+    *update.status.locked() = status.clone();
+    let _ = status.emit(app);
+}
+
+/// Start the check loop and the idle install (setup).
+pub fn init(app: &AppHandle) {
+    app.manage(AppUpdate::default());
+    // The gateway refusing this version: every window shows it, a check starts at once.
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut required = opentrader_core::data::gateway::update_required();
+        if required.wait_for(|r| *r).await.is_err() {
+            return;
+        }
+        let update = handle.state::<AppUpdate>();
+        update.required.store(true, Ordering::Relaxed);
+        let status = {
+            let mut st = update.status.locked();
+            st.update_required = true;
+            st.clone()
+        };
+        let _ = status.emit(&handle);
+        if enabled() {
+            check(&handle);
+        }
+    });
+    if !enabled() {
+        return;
+    }
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut tick = tokio::time::interval(CHECK_EVERY);
+        loop {
+            tick.tick().await;
+            check(&handle);
+        }
+    });
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut tick = tokio::time::interval(IDLE_CHECK_EVERY);
+        loop {
+            tick.tick().await;
+            if idle_install_due(&handle.state::<AppUpdate>(), Instant::now()) {
+                eprintln!("[app-update] installing while the app is idle");
+                if let Err(e) = install_now(&handle).await {
+                    eprintln!("[app-update] idle install: {e}");
+                }
+            }
+        }
+    });
+}
+
+/// A ready update installs by itself now: nobody used the app for
+/// `IDLE_BEFORE_INSTALL`, and the update waited `READY_BEFORE_IDLE_INSTALL`
+/// with no alert on, or this version is no longer served.
+fn idle_install_due(update: &AppUpdate, now: Instant) -> bool {
+    if update.status.locked().state != UpdateState::ReadyToInstall {
+        return false;
+    }
+    if now.saturating_duration_since(*update.last_active.locked()) < IDLE_BEFORE_INSTALL {
+        return false;
+    }
+    if update.required.load(Ordering::Relaxed) {
+        return true;
+    }
+    let waited = update.ready_since.locked().as_ref().map(|(_, since)| now.saturating_duration_since(*since));
+    waited.is_some_and(|w| w >= READY_BEFORE_IDLE_INSTALL) && !update.alerts_active.load(Ordering::Relaxed)
+}
+
+/// Start a check unless one is running or an install started (the reference app runs it only
+/// from up-to-date, ready-to-install or error).
+fn check(app: &AppHandle) {
+    let update = app.state::<AppUpdate>();
+    let prev = {
+        let mut st = update.status.locked();
+        if !matches!(st.state, UpdateState::UpToDate | UpdateState::ReadyToInstall | UpdateState::Error) {
+            return;
+        }
+        let prev = st.clone();
+        st.state = UpdateState::Checking;
+        prev
+    };
+    let _ = AppUpdateStatus { state: UpdateState::Checking, version: prev.version, update_required: prev.update_required }.emit(app);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = check_and_download(&app).await {
+            eprintln!("[app-update] {e}");
+            set_status(&app, UpdateState::Error, None);
+        }
+    });
+}
+
+async fn check_and_download(app: &AppHandle) -> Result<(), String> {
+    let found = updater(app)?.check().await.map_err(|e| format!("check: {e}"))?;
+    let state = app.state::<AppUpdate>();
+    let Some(update) = found else {
+        *state.ready.locked() = None;
+        clear_saved(app);
+        set_status(app, UpdateState::UpToDate, None);
+        return Ok(());
+    };
+    let version = update.version.clone();
+    let have = state.ready.locked().as_ref().is_some_and(|(u, _)| u.version == version);
+    if !have {
+        let bytes = match load_saved(app, &update) {
+            Some(bytes) => bytes,
+            None => {
+                set_status(app, UpdateState::Downloading, Some(version.clone()));
+                let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| format!("download {version}: {e}"))?;
+                keep_download(app, &update, &bytes);
+                bytes
+            }
+        };
+        *state.ready.locked() = Some((update, bytes));
+    }
+    {
+        let mut since = state.ready_since.locked();
+        if since.as_ref().is_none_or(|(v, _)| *v != version) {
+            *since = Some((version.clone(), Instant::now()));
+        }
+    }
+    set_status(app, UpdateState::ReadyToInstall, Some(version));
+    Ok(())
+}
+
+/// Folder of the kept download: `<version>.bin` (the installer) and
+/// `<version>.sig` (its signature as published).
+fn saved_dir(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_local_data_dir().ok().map(|d| d.join("updates"))
+}
+
+/// Remove the kept download (none is needed: up to date, or a newer one replaces it).
+fn clear_saved(app: &AppHandle) {
+    if let Some(dir) = saved_dir(app) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Keep the verified download of `update` for the next launches.
+fn keep_download(app: &AppHandle, update: &Update, bytes: &[u8]) {
+    let Some(dir) = saved_dir(app) else {
+        return;
+    };
+    clear_saved(app);
+    let kept = std::fs::create_dir_all(&dir)
+        .and_then(|_| std::fs::write(dir.join(format!("{}.bin", update.version)), bytes))
+        .and_then(|_| std::fs::write(dir.join(format!("{}.sig", update.version)), &update.signature));
+    if let Err(e) = kept {
+        eprintln!("[app-update] keep download {}: {e}", update.version);
+        clear_saved(app);
+    }
+}
+
+/// The kept download of `update` when it is the one published (same
+/// signature) and its signature still checks against the app's public key.
+fn load_saved(app: &AppHandle, update: &Update) -> Option<Vec<u8>> {
+    let dir = saved_dir(app)?;
+    let signature = std::fs::read_to_string(dir.join(format!("{}.sig", update.version))).ok()?;
+    if signature.trim() != update.signature.trim() {
+        return None;
+    }
+    let bytes = std::fs::read(dir.join(format!("{}.bin", update.version))).ok()?;
+    match verify(app, &bytes, &signature) {
+        Ok(()) => Some(bytes),
+        Err(e) => {
+            eprintln!("[app-update] kept download {} rejected: {e}", update.version);
+            clear_saved(app);
+            None
+        }
+    }
+}
+
+/// Check `bytes` against `signature` (base64 minisign signature, as in the
+/// release's latest.json) with the updater public key of tauri.conf.json.
+/// Plugin packages are signed with the same key (plugins).
+pub(crate) fn verify(app: &AppHandle, bytes: &[u8], signature: &str) -> Result<(), String> {
+    let b64 = |s: &str| {
+        base64::engine::general_purpose::STANDARD
+            .decode(s.trim())
+            .map_err(|e| e.to_string())
+            .and_then(|v| String::from_utf8(v).map_err(|e| e.to_string()))
+    };
+    let pubkey = app
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|u| u.get("pubkey"))
+        .and_then(|k| k.as_str())
+        .ok_or("no updater public key")?;
+    let key = minisign_verify::PublicKey::decode(&b64(pubkey)?).map_err(|e| e.to_string())?;
+    let signature = minisign_verify::Signature::decode(&b64(signature)?).map_err(|e| e.to_string())?;
+    key.verify(bytes, &signature, true).map_err(|e| e.to_string())
+}
+
+/// The app is quitting (all windows closed): install a ready update now,
+/// without starting the app again. Windows: the installer runs and this
+/// process exits.
+pub fn on_exit(app: &AppHandle) {
+    let Some(state) = app.try_state::<AppUpdate>() else {
+        return;
+    };
+    let ready = {
+        let mut st = state.status.locked();
+        if st.state != UpdateState::ReadyToInstall {
+            return;
+        }
+        let ready = state.ready.locked().take();
+        if ready.is_some() {
+            st.state = UpdateState::Installing;
+        }
+        ready
+    };
+    let Some((update, bytes)) = ready else {
+        return;
+    };
+    if let Some(store) = app.get_store(STORE_FILE) {
+        if let Err(e) = store.save() {
+            eprintln!("[app-update] store save failed: {e}");
+        }
+    }
+    let version = update.version.clone();
+    if let Err(e) = update.restart_after_install(false).install(&bytes) {
+        eprintln!("[app-update] install {version} on quit: {e}");
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn app_update_status(state: State<'_, AppUpdate>) -> AppUpdateStatus {
+    state.status.locked().clone()
+}
+
+/// Check now (Settings > About opened).
+#[tauri::command]
+#[specta::specta]
+pub fn app_update_check(app: AppHandle) {
+    if enabled() {
+        check(&app);
+    }
+}
+
+/// The user used the app (any window; sent at most once a minute).
+#[tauri::command]
+#[specta::specta]
+pub fn app_user_active(state: State<'_, AppUpdate>) {
+    *state.last_active.locked() = Instant::now();
+}
+
+/// Whether an alert is on: a ready update then waits for the user (unless
+/// this version is no longer served).
+#[tauri::command]
+#[specta::specta]
+pub fn app_set_alerts_active(active: bool, state: State<'_, AppUpdate>) {
+    state.alerts_active.store(active, Ordering::Relaxed);
+}
+
+/// A window has written its pending settings (answer to BeforeExit).
+#[tauri::command]
+#[specta::specta]
+pub fn app_settings_flushed(window: tauri::WebviewWindow, state: State<'_, AppUpdate>) {
+    state.flushed.locked().insert(window.label().to_string());
+    state.flushed_notify.notify_waiters();
+}
+
+/// "Relaunch to update": save everything, install, restart. On Windows the
+/// installer closes this process and starts the new version itself.
+#[tauri::command]
+#[specta::specta]
+pub async fn app_update_install(app: AppHandle) -> Result<(), String> {
+    install_now(&app).await
+}
+
+/// Before the app exits: every window writes its pending settings (up to
+/// FLUSH_TIMEOUT), then the settings store and the window session go to disk.
+pub async fn save_before_exit(app: &AppHandle, update: Option<String>) {
+    let state = app.state::<AppUpdate>();
+    let windows: HashSet<String> = app.webview_windows().into_keys().collect();
+    state.flushed.locked().clear();
+    let _ = BeforeExit { update }.emit(app);
+    let all_flushed = async {
+        loop {
+            let notified = state.flushed_notify.notified();
+            if windows.is_subset(&state.flushed.locked()) {
+                return;
+            }
+            notified.await;
+        }
+    };
+    if tokio::time::timeout(FLUSH_TIMEOUT, all_flushed).await.is_err() {
+        eprintln!("[app] not every window confirmed its settings write; exiting anyway");
+    }
+    if let Some(store) = app.get_store(STORE_FILE) {
+        if let Err(e) = store.save() {
+            eprintln!("[app] store save failed: {e}");
+        }
+    }
+    crate::window_session::save(app);
+}
+
+/// Save everything, install the ready update, start the new version.
+async fn install_now(app: &AppHandle) -> Result<(), String> {
+    let app = app.clone();
+    let state = app.state::<AppUpdate>();
+    let (update, bytes) = {
+        let mut st = state.status.locked();
+        if st.state != UpdateState::ReadyToInstall {
+            return Err("no update is ready to install".into());
+        }
+        let Some(ready) = state.ready.locked().take() else {
+            return Err("no update is ready to install".into());
+        };
+        st.state = UpdateState::Installing;
+        ready
+    };
+    let version = update.version.clone();
+    let required = state.required.load(Ordering::Relaxed);
+    let _ = AppUpdateStatus { state: UpdateState::Installing, version: Some(version.clone()), update_required: required }.emit(&app);
+
+    // 1-2. Every window's pending settings, the settings store and the window session to disk.
+    save_before_exit(&app, Some(version.clone())).await;
+
+    // 3. Install. Windows: runs the installer and exits. macOS: replaces the app bundle.
+    if let Err(e) = update.install(&bytes) {
+        eprintln!("[app-update] install {version}: {e}");
+        *state.ready.locked() = Some((update, bytes));
+        set_status(&app, UpdateState::ReadyToInstall, Some(version));
+        return Err(e.to_string());
+    }
+    app.restart();
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn app_build_info(app: AppHandle) -> BuildInfo {
+    BuildInfo {
+        version: app.package_info().version.to_string(),
+        build_date: env!("OPENTRADER_BUILD_DATE").to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const H: Duration = Duration::from_secs(60 * 60);
+
+    fn due(waited: Duration, idle: Duration, alerts: bool, required: bool) -> bool {
+        let now = Instant::now() + 30 * 24 * H;
+        let update = AppUpdate::default();
+        update.status.locked().state = UpdateState::ReadyToInstall;
+        *update.ready_since.locked() = Some(("9.9.9".into(), now - waited));
+        *update.last_active.locked() = now - idle;
+        update.alerts_active.store(alerts, Ordering::Relaxed);
+        update.required.store(required, Ordering::Relaxed);
+        idle_install_due(&update, now)
+    }
+
+    #[test]
+    fn installs_when_idle_after_the_wait_with_no_alert() {
+        assert!(due(73 * H, 3 * H, false, false));
+        assert!(!due(71 * H, 3 * H, false, false), "not waited long enough");
+        assert!(!due(73 * H, H, false, false), "used an hour ago");
+        assert!(!due(73 * H, 3 * H, true, false), "an alert is on");
+    }
+
+    #[test]
+    fn a_version_no_longer_served_only_waits_for_idle() {
+        assert!(due(Duration::ZERO, 3 * H, true, true));
+        assert!(!due(Duration::ZERO, H, true, true));
+    }
+
+    #[test]
+    fn nothing_without_a_ready_update() {
+        let now = Instant::now() + 30 * 24 * H;
+        let update = AppUpdate::default();
+        *update.last_active.locked() = now - 3 * H;
+        update.required.store(true, Ordering::Relaxed);
+        assert!(!idle_install_due(&update, now));
+    }
+}

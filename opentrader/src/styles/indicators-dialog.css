@@ -1,0 +1,600 @@
+/*
+ * Indicators, metrics, and strategies dialog.
+ *
+ * Geometry & colours:
+ *   shell    : 840 × 638, bg rgb(31,31,31), 6px radius (same shell as the
+ *              symbol-search dialog)
+ *   header   : 68px, padding 0 20px, title 20px/600 rgb(219,219,219)
+ *   search   : 40px, margin 0 20px, 1px border rgb(74,74,74), 8px radius,
+ *              16px font, magnifier rgb(140,140,140)
+ *   sidebar  : 200px inner (wrapper padding 8 10 16 20), groups gap 8px,
+ *              group title 11px rgb(140,140,140), item 40px, active bg
+ *              rgb(61,61,61)
+ *   row      : 32px tall, 8px radius, selected bg rgb(19,32,66)
+ *   star     : favourited rgb(242,242,242); author link rgb(91,156,246);
+ *              boosts rgb(219,219,219)
+ */
+
+.indicators-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--ot-backdrop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 250;
+}
+
+.indicators-dialog {
+  width: 840px;
+  max-width: 96vw;
+  height: 638px;
+  max-height: 92vh;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  border-radius: 6px;
+  box-shadow: 0 18px 50px var(--ot-shadow-60), 0 2px 8px var(--ot-shadow-40);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-family-base);
+  font-size: 14px;
+  overflow: hidden;
+}
+
+/* ── Header ───────────────────────────────────────────────────────────── */
+.indicators-header {
+  height: 68px;
+  flex-shrink: 0;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Title — 20px/600, rgb(219,219,219). */
+.indicators-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.indicators-close {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.indicators-close:hover {
+  background-color: var(--color-bg-primary-hover);
+}
+
+/* ── Search ───────────────────────────────────────────────────────────── */
+.indicators-search-wrap {
+  flex-shrink: 0;
+  margin: 0 20px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 11px;
+  border: 1px solid var(--color-border-primary-neutral-light);
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+.indicators-search-wrap:focus-within {
+  border-color: var(--color-ot-blue-500);
+}
+
+.indicators-search-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--color-cold-gray-400);
+  flex-shrink: 0;
+}
+
+.indicators-search-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: inherit;
+  font-size: 16px;
+  font-family: inherit;
+  padding-block: 0;
+  padding-inline: 2px 5px;
+}
+
+.indicators-search-input::placeholder {
+  color: var(--color-cold-gray-400);
+}
+
+/* ── Content: sidebar + list ──────────────────────────────────────────── */
+.indicators-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* Sidebar: width 230 (200 inner + 30 padding). */
+.indicators-sidebar {
+  width: 230px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding-block: 8px 16px;
+  padding-inline: 20px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.indicators-sidebar-group {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Sidebar group title: 11px, rgb(140,140,140), padding 7 0 7 12, uppercase. */
+.indicators-sidebar-title {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 16px;
+  color: var(--color-cold-gray-400);
+  padding-block: 7px;
+  padding-inline: 12px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* Sidebar item: 40px, padding 0 8px, flex row. */
+.indicators-sidebar-item {
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.indicators-sidebar-item:hover {
+  background-color: var(--color-bg-primary-hover);
+}
+
+/* Active sidebar item: bg rgb(61,61,61). */
+.indicators-sidebar-item.is-active {
+  background-color: var(--color-container-fill-primary-neutral-light);
+}
+
+.indicators-sidebar-icon {
+  flex-shrink: 0;
+  color: var(--color-content-primary-neutral-semi-bold);
+}
+
+.indicators-sidebar-item.is-active .indicators-sidebar-icon {
+  color: var(--color-text-primary);
+}
+
+.indicators-sidebar-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── List pane ────────────────────────────────────────────────────────── */
+.indicators-list-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Column header — NAME · AUTHOR · BOOSTS, rgb(140,140,140), 11px uppercase. */
+.indicators-list-head {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 320px 200px;
+  align-items: center;
+  height: 30px;
+  padding: 0 20px 8px;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--color-cold-gray-400);
+}
+
+/* Under the type tabs the header has a smaller top gap (8px vs 16px). */
+.indicators-list-head.has-filters {
+  height: 24px;
+}
+
+/* Type tabs (Indicators / Strategies / Patterns ...): 16px above, 8px below,
+   left edge on the row names. */
+.indicators-type-tabs {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-block: 16px 8px;
+  padding-inline: 50px 20px;
+}
+
+/* NAME label sits over the row name text (clears the 22px star + 8px gap). */
+.indicators-col-name { padding-inline-start: 30px; }
+
+.indicators-list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-inline-end: 5px;
+}
+
+/* Scrollbar: global treatment from base.css (5px, #3d3d3d thumb). */
+
+.indicators-empty {
+  margin-top: 24px;
+}
+
+/* Purchased tab — empty-state (title + body + Store CTA). */
+.indicators-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 64px 40px 0;
+  gap: 8px;
+}
+
+.indicators-empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.indicators-empty-body {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--color-cold-gray-400);
+  max-width: 360px;
+}
+
+.indicators-empty-action {
+  margin-top: 12px;
+  height: 32px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background-color: var(--color-ot-blue-500);
+  color: var(--color-white);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.indicators-empty-action:hover {
+  background-color: var(--color-ot-blue-600);
+}
+
+.indicators-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Row colours per theme (reference): hover is neutral grey, the keyboard
+   selection blue; the star's hover inside a selected row is a deeper blue. */
+html.theme-dark {
+  --ot-ind-row-hover: var(--color-cold-gray-800, #2e2e2e);
+  --ot-ind-row-selected: var(--color-ot-blue-a900, #132042);
+  --ot-ind-row-selected-star-hover: var(--color-ot-blue-a700, #143a87);
+  --ot-ind-metric-dot: var(--color-cold-gray-600, #636363);
+}
+html.theme-light {
+  --ot-ind-row-hover: var(--color-cold-gray-100, #f2f2f2);
+  --ot-ind-row-selected: var(--color-ot-blue-50, #e3effd);
+  --ot-ind-row-selected-star-hover: var(--color-ot-blue-200, #90bff9);
+  --ot-ind-metric-dot: var(--color-cold-gray-200, #dbdbdb);
+}
+
+/* Row: 32px, 8px radius. */
+.indicators-row {
+  display: grid;
+  grid-template-columns: 320px 200px;
+  align-items: center;
+  height: 32px;
+  padding: 0 20px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.indicators-row:hover {
+  background-color: var(--ot-ind-row-hover);
+}
+
+.indicators-row.is-selected {
+  background-color: var(--ot-ind-row-selected);
+}
+
+.indicators-row.is-selected .indicators-favorite:hover {
+  background-color: var(--ot-ind-row-selected-star-hover);
+}
+
+/* Section title inside the list (Patterns tab, search results): the column
+   header's type, on the names' left edge, 16px above / 8px below (8px above
+   under the type tabs). */
+.indicators-section-title {
+  box-sizing: border-box;
+  height: 40px;
+  padding-block: 16px 8px;
+  padding-inline: 50px 20px;
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-default-gray);
+}
+
+.indicators-list.has-filters .indicators-section-title {
+  height: 32px;
+  padding-top: 8px;
+}
+
+/* A row's star shows on hover only, unless the row is a favourite. */
+.indicators-row:not(:hover) .indicators-favorite:not(.is-active) {
+  visibility: hidden;
+}
+
+/* Letters matching the search. */
+.indicators-hit {
+  color: var(--color-brand);
+}
+
+/* Registry-backed rows are clickable (each click adds the study). */
+.indicators-row.is-addable {
+  cursor: pointer;
+}
+/* A script another tool (the script screener) cannot use: greyed, not picked. */
+.indicators-row.is-unsupported .indicators-name,
+.indicators-row.is-unsupported .indicators-author-cell {
+  opacity: 0.4;
+}
+.indicators-row.is-unsupported { cursor: default; }
+
+.indicators-cell {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.indicators-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Active favorite star: rgb(242,242,242), 22×22, 4px radius. */
+.indicators-favorite {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--color-cold-gray-400);
+}
+
+.indicators-favorite.is-active {
+  color: var(--ot-strong);
+}
+
+.indicators-favorite:hover {
+  background-color: var(--color-container-fill-primary-neutral-normal);
+}
+
+.indicators-name {
+  font-size: 14px;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Badge — "EP" Editors'-pick pill. */
+.indicators-badge {
+  flex-shrink: 0;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 5px;
+  border-radius: 4px;
+  background-color: var(--color-container-fill-primary-neutral-light);
+  color: var(--color-text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.indicators-author-cell {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Author: plain text (no author pages here). */
+.indicators-author {
+  color: var(--color-main-text);
+  font-size: 14px;
+}
+
+/* Likes: rgb(219,219,219). */
+.indicators-boosts-cell {
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+
+/* ── Fundamentals tab ─────────────────────────────────────────────────── */
+.indicators-fund {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.indicators-subtabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 20px 10px;
+  flex-wrap: wrap;
+}
+
+/* Round-pill tabs (reference "primary" round tabs, both themes). */
+.indicators-subtab {
+  height: 28px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 14px;
+  background-color: var(--color-container-fill-primary-neutral-extra-light);
+  color: var(--color-content-primary-neutral-bold);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.indicators-subtab:hover:not(.selected) {
+  background-color: var(--color-container-fill-primary-neutral-light);
+  color: var(--color-content-secondary-neutral-bold);
+}
+
+.indicators-subtab.selected {
+  background-color: var(--color-container-fill-primary-neutral-extra-bold);
+  color: var(--color-content-secondary-inverse);
+}
+
+.indicators-fund-head {
+  padding: 0 20px 6px;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--color-cold-gray-400);
+}
+
+.indicators-fund-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-inline-end: 5px;
+}
+
+/* Scrollbar: global treatment from base.css (5px, #3d3d3d thumb). */
+
+/* Metric rows (reference 20/10/2026): 32 px, margin 0 15 0 10, padding
+   0 16 0 4, radius 8; the 22 px star (shown on hover or when set), the name
+   4 px after it. A child row: 5 px, its 5 px dot, 5 px, the name. Same row
+   colours as the indicator rows; child dot cold-gray-600 dark / cold-gray-200
+   light. */
+.indicators-metric {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  margin-block: 0;
+  margin-inline: 10px 15px;
+  padding-block: 0;
+  padding-inline: 4px 16px;
+  font-size: 14px;
+  color: var(--color-text-primary);
+  border-radius: 8px;
+}
+
+.indicators-metric:hover {
+  background-color: var(--ot-ind-row-hover);
+}
+
+.indicators-metric .indicators-favorite { margin-inline-end: 4px; }
+.indicators-metric:not(:hover) .indicators-favorite:not(.is-active) { visibility: hidden; }
+
+.indicators-metric.depth-1 {
+  color: var(--color-content-primary-neutral-semi-bold);
+}
+.indicators-metric.depth-1 .indicators-favorite { margin-inline-end: 5px; }
+
+.indicators-metric-dot {
+  width: 5px;
+  height: 5px;
+  margin-inline-end: 5px;
+  border-radius: 50%;
+  background-color: var(--ot-ind-metric-dot);
+  flex-shrink: 0;
+}
+
+.indicators-metric-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.indicators-metric.is-addable { cursor: default; }
+
+/* Hovered row: the period buttons on its right (12 px #8C8C8C on #1F1F1F,
+   radius 4, padding 1 8, 8 px apart; reference 20/10/2026). */
+.indicators-metric-actions {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;
+}
+.indicators-metric:hover .indicators-metric-actions,
+.indicators-row.is-metric:hover .indicators-metric-actions { display: flex; }
+/* Metric row in the search results: name, then the period buttons on the right. */
+.indicators-row.is-metric { grid-template-columns: minmax(0, 1fr) auto; }
+.indicators-metric-period {
+  height: 22px;
+  padding: 1px 8px;
+  border: 0;
+  border-radius: 4px;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: default;
+}
+.indicators-metric-period:hover { color: var(--color-text-primary); }
+
+/* Strategy rows: the reference app's scriptType marker after the name (18 px,
+   #dbdbdb, captured 30/09/2026; the gap to the title was not measured). */
+.indicators-script-type {
+  flex-shrink: 0;
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  margin-inline-start: 4px;
+  color: var(--color-text-primary);
+}
+
+/* Disabled sidebar item (Invite-only): greyed, not selectable. */
+.indicators-sidebar-item.is-disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}

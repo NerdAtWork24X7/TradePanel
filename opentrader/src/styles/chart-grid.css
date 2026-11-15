@@ -1,0 +1,65 @@
+/*
+ * Multi-chart layout grid — sits inside `.chart-pane` and splits the
+ * available space into N ChartView cells per the active template.
+ *
+ * Geometry (each cell's pixel box, the splitters on the gaps) is provided
+ * as inline styles by ChartGrid from the template's split tree, so this
+ * stylesheet only carries the chrome (window background in the gaps, cell
+ * background, splitter highlight).
+ */
+.chart-grid {
+  /* anchor of the layout event hint (ChartEventHint) */
+  position: relative;
+  width: 100%;
+  height: 100%;
+  /* Panels are 4px-rounded cards separated by 2px of the #2e2e2e window
+     background, not 1px divider lines. */
+  background-color: var(--color-widget-border);
+}
+
+.chart-grid-cell {
+  position: absolute;
+  background-color: var(--ot-chart-bg);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  /* Every chart panel is a rounded card. */
+  border-radius: 4px;
+}
+
+/*
+ * Active-pane highlight: a 2px #8c8c8c (mid-gray) border overlay
+ * (position: absolute; inset: 0; pointer-events: none) on the active
+ * pane.  Suppressed on single-pane (`s`) layouts since there's
+ * nothing to disambiguate.
+ */
+.chart-grid:not([data-layout='s']) .chart-grid-cell.is-active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--color-border-primary-neutral-semi-bold);
+  border-radius: 4px;
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/*
+ * Splitter between two charts: a 12px band centred on the 2px gap, clear
+ * until the pointer is over it (or it is dragged).
+ */
+.chart-grid-splitter {
+  position: absolute;
+  z-index: 6;
+  touch-action: none;
+}
+
+.chart-grid-splitter.is-hovered {
+  background: var(--color-overlay-accent-1-light);
+}
+
+/* An alert label under the pointer (line, label, scale tab): vertical move cursor. */
+.alert-label-hover,
+.alert-label-hover * {
+  cursor: ns-resize !important;
+}

@@ -1,0 +1,428 @@
+/*
+ * Stock screener screens: the current screen (draft), the local saved screens
+ * and the undo/redo history, plus the split-view panel state.
+ *
+ * the reference app keeps screens in the account; OpenTrader keeps them in kv:
+ *   ot:screener:screens:v1  saved screens (Stock and ETF ones: Screen.type) + recently used order
+ *   ot:screener:draft:v1    the current Stock screen and the saved screen it came from
+ *   ot:screener:draft-etf:v1  the same for the ETF Screener
+ *   ot:screener:shown:v1    the screener shown: "stock", "etf" or "script" (the Script
+ *                           Screener, see script-screen-store.ts)
+ *   ot:screener:open / ot:screener:width  split-view panel
+ *   ot:screener:placement / ot:screener:height  where the panel shows (right,
+ *   bottom, its own window) and the bottom panel's height
+ * With autosave off (the reference app default) a change marks the screen unsaved and the
+ * topbar shows the Save button until it is saved; with a saved screen's "Autosave" on, each
+ * change is saved at once. Undo/redo hold up to 100
+ * steps (the reference app HISTORY_MAX_SIZE) and are cleared when another screen is opened.
+ */
+import { createRoot, createSignal } from "solid-js";
+import * as kv from "./kv";
+import { oneOf, persisted } from "./persisted";
+import { trackScreenChange, trackScreener } from "./screener-telemetry";
+import { LEGACY_DEFAULT_PILLS, defaultScreen, newScreen, popularScreens, screenType, type Screen, type ScreenerType } from "./screener-catalog";
+
+/** `autosave`: the screen menu's "Autosave" switch of this screen (off by default). */
+export type SavedScreen = { id: string; screen: Screen; updatedAt: number; autosave?: boolean };
+
+const SCREENS_KEY = "ot:screener:screens:v1";
+const DRAFT_KEYS: Record<ScreenerType, string> = { stock: "ot:screener:draft:v1", etf: "ot:screener:draft-etf:v1" };
+const SHOWN_KEY = "ot:screener:shown:v1";
+/** Before one setting, the screener shown was two: Stock or ETF here, Stock or Script in the script store. */
+const OLD_TYPE_KEY = "ot:screener:type:v1";
+const OLD_KIND_KEY = "ot:screener:kind:v1";
+const OPEN_KEY = "ot:screener:open";
+const WIDTH_KEY = "ot:screener:width";
+const HISTORY_MAX = 100;
+const RECENT_MAX = 5;
+
+type Persisted = { screens: SavedScreen[]; recent: string[] };
+/** `popularId`: the popular screen the current one was opened from. */
+type Draft = { savedId: string | null; popularId?: string | null; screen: Screen };
+
+function readJson<T>(key: string): T | null {
+  try {
+    const raw = kv.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+/** Screen content without the filter ids (random per creation). */
+const content = (s: Screen) => ({ ...s, filters: s.filters.map(({ id: _id, ...f }) => f) });
+const newId = () => `scr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+
+function isScreen(v: unknown): v is Screen {
+  const s = v as Screen;
+  return !!s && typeof s.title === "string" && Array.isArray(s.filters) && !!s.sort && typeof s.activeColumnSetId === "string";
+}
+
+/** Screen of a stored draft. A draft that was never changed (still the
+ *  default or popular screen of an earlier version, with fewer default pills)
+ *  becomes the current default, as a new screen would be. */
+function draftScreen(d: Draft): Screen {
+  if (d.savedId || screenType(d.screen) === "etf") return d.screen;
+  const popular = popularScreens("stock").find((p) => p.id === d.popularId);
+  const make = (pills?: (typeof LEGACY_DEFAULT_PILLS)[number]) => (popular ? popular.screen(pills) : defaultScreen(d.screen.title, pills));
+  return LEGACY_DEFAULT_PILLS.some((pills) => same(content(d.screen), content(make(pills)))) ? make() : d.screen;
+}
+
+/** The stored draft of a screener type (a new screen when there is none). */
+function readDraft(type: ScreenerType): { screen: Screen; savedId: string | null; popularId: string | null } {
+  const d = readJson<Draft>(DRAFT_KEYS[type]);
+  if (!d || !isScreen(d.screen) || screenType(d.screen) !== type) return { screen: newScreen(type), savedId: null, popularId: null };
+  return { screen: draftScreen(d), savedId: d.savedId ?? null, popularId: d.popularId ?? null };
+}
+
+/** The screener shown: Stock, ETF or the Script Screener. */
+export type ScreenerShown = ScreenerType | "script";
+/** Stock-side screeners (Stock / ETF, see `type`) or the Script Screener. */
+export type ScreenerKind = "stock" | "script";
+
+/** The two old keys into the one setting, once. */
+function migrateShown(): void {
+  if (kv.getItem(SHOWN_KEY) !== null) return;
+  const kind = kv.getItem(OLD_KIND_KEY);
+  const type = kv.getItem(OLD_TYPE_KEY);
+  if (kind === null && type === null) return;
+  kv.setItem(SHOWN_KEY, kind === "script" ? "script" : type === "etf" ? "etf" : "stock");
+  kv.removeItem(OLD_KIND_KEY);
+  kv.removeItem(OLD_TYPE_KEY);
+}
+migrateShown();
+
+const store = createRoot(() => {
+  const [shown, setShown] = persisted<ScreenerShown>(SHOWN_KEY, { parse: oneOf("stock", "etf", "script"), format: String, default: "stock" });
+  const saved = readJson<Persisted>(SCREENS_KEY);
+  const [screens, setScreens] = createSignal<SavedScreen[]>(
+    (saved?.screens ?? []).filter((x) => x && typeof x.id === "string" && isScreen(x.screen)),
+  );
+  const [recent, setRecent] = createSignal<string[]>(saved?.recent ?? []);
+  // Stock or ETF: the one shown, else (the Script Screener shown) the one it goes back to.
+  const [type, setType] = createSignal<ScreenerType>(shown() === "etf" ? "etf" : "stock");
+  const draft = readDraft(type());
+  const [screen, setScreenRaw] = createSignal<Screen>(draft.screen);
+  const [savedId, setSavedId] = createSignal<string | null>(draft.savedId);
+  const [popularId, setPopularId] = createSignal<string | null>(draft.popularId);
+  const [past, setPast] = createSignal<Screen[]>([]);
+  const [future, setFuture] = createSignal<Screen[]>([]);
+  return { shown, setShown, screens, setScreens, recent, setRecent, type, setType, screen, setScreenRaw, savedId, setSavedId, popularId, setPopularId, past, setPast, future, setFuture };
+});
+
+function persistScreens(): void {
+  kv.setItem(SCREENS_KEY, JSON.stringify({ screens: store.screens(), recent: store.recent() }));
+}
+function persistDraft(): void {
+  kv.setItem(DRAFT_KEYS[screenType(store.screen())], JSON.stringify({ savedId: store.savedId(), popularId: store.popularId(), screen: store.screen() }));
+}
+function touchRecent(id: string): void {
+  store.setRecent([id, ...store.recent().filter((x) => x !== id)].slice(0, 50));
+}
+
+/** Replace the current screen without touching the history (open / new). A screen of the other screener
+ *  switches to it. */
+function load(s: Screen, savedId: string | null, popularId: string | null = null): void {
+  setTypeOnly(screenType(s));
+  store.setScreenRaw(clone(s));
+  store.setSavedId(savedId);
+  store.setPopularId(popularId);
+  store.setPast([]);
+  store.setFuture([]);
+  persistDraft();
+}
+
+/** The current screen of the screener not shown, while this window runs. */
+const parked: Partial<Record<ScreenerType, { screen: Screen; savedId: string | null; popularId: string | null }>> = {};
+
+function setTypeOnly(t: ScreenerType): void {
+  if (store.type() === t) return;
+  store.setType(t);
+  if (store.shown() !== "script") store.setShown(t);
+}
+
+export const screenerStore = {
+  /** A stock-side screener (Stock or ETF, see `type`) or the Script Screener. */
+  kind: (): ScreenerKind => (store.shown() === "script" ? "script" : "stock"),
+  /** Show the Script Screener, or the Stock / ETF one it was left for. */
+  setKind(k: ScreenerKind): void {
+    const to = k === "script" ? "script" : store.type();
+    if (store.shown() !== to) trackScreener("screener_switched", { to });
+    store.setShown(to);
+  },
+  /** The stock-side screener: Stock or ETF. */
+  type: store.type,
+  /** Show the other screener: its own current screen comes back. */
+  setType(t: ScreenerType): void {
+    if (store.type() === t) return;
+    trackScreener("screener_switched", { to: t });
+    parked[store.type()] = { screen: store.screen(), savedId: store.savedId(), popularId: store.popularId() };
+    const d = parked[t] ?? readDraft(t);
+    load(d.screen, d.savedId, d.popularId);
+  },
+  screen: store.screen,
+  savedId: store.savedId,
+  popularId: store.popularId,
+  savedScreens: store.screens,
+
+  /** Saved screen the current one came from, if any. */
+  saved(): SavedScreen | undefined {
+    const id = store.savedId();
+    return id ? store.screens().find((s) => s.id === id) : undefined;
+  },
+
+  /** Unsaved changes: differs from its saved copy, from the popular screen
+   *  it was opened from, or (neither) from the default screen of its title. */
+  unsaved(): boolean {
+    const saved = screenerStore.saved();
+    const cur = store.screen();
+    const popular = popularScreens(screenType(cur)).find((p) => p.id === store.popularId());
+    const base = saved ? saved.screen : popular ? popular.screen() : newScreen(screenType(cur), cur.title);
+    return !same(content(cur), content(base));
+  },
+
+  /** Apply a change as one undoable step. */
+  update(fn: (s: Screen) => Screen): void {
+    const cur = store.screen();
+    const next = fn(clone(cur));
+    if (same(next, cur)) return;
+    store.setPast([...store.past(), cur].slice(-HISTORY_MAX));
+    store.setFuture([]);
+    store.setScreenRaw(next);
+    persistDraft();
+    autosaveNow();
+    trackScreenChange(cur, next);
+  },
+
+  /** "Autosave" of the current saved screen. */
+  autosave(): boolean {
+    return !!screenerStore.saved()?.autosave;
+  },
+  /** Switch "Autosave" of the current saved screen; on saves the screen at once. */
+  setAutosave(on: boolean): void {
+    const id = store.savedId();
+    if (!id) return;
+    store.setScreens(store.screens().map((s) => (s.id === id ? { ...s, autosave: on } : s)));
+    persistScreens();
+    if (on) screenerStore.save();
+  },
+
+  canUndo: () => store.past().length > 0,
+  canRedo: () => store.future().length > 0,
+  undo(): void {
+    const p = store.past();
+    if (!p.length) return;
+    store.setFuture([store.screen(), ...store.future()]);
+    store.setScreenRaw(p[p.length - 1]);
+    store.setPast(p.slice(0, -1));
+    persistDraft();
+    autosaveNow();
+  },
+  redo(): void {
+    const f = store.future();
+    if (!f.length) return;
+    store.setPast([...store.past(), store.screen()].slice(-HISTORY_MAX));
+    store.setScreenRaw(f[0]);
+    store.setFuture(f.slice(1));
+    persistDraft();
+    autosaveNow();
+  },
+
+  /** Save in place. Returns false when the screen has never been saved (the
+   *  caller asks for a name, then calls saveAs). `counted`: false for autosave (usage statistics). */
+  save(counted = true): boolean {
+    const id = store.savedId();
+    if (!id || !store.screens().some((s) => s.id === id)) return false;
+    const snap = clone(store.screen());
+    store.setScreens(store.screens().map((s) => (s.id === id ? { ...s, screen: snap, updatedAt: Date.now() } : s)));
+    touchRecent(id);
+    persistScreens();
+    if (counted) trackScreener("screener_screen_saved", { screener: store.type(), as: "save" });
+    return true;
+  },
+
+  /** Save the current screen as a new saved screen named `name` (Save screen
+   *  as / Make a copy) and continue on it. */
+  saveAs(name: string): void {
+    const id = newId();
+    const snap = { ...clone(store.screen()), title: name };
+    store.setScreens([...store.screens(), { id, screen: snap, updatedAt: Date.now() }]);
+    touchRecent(id);
+    persistScreens();
+    store.setScreenRaw(clone(snap));
+    store.setSavedId(id);
+    store.setPopularId(null);
+    persistDraft();
+    trackScreener("screener_screen_saved", { screener: store.type(), as: "new" });
+  },
+
+  /** Rename the current screen (and its saved copy). */
+  rename(name: string): void {
+    const id = store.savedId();
+    if (id) {
+      store.setScreens(store.screens().map((s) => (s.id === id ? { ...s, screen: { ...s.screen, title: name }, updatedAt: Date.now() } : s)));
+      persistScreens();
+    }
+    store.setScreenRaw({ ...store.screen(), title: name });
+    persistDraft();
+  },
+
+  /** Create a saved screen from the default template and open it. */
+  createNew(name: string): void {
+    const id = newId();
+    const s = newScreen(store.type(), name);
+    store.setScreens([...store.screens(), { id, screen: s, updatedAt: Date.now() }]);
+    touchRecent(id);
+    persistScreens();
+    load(s, id);
+    trackScreener("screener_screen_opened", { screener: store.type(), from: "new" });
+  },
+
+  open(id: string): void {
+    const s = store.screens().find((x) => x.id === id);
+    if (!s) return;
+    touchRecent(id);
+    persistScreens();
+    load(s.screen, id);
+    trackScreener("screener_screen_opened", { screener: store.type(), from: "saved" });
+  },
+
+  /** Open a reference app popular screen (not saved: Save asks for a name). */
+  openPopular(id: string): void {
+    const p = popularScreens(store.type()).find((x) => x.id === id);
+    if (!p) return;
+    load(p.screen(), null, id);
+    trackScreener("screener_screen_opened", { screener: store.type(), from: "popular", popular: id });
+  },
+
+  /** Save a copy of a saved or popular screen under `name`, without opening
+   *  it (the "Make a copy" row action of Open screen). */
+  copyOf(screen: Screen, name: string): void {
+    const id = newId();
+    store.setScreens([...store.screens(), { id, screen: { ...clone(screen), title: name }, updatedAt: Date.now() }]);
+    persistScreens();
+  },
+
+  remove(id: string): void {
+    store.setScreens(store.screens().filter((s) => s.id !== id));
+    store.setRecent(store.recent().filter((x) => x !== id));
+    persistScreens();
+    if (store.savedId() === id) {
+      store.setSavedId(null);
+      persistDraft();
+    }
+  },
+
+  /** Saved screens of the screener shown. */
+  typeScreens(): SavedScreen[] {
+    return store.screens().filter((s) => screenType(s.screen) === store.type());
+  },
+
+  /** Recently used saved screens of the screener shown (menu "Recently used"). */
+  recentScreens(): SavedScreen[] {
+    const byId = new Map(store.screens().map((s) => [s.id, s] as const));
+    const out = store.recent().map((id) => byId.get(id)).filter((s): s is SavedScreen => !!s && screenType(s.screen) === store.type());
+    return out.slice(0, RECENT_MAX);
+  },
+};
+
+/** A change to a saved screen with "Autosave" on is saved at once. */
+function autosaveNow(): void {
+  if (screenerStore.autosave()) screenerStore.save(false);
+}
+
+// ── Split-view panel state ────────────────────────────────────────────────
+export const PANEL_MIN_WIDTH = 420;
+/** The overlay goes narrower: its compact layout (a "Filters" button) fits 350 px in the reference app. */
+export const OVERLAY_MIN_WIDTH = 320;
+export const PANEL_DEFAULT_WIDTH = 931;
+export const PANEL_MIN_HEIGHT = 240;
+export const PANEL_DEFAULT_HEIGHT = 380;
+const PLACEMENT_KEY = "ot:screener:placement";
+const HEIGHT_KEY = "ot:screener:height";
+const MODE_KEY = "ot:screener:mode";
+const OVERLAY_WIDTH_KEY = "ot:screener:overlay-width";
+
+/** The right panel: a split view the charts shrink for, or an overlay over them (the reference app's
+ *  "Move split-view to overlay", kept for the next opening). */
+export type ScreenerMode = "split" | "overlay";
+
+/** Where the screener shows: the right split view (the reference app's only place, the default), the bottom panel
+ *  under the charts, or its own window (desktop). */
+export type ScreenerPlacement = "right" | "bottom" | "window";
+
+const panel = createRoot(() => {
+  const [open, setOpen] = createSignal(kv.getItem(OPEN_KEY) === "1");
+  const w = Number(kv.getItem(WIDTH_KEY));
+  const [width, setWidth] = createSignal(Number.isFinite(w) && w >= PANEL_MIN_WIDTH ? w : PANEL_DEFAULT_WIDTH);
+  const [fullscreen, setFullscreen] = createSignal(false);
+  const stored = kv.getItem(PLACEMENT_KEY);
+  const [placement, setPlacement] = createSignal<ScreenerPlacement>(stored === "bottom" || stored === "window" ? stored : "right");
+  const h = Number(kv.getItem(HEIGHT_KEY));
+  const [height, setHeight] = createSignal(Number.isFinite(h) && h >= PANEL_MIN_HEIGHT ? h : PANEL_DEFAULT_HEIGHT);
+  const [mode, setMode] = createSignal<ScreenerMode>(kv.getItem(MODE_KEY) === "overlay" ? "overlay" : "split");
+  // The overlay's width; none saved = half the window (the reference app).
+  const ow = Number(kv.getItem(OVERLAY_WIDTH_KEY));
+  const [overlayWidth, setOverlayWidth] = createSignal<number | null>(Number.isFinite(ow) && ow >= OVERLAY_MIN_WIDTH ? ow : null);
+  const [collapsed, setCollapsed] = createSignal(false);
+  return {
+    open, setOpen, width, setWidth, fullscreen, setFullscreen, placement, setPlacement, height, setHeight,
+    mode, setMode, overlayWidth, setOverlayWidth, collapsed, setCollapsed,
+  };
+});
+
+// Another window (the screener's own) moved the screener: follow. Whether it shows belongs to each window's tab.
+kv.onExternalChange(PLACEMENT_KEY, (v) => panel.setPlacement(v === "bottom" || v === "window" ? v : "right"));
+
+export const screenerPanel = {
+  open: panel.open,
+  width: panel.width,
+  fullscreen: panel.fullscreen,
+  setOpen(v: boolean): void {
+    panel.setOpen(v);
+    panel.setCollapsed(false);
+    if (!v) panel.setFullscreen(false);
+    kv.setItem(OPEN_KEY, v ? "1" : "0");
+  },
+  /** Collapse panel: the panel closes and the rail button keeps a dot until it opens or closes again. */
+  collapse(): void {
+    screenerPanel.setOpen(false);
+    panel.setCollapsed(true);
+  },
+  collapsed: panel.collapsed,
+  mode: panel.mode,
+  setMode(m: ScreenerMode): void {
+    panel.setMode(m);
+    panel.setFullscreen(false);
+    kv.setItem(MODE_KEY, m);
+  },
+  overlayWidth: panel.overlayWidth,
+  /** Live overlay width while dragging; `commit` persists it. */
+  setOverlayWidth(px: number, commit = false): void {
+    panel.setOverlayWidth(Math.max(OVERLAY_MIN_WIDTH, Math.round(px)));
+    if (commit) kv.setItem(OVERLAY_WIDTH_KEY, String(panel.overlayWidth()));
+  },
+  toggle(): void {
+    screenerPanel.setOpen(!panel.open());
+  },
+  /** Live width while dragging; `commit` persists it. */
+  setWidth(px: number, commit = false): void {
+    panel.setWidth(Math.max(PANEL_MIN_WIDTH, Math.round(px)));
+    if (commit) kv.setItem(WIDTH_KEY, String(panel.width()));
+  },
+  setFullscreen: panel.setFullscreen,
+  placement: panel.placement,
+  setPlacement(p: ScreenerPlacement): void {
+    panel.setPlacement(p);
+    panel.setFullscreen(false);
+    kv.setItem(PLACEMENT_KEY, p);
+  },
+  height: panel.height,
+  /** Live height of the bottom panel while dragging; `commit` persists it. */
+  setHeight(px: number, commit = false): void {
+    panel.setHeight(Math.max(PANEL_MIN_HEIGHT, Math.round(px)));
+    if (commit) kv.setItem(HEIGHT_KEY, String(panel.height()));
+  },
+};

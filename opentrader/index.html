@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/src/assets/app-icon-32.png" />
+    <link rel="icon" type="image/png" sizes="256x256" href="/src/assets/app-icon-256.png" />
+    <link rel="apple-touch-icon" href="/src/assets/app-icon-256.png" />
+    <title>OpenTrader</title>
+    <!-- Splash: plain HTML + inline CSS so it paints before any script loads.
+         index.tsx fades it out once the App has rendered. -->
+    <style>
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0f0f0f;
+        color: #a1a1aa;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: 14px;
+        letter-spacing: 0.02em;
+        transition: opacity 200ms ease;
+      }
+      #splash.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="splash" role="status">Loading Chart...</div>
+    <script>
+      // Only the main window shows the splash; detached chart windows load
+      // straight into their tabs.
+      if ((window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label ?? "main") !== "main") {
+        document.getElementById("splash")?.remove();
+      }
+    </script>
+    <div id="root"></div>
+
+    <script src="/src/index.tsx" type="module"></script>
+  </body>
+</html>

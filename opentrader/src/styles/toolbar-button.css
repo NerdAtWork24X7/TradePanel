@@ -1,0 +1,144 @@
+/*
+ * `.ot-toolbar-button` — base for any toolbar button that shows the
+ * rounded hover/active pill on a transparent surface: one CSS rule, parent
+ * sets `--ot-toolbar-explicit-hover-*` to control the pill geometry per
+ * surface.
+ *
+ * Add this class alongside a surface-specific class that handles the
+ * button's own dimensions / padding (e.g. `.drawing-tool-btn`,
+ * `.header-toolbar-btn`, `.right-rail-tab`).  That surface class is the
+ * one that overrides the CSS variables below; the base class only
+ * supplies the pill itself + the activated/hovered fill.
+ *
+ * Variables (all optional; defaults match the neutral toolbar buttons):
+ *   --ot-tb-pill-inset       — same on all sides (shorthand; 2px default)
+ *   --ot-tb-pill-{top,bottom,left,right} — per-side override
+ *   --ot-tb-pill-radius      — pill corner radius (6px default)
+ */
+.ot-toolbar-button {
+  position: relative;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  color: var(--color-toolbar-button-text);
+  cursor: default;
+  -webkit-app-region: no-drag;
+  transition: color 60ms ease;
+}
+
+.ot-toolbar-button::before {
+  content: "";
+  position: absolute;
+  top:    var(--ot-tb-pill-top,    var(--ot-tb-pill-inset, 2px));
+  bottom: var(--ot-tb-pill-bottom, var(--ot-tb-pill-inset, 2px));
+  inset-inline-start:   var(--ot-tb-pill-left,   var(--ot-tb-pill-inset, 2px));
+  inset-inline-end:  var(--ot-tb-pill-right,  var(--ot-tb-pill-inset, 2px));
+  border-radius: var(--ot-tb-pill-radius, 6px);
+  background-color: transparent;
+  z-index: -1;
+  pointer-events: none;
+  transition: background-color 60ms ease;
+}
+
+.ot-toolbar-button:hover {
+  color: var(--color-toolbar-button-text-hover);
+}
+
+/* Plain hover (button not selected) — neutral gray pill. */
+.ot-toolbar-button:hover:not(.is-disabled)::before {
+  background-color: var(--color-toolbar-button-background-hover);
+}
+
+/* Toggle "active" (magnet / lock / hide / favorites-toggle, header interval,
+ * right-rail tabs) — dedicated blue-tinted pill. Separate `-background-active`
+ * and `-background-hover` tokens exist so the active button stays
+ * distinguishable from one that's merely hovered; reusing the hover token here
+ * made the active tab invisible at rest. */
+.ot-toolbar-button.active::before,
+.ot-toolbar-button[aria-pressed="true"]::before {
+  background-color: var(--color-toolbar-button-background-active);
+}
+
+/* Active + hover — slightly stronger tint (higher specificity wins). */
+.ot-toolbar-button.active:hover:not(.is-disabled)::before,
+.ot-toolbar-button[aria-pressed="true"]:hover:not(.is-disabled)::before {
+  background-color: var(--color-toolbar-button-background-active-hover);
+}
+
+.ot-toolbar-button.active,
+.ot-toolbar-button[aria-pressed="true"] {
+  color: var(--color-toolbar-button-text-active);
+}
+
+.ot-toolbar-button.active:hover:not(.is-disabled),
+.ot-toolbar-button[aria-pressed="true"]:hover:not(.is-disabled) {
+  color: var(--color-toolbar-button-text-active-hover);
+}
+
+/* Selected DRAWING TOOL — NOT blue. The drawing toolbar leaves the armed
+ * tool's icon at its default colour and marks it only with a neutral grey pill
+ * (icon #dbdbdb, pill #3d3d3d = the secondary-hover token). So `.selected`
+ * keeps the default text colour (no rule) and just gets the grey pill, at rest
+ * and on hover. Placed after the plain-hover rule so it wins on hover by source order. */
+.ot-toolbar-button.selected::before,
+.ot-toolbar-button.selected:hover:not(.is-disabled)::before {
+  background-color: var(--color-toolbar-button-background-secondary-hover);
+}
+
+/* Selected TIMEFRAME on the header interval strip — the same neutral grey
+ * treatment as the armed drawing tool, NOT the blue toggle pill (the active
+ * interval gets a grey pill + default-colour label). Three
+ * classes so it outranks the generic `.active` blue pill + text rules above,
+ * at rest and on hover. */
+.ot-toolbar-button.header-toolbar-btn.active::before,
+.ot-toolbar-button.header-toolbar-btn.active:hover:not(.is-disabled)::before {
+  background-color: var(--color-toolbar-button-background-secondary-hover);
+}
+.ot-toolbar-button.header-toolbar-btn.active {
+  color: var(--color-toolbar-button-text);
+}
+.ot-toolbar-button.header-toolbar-btn.active:hover:not(.is-disabled) {
+  color: var(--color-toolbar-button-text-hover);
+}
+
+/* Selected RIGHT-RAIL TAB — neutral grey pill + default icon colour, the same
+ * treatment as the armed drawing tool (NOT the blue toggle pill), for the
+ * open widget tab. Specificity beats the generic `.active` /
+ * `[aria-pressed="true"]` blue rules above; covers rest + hover. */
+.ot-toolbar-button.right-rail-tab.active::before,
+.ot-toolbar-button.right-rail-tab[aria-pressed="true"]::before,
+.ot-toolbar-button.right-rail-tab.active:hover:not(.is-disabled)::before,
+.ot-toolbar-button.right-rail-tab[aria-pressed="true"]:hover:not(.is-disabled)::before {
+  background-color: var(--color-toolbar-button-background-secondary-hover);
+}
+.ot-toolbar-button.right-rail-tab.active,
+.ot-toolbar-button.right-rail-tab[aria-pressed="true"] {
+  color: var(--color-toolbar-button-text);
+}
+.ot-toolbar-button.right-rail-tab.active:hover:not(.is-disabled),
+.ot-toolbar-button.right-rail-tab[aria-pressed="true"]:hover:not(.is-disabled) {
+  color: var(--color-toolbar-button-text-hover);
+}
+
+/* Favourite-drawings toggle (left toolbar star) — keeps the neutral icon
+ * colour with a grey pill when active, never the blue toggle. */
+.ot-toolbar-button.drawing-fav-toggle.active::before,
+.ot-toolbar-button.drawing-fav-toggle.active:hover:not(.is-disabled)::before {
+  background-color: var(--color-toolbar-button-background-secondary-hover);
+}
+.ot-toolbar-button.drawing-fav-toggle.active {
+  color: var(--color-toolbar-button-text);
+}
+.ot-toolbar-button.drawing-fav-toggle.active:hover:not(.is-disabled) {
+  color: var(--color-toolbar-button-text-hover);
+}
+
+.ot-toolbar-button.is-disabled {
+  opacity: 0.4;
+}

@@ -10,6 +10,30 @@ set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
+# Version managers (nvm, fnm, volta) wire node up in the interactive rc files only, so a launcher started from
+# a desktop icon — with the session's sparse PATH — finds no node at all. Fall back to their newest install.
+node_dirs() {
+  local home="${HOME:-${USERPROFILE:-}}" dir
+  for dir in \
+    "${NVM_DIR:-$home/.nvm}/versions/node"/*/bin \
+    "${FNM_DIR:-$home/.local/share/fnm}/node-versions"/*/installation/bin \
+    "${VOLTA_HOME:-$home/.volta}/bin"; do
+    if [ -x "$dir/node" ]; then printf '%s\n' "$dir"; fi
+  done
+  return 0
+}
+
+if ! command -v node >/dev/null 2>&1; then
+  node_bin="$(node_dirs | sort -rV 2>/dev/null | tail -n 1)"
+  if [ -z "$node_bin" ]; then
+    node_bin="$(node_dirs | sort -r | tail -n 1)"
+  fi
+  if [ -n "$node_bin" ]; then
+    PATH="$node_bin:$PATH"
+    export PATH
+  fi
+fi
+
 if ! command -v node >/dev/null 2>&1; then
   echo "tradepanel: Node.js 22+ is required: https://nodejs.org" >&2
   exit 1

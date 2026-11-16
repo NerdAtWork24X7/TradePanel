@@ -64,3 +64,12 @@ node_modules/
 dist/
 target/
 dist-standalone/
+
+# ── Generated OpenTrader checkout (scripts/update-opentrader.mjs) ────────────
+opentrader/
+
+# ── Plugin build artifacts (source is tracked) ───────────────────────────────
+plugins/*/.venv/
+plugins/*/dist/
+plugins/*/.pytest_cache/
+extensions/analyst/runtime/node_modules/

@@ -1,0 +1,811 @@
+diff --git a/src/App.tsx b/src/App.tsx
+index b2c7c14..1873cdc 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -16,6 +16,11 @@ import { activeChartProbe } from "./window/chart/active-chart";
+ import { openCreateAlertOnSelection } from "./window/shell/create-alert";
+ import { findTimezone } from "./data/timezones";
+ import { ChartGrid } from "./window/chart/ChartGrid";
++import { installAnalystCapture } from "./data/analyst-capture";
++import { installAnalystTradeDrawing, type AnalystTradeDrawingPlan } from "./data/analyst-trade-drawing";
++import { chartLastBarTime } from "./data/chart-state-registry";
++import { planDrawing } from "./window/trading/plan-drawing";
++import { captureInAnalysisWindow } from "./window/chart/analyst-capture-window";
+ import { LAYOUT_SPECS, layoutFromVariantId, variantIdForLayout, type LayoutId } from "./window/chart/layouts";
+ import { DrawingToolbar } from "./window/drawings/DrawingToolbar";
+ import { drawingPanelVisible } from "./data/drawing-panel";
+@@ -25,7 +30,7 @@ import { TabPanelActions } from "./window/shell/TabPanelActions";
+ import { KeyboardShortcutsPanel } from "./window/shell/KeyboardShortcutsPanel";
+ import { ZoomToast } from "./window/shell/ZoomToast";
+ import { WindowControls } from "./window/shell/WindowControls";
+-import { DEFAULT_PANELS, reconcilePanes } from "./window/shell/tabs";
++import { DEFAULT_PANELS, reconcilePanes, type PaneChart } from "./window/shell/tabs";
+ import { recordRecentSymbol } from "./data/recent-symbols";
+ import { AppSettingsDialog } from "./window/header/AppSettingsDialog";
+ import { AlertDialog } from "./window/alerts/AlertDialog";
+@@ -396,6 +402,52 @@ function App() {
+     moveDrawingToDisplayIndex,
+   } = drawingStore;
+   const chartEdits = createChartEdits(appTabs, undo, drawingStore);
++
++  // Analyze chart "Show on chart": the plan becomes a long / short position
++  // drawing (the risk/reward box) on a pane that shows the symbol. It is a
++  // drawing like any other: undoable, movable and removable.
++  onCleanup(
++    installAnalystTradeDrawing((plan: AnalystTradeDrawingPlan) => {
++      const symbol = plan.symbol.trim().toUpperCase();
++      const tab = activeTab();
++      const active = activePaneState();
++      const pane =
++        tab.panes.find((p) => p.symbol.trim().toUpperCase() === symbol) ??
++        (active.symbol.trim().toUpperCase() === symbol ? active : null);
++      if (!pane) return false;
++      const drawing = planDrawing(plan, pane.interval, chartLastBarTime(pane.symbol) ?? Date.now());
++      if (!drawing) return false;
++      const id = drawingStore.addDrawingToSymbol(drawingStore.drawingKeyFor(pane, tab.id), drawing);
++      setSelectedDrawingId(id);
++      return true;
++    }),
++  );
++
++  // Analyze chart's pictures: a short-lived, off-screen second Tauri window
++  // renders the selected chart at 1d / 4h / 5m with the studies it shows, so
++  // the analyst gets three images without the visible chart flashing through
++  // intervals and without a bundled browser.
++  const copyPane = (pane: PaneChart): PaneChart => ({
++    ...pane,
++    indicators: [...pane.indicators],
++    ...(pane.compare ? { compare: pane.compare.map((c) => ({ ...c })) } : {}),
++    ...(pane.indicatorSettings ? { indicatorSettings: JSON.parse(JSON.stringify(pane.indicatorSettings)) as PaneChart["indicatorSettings"] } : {}),
++    ...(pane.settings ? { settings: JSON.parse(JSON.stringify(pane.settings)) as PaneChart["settings"] } : {}),
++  });
++  onCleanup(
++    installAnalystCapture((request) => {
++      const pane = copyPane(activePaneState());
++      return captureInAnalysisWindow({
++        symbol: request.symbol || pane.symbol,
++        targets: [...request.targets],
++        pane,
++        indicatorsHidden: indicatorsHidden(),
++        theme: theme(),
++        timeZone: displayTimeZone(timezone().label, timezone().iana, pane.symbol),
++        timeZoneLabel: timezone().label,
++      });
++    }),
++  );
+   const {
+     patchStudyInputs,
+     addIndicator,
+@@ -1010,7 +1062,7 @@ function App() {
+         <ScreenerPanel windowLabel={windowLabel} onSymbolPicked={onSymbolPicked} />
+       </Show>
+       {/* AI assistant (desktop: its requests go through Rust). */}
+-      <Show when={assistantPanel.open() && isTauri()}>
++      <Show when={assistantPanel.open()}>
+         <AssistantPanel ticker={tickerOf(symbol())} />
+       </Show>
+       </div>
+diff --git a/src/index.tsx b/src/index.tsx
+index 93401f3..e51ca6e 100644
+--- a/src/index.tsx
++++ b/src/index.tsx
+@@ -1,6 +1,7 @@
+ /* @refresh reload */
+ import "./styles.css";
+ import { hydrateKv } from "./data/kv";
++import { ANALYSIS_CAPTURE_VIEW } from "./data/analyst-capture";
+ import { installOverflowTooltip } from "./components/overflow-tooltip";
+ import { installBrowserMenuBlock } from "./components/browser-menu";
+ 
+@@ -18,18 +19,33 @@ void hydrateKv().finally(async () => {
+   // Restart: main may take over a saved window's tabs (window session).
+   const { adoptSavedWindowTabs } = await import("./window/shell/window-bridge");
+   await adoptSavedWindowTabs();
++  // The interface language, before anything is drawn.
++  const { startTranslation } = await import("./i18n/language");
++  await startTranslation();
++  const params = new URLSearchParams(location.search);
++  // Analyze chart's short-lived hidden renderer: a chart only, no shell.
++  if (params.get("view") === ANALYSIS_CAPTURE_VIEW) {
++    const id = params.get("id") ?? "";
++    // The chart studies must exist before the chart is created and pictured.
++    const { loadIndicatorLibrary } = await import("./window/chart/indicators/registry");
++    // A failed library chunk must not leave the capture window on its splash.
++    await loadIndicatorLibrary().catch(() => undefined);
++    const { render } = await import("solid-js/web");
++    const { AnalysisCaptureWindow } = await import("./window/chart/AnalysisCaptureWindow");
++    const root = document.getElementById("root") as HTMLElement;
++    render(() => <AnalysisCaptureWindow id={id} />, root);
++    hideSplash();
++    return;
++  }
+   // Update state for the title bar, main menu and Settings > About.
+   const { initAppUpdate } = await import("./data/app-update");
+   initAppUpdate();
+   // The run's app zoom (a window opened after a change takes it).
+   const { initAppZoom } = await import("./data/app-zoom");
+   initAppZoom();
+-  // The interface language, before anything is drawn.
+-  const { startTranslation } = await import("./i18n/language");
+-  await startTranslation().finally(() => document.getElementById("splash")?.classList.add("is-translated"));
+   const { render } = await import("solid-js/web");
+   // The screener's own window (placement "Separate window") holds the screener only.
+-  if (new URLSearchParams(location.search).get("view") === "screener") {
++  if (params.get("view") === "screener") {
+     const { ScreenerWindow } = await import("./window/screener/ScreenerWindow");
+     render(() => <ScreenerWindow />, document.getElementById("root") as HTMLElement);
+     hideSplash();
+@@ -48,9 +64,9 @@ void hydrateKv().finally(async () => {
+   initAnalytics();
+ });
+ 
+-/** Minimum time the startup splash stays up, from page start, so its delay
+- *  warning can be read. The App renders and loads data underneath meanwhile. */
+-const SPLASH_MIN_MS = 1500;
++/** Minimum time the startup splash stays up, from page start, so a fast start
++ *  does not flash the loading text for a frame. The App renders underneath. */
++const SPLASH_MIN_MS = 300;
+ 
+ /** Fade out the startup splash (index.html) once the App has rendered and the
+  *  minimum time has passed. */
+diff --git a/src/styles/assistant.css b/src/styles/assistant.css
+index 0e2d543..3a865af 100644
+--- a/src/styles/assistant.css
++++ b/src/styles/assistant.css
+@@ -652,3 +652,534 @@
+ .asst-rate-btn.is-on {
+   color: var(--color-cold-gray-200);
+ }
++
++/* ── Chart analyst ───────────────────────────────────────────────────────── */
++.asst-mode {
++  flex: 0 0 auto;
++  padding: 8px 14px;
++  border-bottom: 1px solid var(--color-divider, var(--color-cold-gray-800));
++}
++.asst-analyst {
++  flex: 1 1 auto;
++  min-height: 0;
++  overflow-y: auto;
++  display: flex;
++  flex-direction: column;
++  gap: 12px;
++  padding: 12px 14px 16px;
++}
++.asst-analyst-head {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  gap: 12px;
++}
++.asst-analyst-title {
++  font-size: 13px;
++  font-weight: 600;
++  color: var(--color-text-primary);
++}
++.asst-analyst-meta {
++  margin-block-start: 2px;
++  font-size: 12px;
++  color: var(--color-text-secondary);
++  overflow-wrap: anywhere;
++}
++.asst-link {
++  padding: 2px 4px;
++  border: 0;
++  border-radius: 4px;
++  background: none;
++  color: var(--color-text-primary);
++  font: inherit;
++  font-size: 12px;
++  cursor: pointer;
++}
++.asst-link:hover {
++  color: var(--color-brand, var(--color-white));
++  text-decoration: underline;
++}
++.asst-link:focus-visible {
++  outline: 2px solid var(--color-brand, var(--color-cold-gray-200));
++  outline-offset: 2px;
++}
++.asst-primary {
++  padding: 6px 12px;
++  border: 0;
++  border-radius: 6px;
++  background: var(--color-text-primary);
++  color: var(--color-bg-primary);
++  font: inherit;
++  font-size: 13px;
++  font-weight: 600;
++  cursor: pointer;
++}
++.asst-primary:disabled {
++  opacity: 0.45;
++  cursor: default;
++}
++.asst-primary:focus-visible {
++  outline: 2px solid var(--color-brand, var(--color-white));
++  outline-offset: 2px;
++}
++.asst-analyst-form {
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++  padding: 10px;
++  border: 1px solid var(--color-divider, var(--color-cold-gray-800));
++  border-radius: 8px;
++  background: var(--color-bg-highlight);
++}
++.asst-analyst-field {
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++  font-size: 12px;
++  color: var(--color-text-secondary);
++}
++.asst-analyst-input {
++  padding: 6px 8px;
++  border: 1px solid var(--color-divider, #3a3a3a);
++  border-radius: 6px;
++  background: var(--color-bg-primary);
++  color: var(--color-text-primary);
++  font: inherit;
++  font-size: 13px;
++}
++.asst-analyst-input:focus-visible {
++  border-color: var(--color-brand, var(--color-cold-gray-200));
++  outline: none;
++  box-shadow: 0 0 0 1px var(--color-brand, var(--color-cold-gray-200));
++}
++.asst-analyst-input.is-invalid {
++  border-color: var(--color-danger, var(--color-content-primary-danger));
++}
++.asst-analyst-note {
++  margin: 0;
++  font-size: 12px;
++  line-height: 16px;
++  color: var(--color-text-secondary);
++}
++.asst-analyst-figure {
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++  margin: 0;
++}
++.asst-analyst-image {
++  width: 100%;
++  border: 1px solid var(--color-divider, var(--color-cold-gray-800));
++  border-radius: 6px;
++}
++.asst-shot-grid {
++  display: grid;
++  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
++  gap: 8px;
++}
++.asst-shot {
++  position: relative;
++  display: block;
++  min-width: 0;
++  padding: 0;
++  border: 0;
++  border-radius: 6px;
++  background: none;
++  cursor: pointer;
++  text-align: start;
++}
++.asst-shot:hover .asst-analyst-image {
++  border-color: var(--color-brand, var(--color-cold-gray-450));
++}
++.asst-shot:focus-visible {
++  outline: 2px solid var(--color-brand, var(--color-cold-gray-200));
++  outline-offset: 2px;
++}
++.asst-shot .asst-analyst-image {
++  display: block;
++}
++.asst-shot-label {
++  position: absolute;
++  inset-block-start: 4px;
++  inset-inline-start: 4px;
++  padding: 1px 5px;
++  border-radius: 4px;
++  background: color-mix(in srgb, var(--color-bg-primary, #000) 72%, transparent);
++  color: var(--color-text-primary);
++  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
++  font-size: 10px;
++  line-height: 14px;
++  pointer-events: none;
++}
++.asst-log {
++  /* The analyst column is a finite-height flex column: without this the log
++     shrinks to its header and the rows paint under the next section. */
++  flex: 0 0 auto;
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++  max-height: 260px;
++  overflow-y: auto;
++  padding: 10px;
++  border: 1px solid var(--color-divider, var(--color-cold-gray-800));
++  border-radius: 8px;
++  background: var(--color-bg-highlight);
++}
++.asst-log-head {
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: 8px;
++  font-size: 12px;
++  font-weight: 600;
++  color: var(--color-text-primary);
++}
++.asst-log-count {
++  font-weight: 400;
++  color: var(--color-text-secondary);
++}
++.asst-log-list {
++  display: flex;
++  flex-direction: column;
++  gap: 2px;
++  margin: 0;
++  padding: 0;
++  list-style: none;
++}
++.asst-log-row {
++  display: flex;
++  align-items: center;
++  gap: 2px;
++  border-radius: 6px;
++}
++.asst-log-row.is-current {
++  background: color-mix(in srgb, var(--color-brand, #2962ff) 12%, transparent);
++}
++.asst-log-open {
++  flex: 1 1 auto;
++  display: grid;
++  grid-template-columns: auto minmax(0, 1fr) auto auto;
++  gap: 8px;
++  align-items: center;
++  min-width: 0;
++  padding: 5px 6px;
++  border: 0;
++  border-radius: 6px;
++  background: none;
++  color: var(--color-text-primary);
++  font: inherit;
++  font-size: 12px;
++  text-align: start;
++  cursor: pointer;
++}
++.asst-log-open:hover:not(:disabled) {
++  background: color-mix(in srgb, var(--color-text-primary) 7%, transparent);
++}
++.asst-log-open:disabled {
++  opacity: 0.5;
++  cursor: default;
++}
++.asst-log-open:focus-visible {
++  outline: 2px solid var(--color-brand, var(--color-cold-gray-200));
++  outline-offset: 1px;
++}
++.asst-log-side {
++  font-size: 10px;
++  font-weight: 700;
++  letter-spacing: 0.04em;
++  text-transform: uppercase;
++  color: var(--color-content-primary-positive, #089981);
++}
++.asst-log-side.is-short {
++  color: var(--color-content-primary-danger, #f23645);
++}
++.asst-log-symbol {
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++.asst-log-stamp {
++  color: var(--color-text-secondary);
++  font-size: 11px;
++  font-variant-numeric: tabular-nums;
++}
++.asst-log-prob {
++  min-width: 30px;
++  text-align: end;
++  font-size: 11px;
++  font-variant-numeric: tabular-nums;
++  color: var(--color-text-secondary);
++}
++.asst-log-del {
++  flex: 0 0 auto;
++  width: 24px;
++  height: 24px;
++  padding: 0;
++  border: 0;
++  border-radius: 4px;
++  background: none;
++  color: var(--color-text-secondary);
++  font-size: 16px;
++  line-height: 1;
++  cursor: pointer;
++}
++.asst-log-del:hover:not(:disabled) {
++  color: var(--color-content-primary-danger, #f23645);
++  background: color-mix(in srgb, var(--color-content-primary-danger, #f23645) 12%, transparent);
++}
++.asst-log-del:focus-visible {
++  outline: 2px solid var(--color-brand, var(--color-cold-gray-200));
++  outline-offset: 1px;
++}
++.asst-analyst-figure figcaption {
++  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
++  font-size: 11px;
++  line-height: 15px;
++  white-space: pre-wrap;
++}
++.asst-analyst-ask {
++  /* The follow-up composer stays at the bottom of the analyst panel while a
++     long answer scrolls above it. */
++  position: sticky;
++  bottom: 0;
++  z-index: 2;
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++  padding: 8px;
++  border: 1px solid var(--color-divider, #444);
++  border-radius: 8px;
++  background: var(--color-bg-primary);
++  box-shadow: 0 -6px 14px 0 color-mix(in srgb, #000 32%, transparent);
++}
++.asst-analyst-ask:focus-within {
++  border-color: var(--color-brand, var(--color-cold-gray-450));
++}
++.asst-analyst-actions {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: 8px;
++}
++
++/* Analyze chart: the agent's tool steps and its validated trade card. */
++.asst-steps {
++  /* Long/short colours with an AA contrast on the panel background in both themes. */
++  --plan-up: var(--color-content-primary-positive, #089981);
++  --plan-down: var(--color-content-primary-danger, #f23645);
++  display: flex;
++  flex-wrap: wrap;
++  gap: 6px;
++  margin: 0;
++  padding: 0;
++  list-style: none;
++}
++.asst-step {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++  padding: 3px 8px;
++  border: 1px solid var(--color-divider, var(--color-cold-gray-800));
++  border-radius: 999px;
++  font-size: 11px;
++  line-height: 14px;
++  color: var(--color-text-secondary);
++  font-variant-numeric: tabular-nums;
++}
++.asst-step .asst-step-dot {
++  flex: 0 0 6px;
++  height: 6px;
++  border-radius: 50%;
++  background-color: var(--color-brand, #2962ff);
++  animation: asst-blink 1.2s infinite ease-in-out;
++}
++.asst-step.is-done .asst-step-dot {
++  background-color: var(--plan-up);
++  animation: none;
++}
++.asst-step.is-failed {
++  border-color: var(--plan-down);
++  color: var(--plan-down);
++}
++.asst-step.is-failed .asst-step-dot {
++  background-color: var(--plan-down);
++  animation: none;
++}
++.asst-plan {
++  --plan-up: var(--color-content-primary-positive, #089981);
++  --plan-down: var(--color-content-primary-danger, #f23645);
++  display: flex;
++  flex-direction: column;
++  gap: 10px;
++  padding: 12px;
++  border: 1px solid color-mix(in srgb, var(--plan-up) 45%, transparent);
++  border-inline-start-width: 3px;
++  border-radius: 10px;
++  background:
++    linear-gradient(180deg, color-mix(in srgb, var(--plan-up) 10%, transparent), transparent 70%),
++    var(--color-bg-highlight);
++}
++/* The light theme's danger red is too light for text: the bold step keeps AA. */
++html.theme-light .asst-plan,
++html.theme-light .asst-steps {
++  --plan-down: var(--color-content-primary-danger-bold, #b22833);
++}
++.asst-plan.is-short {
++  border-color: color-mix(in srgb, var(--plan-down) 45%, transparent);
++  background:
++    linear-gradient(180deg, color-mix(in srgb, var(--plan-down) 10%, transparent), transparent 70%),
++    var(--color-bg-highlight);
++}
++.asst-plan-head {
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: 12px;
++}
++.asst-plan-side {
++  font-size: 15px;
++  font-weight: 700;
++  letter-spacing: 0.04em;
++  text-transform: uppercase;
++  color: var(--plan-up);
++}
++.asst-plan.is-short .asst-plan-side {
++  color: var(--plan-down);
++}
++.asst-plan-prob {
++  display: inline-flex;
++  align-items: baseline;
++  gap: 6px;
++  color: var(--color-text-secondary);
++  font-size: 11px;
++}
++.asst-plan-prob b {
++  font-size: 18px;
++  font-variant-numeric: tabular-nums;
++  color: var(--color-text-primary);
++}
++.asst-plan-rows {
++  display: grid;
++  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
++  gap: 8px 12px;
++  margin: 0;
++}
++.asst-plan-rows > div {
++  display: flex;
++  flex-direction: column;
++  gap: 2px;
++  min-width: 0;
++}
++.asst-plan-rows dt {
++  font-size: 11px;
++  line-height: 14px;
++  color: var(--color-text-secondary);
++}
++.asst-plan-rows dd {
++  margin: 0;
++  font-size: 14px;
++  line-height: 18px;
++  font-variant-numeric: tabular-nums;
++  color: var(--color-text-primary);
++  overflow-wrap: anywhere;
++}
++.asst-plan-rows dd.is-target {
++  color: var(--plan-up);
++}
++.asst-plan-rows dd.is-risk {
++  color: var(--plan-down);
++}
++.asst-plan-note {
++  margin: 0;
++  font-size: 12px;
++  line-height: 17px;
++  color: var(--color-text-secondary);
++}
++.asst-plan-actions {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: 8px;
++}
++.asst-plan-basis {
++  margin-inline-start: auto;
++  padding: 2px 6px;
++  border-radius: 4px;
++  background: var(--color-bg-primary);
++  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
++  font-size: 11px;
++  color: var(--color-text-secondary);
++}
++
++/* Analyze chart: the runtime badge, callouts and the one-press start. */
++.asst-analyst-heading {
++  min-width: 0;
++}
++.asst-runtime {
++  display: inline-flex;
++  align-items: center;
++  gap: 5px;
++  color: var(--color-text-secondary);
++  font-size: 11px;
++}
++.asst-runtime-dot {
++  width: 6px;
++  height: 6px;
++  border-radius: 50%;
++  background-color: var(--color-content-primary-positive, #089981);
++}
++.asst-runtime.is-busy .asst-runtime-dot {
++  background-color: var(--color-brand, #2962ff);
++  animation: asst-blink 1.2s infinite ease-in-out;
++}
++.asst-runtime.is-error .asst-runtime-dot {
++  background-color: var(--color-content-primary-danger, #f23645);
++}
++.asst-analyst-sep {
++  color: var(--color-cold-gray-450);
++}
++.asst-callout {
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++  padding: 10px 12px;
++  border: 1px solid var(--color-divider, var(--color-cold-gray-800));
++  border-radius: 8px;
++  background: var(--color-bg-highlight);
++}
++.asst-callout p {
++  margin: 0;
++  font-size: 12px;
++  line-height: 16px;
++  color: var(--color-text-secondary);
++}
++.asst-callout.is-error {
++  border-color: color-mix(in srgb, var(--color-content-primary-danger, #f23645) 45%, transparent);
++}
++.asst-callout.is-error p {
++  color: var(--color-content-primary-danger, #f23645);
++}
++.asst-form-head {
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: 8px;
++  font-size: 12px;
++  font-weight: 600;
++  color: var(--color-text-primary);
++}
++.asst-runtime-note {
++  font-weight: 400;
++  color: var(--color-text-secondary);
++}
++.asst-analyst-start .asst-primary {
++  flex: 1 1 auto;
++  min-height: 32px;
++}
++/* The light theme's danger red is too light for 12 px text (AA): use its bold step. */
++html.theme-light .asst-callout.is-error {
++  border-color: color-mix(in srgb, var(--color-content-primary-danger-bold, #b22833) 45%, transparent);
++}
++html.theme-light .asst-callout.is-error p {
++  color: var(--color-content-primary-danger-bold, #b22833);
++}
+diff --git a/src/window/assistant/AssistantPanel.tsx b/src/window/assistant/AssistantPanel.tsx
+index 25c41d6..2264ad8 100644
+--- a/src/window/assistant/AssistantPanel.tsx
++++ b/src/window/assistant/AssistantPanel.tsx
+@@ -1,8 +1,8 @@
+ import { translate, translateWith } from "../../i18n/translator";
+ /*
+  * The AI assistant panel (right rail's AI button), laid out as the reference desktop app's (3.5.0, measured over CDP
+- * on 04/11/2026, .tmp/ai-panel): an overlay at the window's right (or a split view), its header with "Move overlay to
+- * split-view", the title, Collapse panel and Close; a 680 px column with the chat's title menu (Create new chat /
++ * on 04/11/2026, .tmp/ai-panel): a split view at the window's right (or an overlay over the charts), its header with
++ * "Move split-view to overlay", the title, Collapse panel and Close; a 680 px column with the chat's title menu (Create new chat /
+  * Open chat…), the greeting and its suggestions on an empty chat, the messages, then the composer with Send, and the
+  * note under it.
+  *
+@@ -17,6 +17,8 @@ import { activeChat, answerConfirm, chats, deleteChat, newChat, openChat, rateAn
+ import { attach, MAX_ATTACHMENT_BYTES } from "../../data/assistant/attachments";
+ import { Popup } from "./Popup";
+ import { AssistantSetup } from "./LocalModel";
++import { ChartAnalyst } from "./ChartAnalyst";
++import { SegmentedControl } from "../../components/SegmentedControl";
+ import { gb, localError, localInfo, localProgress, refreshLocal, removeLocal, setUpdateLater, updateBytes, updateLater, updateLocal } from "../../data/assistant/local";
+ import { stepTitle } from "./steps";
+ import "../../styles/screener.css";
+@@ -37,7 +39,7 @@ export function AssistantPanel(props: { ticker: string }) {
+   onMount(() => void refreshLocal());
+   const ready = () => !!localInfo()?.installed;
+   const overlay = () => assistantPanel.mode() === "overlay";
+-  const [view, setView] = createSignal<"chat" | "chats">("chat");
++  const [view, setView] = createSignal<"chat" | "chats" | "analyze">("chat");
+ 
+ 
+   // Resizer: drag the 4 px strip; the panel grows to the left.
+@@ -95,8 +97,22 @@ export function AssistantPanel(props: { ticker: string }) {
+             </button>
+           </div>
+         </header>
++        <div class="asst-mode">
++          <SegmentedControl<"chat" | "analyze">
++            items={[
++              { id: "chat", label: translate("Chat") },
++              { id: "analyze", label: translate("Analyze chart") },
++            ]}
++            value={view() === "analyze" ? "analyze" : "chat"}
++            onChange={(id) => setView(id)}
++            ariaLabel={translate("Assistant mode")}
++          />
++        </div>
+         <div class="asst-body">
+           <Switch>
++            <Match when={view() === "analyze"}>
++              <ChartAnalyst ticker={props.ticker} />
++            </Match>
+             <Match when={localInfo() && !ready()}>
+               <AssistantSetup />
+             </Match>
+diff --git a/src/window/chart/ChartView.tsx b/src/window/chart/ChartView.tsx
+index a83bcf6..d37375e 100644
+--- a/src/window/chart/ChartView.tsx
++++ b/src/window/chart/ChartView.tsx
+@@ -581,6 +582,7 @@ export function ChartView(props: ChartViewProps) {
+   // keyed by the full name ("NASDAQ:AAPL"). Re-keys on symbol change; provider reads the mutable
+   // `raw`/`controller` lazily so values are always current. (chart-state-registry.ts)
+   createEffect(() => {
++    if (props.capture) return;
+     const key = (props.symbol ?? "").toUpperCase();
+     if (!key) return;
+     registerChartState(key, {
+diff --git a/src/window/shell/window-bridge.ts b/src/window/shell/window-bridge.ts
+index debc1c4..ad038b0 100644
+--- a/src/window/shell/window-bridge.ts
++++ b/src/window/shell/window-bridge.ts
+@@ -18,6 +18,7 @@ import { getAllWebviewWindows, getCurrentWebviewWindow, WebviewWindow } from "@t
+ import type { TabChart } from "./tabs";
+ import { clearTabs, tabTitle } from "./tabs";
+ import { pushClosed, type ClosedWindow } from "./closed-stack";
++import { ANALYSIS_CAPTURE_VIEW } from "../../data/analyst-capture";
+ 
+ const DETACH_PREFIX = "ot:detach:";
+ 
+@@ -93,6 +94,41 @@ export function detachTabToWindow(tab: TabChart, screenX: number, screenY: numbe
+   }
+ }
+ 
++/** Label prefix of the short-lived Analyze chart renderer (never restored). */
++export const ANALYSIS_CAPTURE_PREFIX = "analysis-capture-";
++
++/**
++ * Open the hidden window that renders Analyze chart's pictures. It is a real
++ * second Tauri webview (the same seam as detached tabs), created hidden so it
++ * can paint without flashing the user's chart. Returns null outside Tauri or
++ * when the window cannot be created.
++ */
++export function openAnalysisCaptureWindow(id: string): WebviewWindow | null {
++  if (!isTauri()) return null;
++  try {
++    const win = new WebviewWindow(`${ANALYSIS_CAPTURE_PREFIX}${id}`, {
++      url: `index.html?view=${ANALYSIS_CAPTURE_VIEW}&id=${encodeURIComponent(id)}`,
++      x: -20_000,
++      y: 0,
++      width: 1120,
++      height: 700,
++      title: "OpenTrader",
++      focus: false,
++      visible: false,
++      skipTaskbar: true,
++      decorations: false,
++      shadow: false,
++      resizable: false,
++      dragDropEnabled: false,
++    });
++    // The hidden window must not take focus from the chart.
++    void win.setFocusable(false).catch(() => undefined);
++    return win;
++  } catch {
++    return null;
++  }
++}
++
+ /** Label of the screener's own window (placement "Separate window"): one at a time. */
+ export const SCREENER_WINDOW = "screener";
+ 

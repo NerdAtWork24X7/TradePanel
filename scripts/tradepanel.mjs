@@ -21,6 +21,12 @@ const APP = join(ROOT, "opentrader");
 const SRC_TAURI = join(APP, "src-tauri");
 const WIN = process.platform === "win32";
 const NPM = WIN ? "npm.cmd" : "npm";
+if (!existsSync(join(APP, "package.json")) || !existsSync(join(APP, ".git"))) {
+  fail(
+    "opentrader/ is not a prepared upstream checkout.",
+    "Run `npm run setup` (clone, overlay the extension packs, install dependencies).",
+  );
+}
 const MIN_NODE = [20, 19];
 const RECOMMENDED_NODE = 22;
 
@@ -209,11 +215,11 @@ if (!existsSync(join(APP, "src", "bindings.ts"))) {
 
 // ── Crypto plugin (installed by default) ──────────────────────────────────────
 if (!noInstall) {
-  const installScript = join(APP, "scripts", "install-crypto-plugin.mjs");
+  const installScript = join(ROOT, "scripts", "install-crypto-plugin.mjs");
   if (existsSync(installScript)) {
     say("ensuring the crypto plugin is installed (npm run ot:crypto)");
     const crypto = spawnSync(process.execPath, [installScript, "--if-needed"], {
-      cwd: APP,
+      cwd: ROOT,
       stdio: "inherit",
       shell: WIN,
     });
@@ -221,11 +227,11 @@ if (!noInstall) {
   }
   // One broker plugin per venue, installed off: every broker is a card in Exchanges > Brokers and in
   // Trade > Connect broker, and enabling the one the user trades starts its process.
-  const brokerScript = join(APP, "scripts", "install-broker-plugins.mjs");
+  const brokerScript = join(ROOT, "scripts", "install-broker-plugins.mjs");
   if (existsSync(brokerScript)) {
     say("ensuring the broker plugins are installed (npm run ot:brokers)");
     const brokers = spawnSync(process.execPath, [brokerScript, "--if-needed", "--disabled"], {
-      cwd: APP,
+      cwd: ROOT,
       stdio: "inherit",
       shell: WIN,
     });

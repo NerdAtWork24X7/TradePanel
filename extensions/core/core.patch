@@ -1,0 +1,790 @@
+diff --git a/.gitignore b/.gitignore
+index 272cd95..e31ff5a 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -61,3 +61,12 @@ BACKLOG.md
+ # Stale internal notes (describe the pre-gateway data layer)
+ docs/PERFORMANCE.md
+ plugins/*/dist/
++plugins/dist/
++
++# Staged AI runtime (npm run ai:runtime): build artifact
++src-tauri/ai-runtime/*
++!src-tauri/ai-runtime/README.md
++ai-runtime/node_modules/
++
++# Staged standalone build (npm run standalone): build artifact
++src-tauri/standalone/
+diff --git a/src-tauri/capabilities/default.json b/src-tauri/capabilities/default.json
+index 1532dac..fc05dd6 100644
+--- a/src-tauri/capabilities/default.json
++++ b/src-tauri/capabilities/default.json
+@@ -1,8 +1,13 @@
+ {
+   "$schema": "../gen/schemas/desktop-schema.json",
+   "identifier": "default",
+-  "description": "Capability for the main window and detached chart windows",
+-  "windows": ["main", "chart-*", "screener"],
++  "description": "Capability for the main window, detached chart windows, the screener and the off-screen analysis renderer",
++  "windows": [
++    "main",
++    "chart-*",
++    "screener",
++    "analysis-capture-*"
++  ],
+   "permissions": [
+     "core:default",
+     "opener:default",
+@@ -11,6 +16,7 @@
+     "core:window:allow-close",
+     "core:window:allow-destroy",
+     "core:window:allow-set-focus",
++    "core:window:allow-set-focusable",
+     "core:window:allow-minimize",
+     "core:window:allow-maximize",
+     "core:window:allow-unmaximize",
+diff --git a/src-tauri/crates/core/src/data/market_rest/search.rs b/src-tauri/crates/core/src/data/market_rest/search.rs
+index 16051b0..013de87 100644
+--- a/src-tauri/crates/core/src/data/market_rest/search.rs
++++ b/src-tauri/crates/core/src/data/market_rest/search.rs
+@@ -63,7 +63,9 @@ pub async fn search_tickers(
+     if type_filter == Some("economic") {
+         return Ok(super::economics::search(query));
+     }
+-    let mut out = listings(query, type_filter).await?;
++    // An empty query names no prefix to look listings up by (the gateway would answer its first
++    // page, not a ranking): the provider's own symbols and the economic series still answer it.
++    let mut out = if query.trim().is_empty() { Vec::new() } else { listings(query, type_filter).await? };
+     if economic {
+         out.extend(super::economics::search(query));
+     }
+diff --git a/src-tauri/crates/core/src/plugins/manifest.rs b/src-tauri/crates/core/src/plugins/manifest.rs
+index 6721bb6..641326c 100644
+--- a/src-tauri/crates/core/src/plugins/manifest.rs
++++ b/src-tauri/crates/core/src/plugins/manifest.rs
+@@ -72,6 +72,9 @@ pub enum SettingKind {
+     Number,
+     Bool,
+     Select,
++    /// Kept in the system credential store, never in `plugins.json`; sent to the plugin in
++    /// its `plugin.configure` message only (TradePanel plugin secrets).
++    Secret,
+ }
+ 
+ #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, specta::Type)]
+@@ -341,6 +344,13 @@ mod tests {
+         assert_eq!(m.settings[0].kind, SettingKind::Number);
+     }
+ 
++    #[test]
++    fn parses_a_secret_setting() {
++        let mut s = sample();
++        s["settings"] = serde_json::json!([{ "key": "privateKey", "label": "Key", "type": "secret", "default": "" }]);
++        assert_eq!(parse(s).unwrap().settings[0].kind, SettingKind::Secret);
++    }
++
+     #[test]
+     fn refuses_bad_fields() {
+         let with = |k: &str, v: serde_json::Value| {
+diff --git a/src-tauri/src/assistant.rs b/src-tauri/src/assistant.rs
+index 22b1c59..68f1026 100644
+--- a/src-tauri/src/assistant.rs
++++ b/src-tauri/src/assistant.rs
+@@ -46,7 +46,7 @@ fn server_error(status: u16, body: &str) -> String {
+ 
+ /// The next whole line of `buf` (without its line end), taken out of it. Lines are cut at the byte `\n`, which is
+ /// never part of a multi-byte character: a character split between two chunks of the stream stays whole.
+-fn next_line(buf: &mut Vec<u8>) -> Option<String> {
++pub(crate) fn next_line(buf: &mut Vec<u8>) -> Option<String> {
+     let at = buf.iter().position(|&b| b == b'\n')?;
+     let line: Vec<u8> = buf.drain(..=at).collect();
+     Some(String::from_utf8_lossy(&line).trim_end_matches(['\r', '\n']).to_string())
+diff --git a/src-tauri/src/commands/images.rs b/src-tauri/src/commands/images.rs
+index fcb17a3..836c7aa 100644
+--- a/src-tauri/src/commands/images.rs
++++ b/src-tauri/src/commands/images.rs
+@@ -1,7 +1,8 @@
+ /*
+  * Images kept in the app data folder, named by their content
+  * (`<content hash>.<ext>`): the drawing images of the Image tool
+- * (`drawing-images/`) and the chart snapshots of symbol notes (`note-images/`);
++ * (`drawing-images/`), the chart snapshots of symbol notes (`note-images/`)
++ * and the Analyze chart pictures of analysis logs (`analysis-images/`);
+  * see `opentrader_core::images`.
+  */
+ use opentrader_core::images;
+@@ -46,3 +47,25 @@ pub fn read_note_image(app: tauri::AppHandle, name: String) -> Result<String, St
+ pub fn delete_note_image(app: tauri::AppHandle, name: String) -> Result<(), String> {
+     Ok(images::delete_image(&images_dir(&app, "note-images")?, &name)?)
+ }
++
++/// Store an Analyze chart picture (1d / 4h / 5m) and return its file name.
++/// The analyst log keeps the name, never the bytes.
++#[tauri::command]
++#[specta::specta]
++pub fn save_analysis_image(app: tauri::AppHandle, data_base64: String, ext: String) -> Result<String, String> {
++    Ok(images::save_note_image(&images_dir(&app, "analysis-images")?, &data_base64, &ext)?)
++}
++
++/// Read an Analyze chart picture back as base64.
++#[tauri::command]
++#[specta::specta]
++pub fn read_analysis_image(app: tauri::AppHandle, name: String) -> Result<String, String> {
++    Ok(images::read_image(&images_dir(&app, "analysis-images")?, &name)?)
++}
++
++/// Remove an Analyze chart picture (a deleted or evicted log entry).
++#[tauri::command]
++#[specta::specta]
++pub fn delete_analysis_image(app: tauri::AppHandle, name: String) -> Result<(), String> {
++    Ok(images::delete_image(&images_dir(&app, "analysis-images")?, &name)?)
++}
+diff --git a/src-tauri/src/community.rs b/src-tauri/src/community.rs
+index 8c142dc..96e97b7 100644
+--- a/src-tauri/src/community.rs
++++ b/src-tauri/src/community.rs
+@@ -5,6 +5,7 @@
+  * itself. The session token goes to the system's encrypted credential store; where that store isn't available it
+  * lasts until the app closes.
+  */
++use crate::credentials;
+ use std::sync::Mutex;
+ use opentrader_core::sync::LockExt;
+ use std::time::Duration;
+@@ -91,10 +92,6 @@ pub fn community_auth_cancel() {
+     CANCEL.notify_waiters();
+ }
+ 
+-fn credential(app: &AppHandle) -> keyring::Result<keyring::Entry> {
+-    keyring::Entry::new(&app.config().identifier, ACCOUNT)
+-}
+-
+ /// The saved session token, if any.
+ #[tauri::command]
+ #[specta::specta]
+@@ -102,9 +99,8 @@ pub fn community_token_get(app: AppHandle) -> Option<String> {
+     if let Some(token) = UNSAVED_TOKEN.locked().clone() {
+         return Some(token);
+     }
+-    match credential(&app).and_then(|e| e.get_password()) {
+-        Ok(token) => Some(token),
+-        Err(keyring::Error::NoEntry) => None,
++    match credentials::read(&app.config().identifier, ACCOUNT) {
++        Ok(token) => token,
+         Err(e) => {
+             eprintln!("[community] session not read: {e}");
+             None
+@@ -116,13 +112,11 @@ pub fn community_token_get(app: AppHandle) -> Option<String> {
+ #[tauri::command]
+ #[specta::specta]
+ pub fn community_token_set(app: AppHandle, token: Option<String>) -> Result<(), String> {
+-    let stored = credential(&app).and_then(|entry| match &token {
+-        Some(t) => entry.set_password(t),
+-        None => match entry.delete_credential() {
+-            Err(keyring::Error::NoEntry) => Ok(()),
+-            other => other,
+-        },
+-    });
++    let service = &app.config().identifier;
++    let stored = match &token {
++        Some(t) => credentials::write(service, ACCOUNT, t),
++        None => credentials::delete(service, ACCOUNT),
++    };
+     *UNSAVED_TOKEN.locked() = if stored.is_ok() { None } else { token };
+     stored.map_err(|e| format!("credential store: {e}"))
+ }
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index e3f994b..3d826cd 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -6,9 +6,11 @@ mod local_model;
+ mod app_update;
+ mod commands;
+ mod community;
++mod credentials;
+ mod deep_link;
+ mod host;
+ mod network;
++mod pi;
+ mod plugins;
+ mod window_session;
+ 
+@@ -67,6 +69,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
+             commands::images::save_note_image,
+             commands::images::read_note_image,
+             commands::images::delete_note_image,
++            commands::images::save_analysis_image,
++            commands::images::read_analysis_image,
++            commands::images::delete_analysis_image,
+             commands::local_series::local_series_list,
+             commands::local_series::local_series_save,
+             commands::local_series::local_series_read,
+@@ -109,6 +114,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
+             agent::agent_ready,
+             assistant::assistant_chat,
+             assistant::assistant_cancel,
++            pi::commands::pi_status,
++            pi::commands::pi_set_settings,
++            pi::commands::pi_clear_key,
++            pi::commands::pi_analyze,
++            pi::commands::pi_abort,
++            pi::commands::pi_new_session,
+             local_model::local_model_info,
+             local_model::local_model_install,
+             local_model::local_model_cancel,
+@@ -122,6 +133,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
+             plugins::plugin_install_file,
+             plugins::plugin_set_enabled,
+             plugins::plugin_set_settings,
++            plugins::plugin_clear_secret,
+             plugins::plugin_new_token,
+             plugins::plugin_remove,
+             plugins::plugin_folder_candidates,
+@@ -265,6 +277,9 @@ pub fn run() {
+             agent::init(app.handle());
+             // Settings > Plugins (the Plugin API listens while a plugin is enabled).
+             plugins::init(app.handle());
++            // Analyze chart: the bundled, read-only Pi runtime (lazy: no child
++            // until the first analysis).
++            app.manage(pi::PiManager::new(app.handle().clone()));
+             Ok(())
+         })
+         .build(tauri::generate_context!())
+@@ -275,6 +290,10 @@ pub fn run() {
+                 app_update::on_exit(app);
+                 // The AI assistant's model server would outlive the app.
+                 local_model::shutdown();
++                // The Pi analysis child must not outlive the window either.
++                if let Some(manager) = app.try_state::<std::sync::Arc<pi::PiManager>>() {
++                    tauri::async_runtime::block_on(manager.shutdown());
++                }
+                 // The plugin programs the app started.
+                 plugins::shutdown(app);
+             }
+diff --git a/src-tauri/src/network.rs b/src-tauri/src/network.rs
+index d2c331f..e92a9e6 100644
+--- a/src-tauri/src/network.rs
++++ b/src-tauri/src/network.rs
+@@ -3,6 +3,7 @@
+  * connection is made. The password is never written there: it goes to the system's encrypted credential store
+  * (Credential Manager, Keychain, Secret Service). Where that store isn't available it lasts until the app closes.
+  */
++use crate::credentials;
+ use opentrader_core::files;
+ use opentrader_core::net::{self, ProxySettings};
+ use opentrader_core::sync::LockExt;
+@@ -26,18 +27,12 @@ struct SavedFile {
+     has_password: bool,
+ }
+ 
+-fn credential(app: &AppHandle) -> keyring::Result<keyring::Entry> {
+-    keyring::Entry::new(&app.config().identifier, ACCOUNT)
+-}
+-
+ fn store_password(app: &AppHandle, password: &str) -> keyring::Result<()> {
+-    let entry = credential(app)?;
+-    if !password.is_empty() {
+-        return entry.set_password(password);
+-    }
+-    match entry.delete_credential() {
+-        Err(keyring::Error::NoEntry) => Ok(()),
+-        other => other,
++    let service = &app.config().identifier;
++    if password.is_empty() {
++        credentials::delete(service, ACCOUNT)
++    } else {
++        credentials::write(service, ACCOUNT, password)
+     }
+ }
+ 
+@@ -75,8 +70,9 @@ fn load(app: &AppHandle) -> ProxySettings {
+     if let Some(password) = UNSAVED_PASSWORD.locked().clone() {
+         settings.password = password;
+     } else if file.has_password {
+-        match credential(app).and_then(|entry| entry.get_password()) {
+-            Ok(password) => settings.password = password,
++        match credentials::read(&app.config().identifier, ACCOUNT) {
++            Ok(Some(password)) => settings.password = password,
++            Ok(None) => {}
+             Err(e) => eprintln!("[network] proxy password not read: {e}"),
+         }
+     }
+diff --git a/src-tauri/src/plugins/broker.rs b/src-tauri/src/plugins/broker.rs
+index ca51279..7cc54f6 100644
+--- a/src-tauri/src/plugins/broker.rs
++++ b/src-tauri/src/plugins/broker.rs
+@@ -28,7 +28,12 @@ const NOTICES: usize = 200;
+ pub struct BrokerPlugin {
+     pub id: String,
+     pub name: String,
++    /// The exchange its manifest names: the venue the Exchanges tab and the picker list it under.
++    pub exchange: Option<String>,
+     pub connected: bool,
++    /// Enabled: its program runs, so it can be connected. A disabled one is listed all the same, so the
++    /// user finds every venue's broker and turns on the one they trade.
++    pub enabled: bool,
+ }
+ 
+ #[derive(Clone, Serialize, Deserialize, specta::Type)]
+@@ -121,12 +126,17 @@ fn active(app: &AppHandle) -> Option<String> {
+ 
+ pub fn status(app: &AppHandle) -> BrokerStatus {
+     let plugins = app.state::<Plugins>();
+-    let enabled: Vec<String> = plugins.config.locked().plugins.iter().filter(|(_, p)| p.enabled).map(|(id, _)| id.clone()).collect();
+-    let brokers: Vec<BrokerPlugin> = enabled
+-        .iter()
+-        .filter_map(|id| installed_manifest(app, id))
++    // Every broker plugin installed, enabled or not: the picker lists them all and enables the chosen one.
++    let enabled: HashMap<String, bool> = plugins.config.locked().plugins.iter().map(|(id, p)| (id.clone(), p.enabled)).collect();
++    let brokers: Vec<BrokerPlugin> = super::installed(app)
++        .into_iter()
+         .filter(|m| m.provides(Capability::Broker) && m.supported_here())
+-        .map(|m| BrokerPlugin { connected: plugins.hub.connected(&m.id).is_some(), id: m.id, name: m.name })
++        .filter_map(|m| {
++            // A folder without a `plugins.json` entry is not a plugin of this app (yet): leave it out, as before.
++            let enabled = *enabled.get(&m.id)?;
++            let connected = plugins.hub.connected(&m.id).is_some();
++            Some(BrokerPlugin { id: m.id.clone(), name: m.name.clone(), exchange: m.exchange.clone(), connected, enabled })
++        })
+         .collect();
+     let active = active(app).filter(|id| brokers.iter().any(|b| &b.id == id));
+     let manifest = active.as_deref().and_then(|id| installed_manifest(app, id));
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index e5d2abf..9ed3e99 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -8,12 +8,14 @@
+  * one runs inside another application and finds the address and its token in the connection file written for it.
+  */
+ pub mod broker;
++pub mod bundled;
+ pub mod data;
+ mod package;
+ 
++use crate::credentials;
+ use opentrader_core::files;
+ use opentrader_core::plugins::hub::{Allowed, Hub, HubEvent};
+-use opentrader_core::plugins::manifest::{self, Manifest, Runtime};
++use opentrader_core::plugins::manifest::{self, Manifest, Runtime, SettingKind};
+ use opentrader_core::plugins::API_VERSION;
+ use opentrader_core::sync::LockExt;
+ use package::CatalogEntry;
+@@ -55,6 +57,8 @@ struct PluginConfig {
+     enabled: bool,
+     token: String,
+     settings: BTreeMap<String, String>,
++    /// The manifest's `secret` settings that hold a value in the system credential store.
++    secret_keys: Vec<String>,
+     /// The files the installation steps copied outside the plugin's folder (removed with the plugin).
+     copied: Vec<String>,
+     verified: bool,
+@@ -76,6 +80,8 @@ pub struct PluginInfo {
+     /// The version the plugin gave when it connected.
+     pub connected_version: Option<String>,
+     pub settings: BTreeMap<String, String>,
++    /// Keys of `secret` settings stored in the system credential store (their value is not sent to the window).
++    pub secret_keys: Vec<String>,
+     pub copied: Vec<String>,
+     pub symbol_map: BTreeMap<String, String>,
+     /// Runs on this computer.
+@@ -190,6 +196,7 @@ fn status(app: &AppHandle) -> PluginsStatus {
+                 running: running.contains(&m.id),
+                 connected_version: hello.map(|h| h.version).filter(|v| !v.is_empty()),
+                 settings: c.settings,
++                secret_keys: c.secret_keys,
+                 copied: c.copied,
+                 symbol_map: c.symbol_map,
+                 supported: m.supported_here(),
+@@ -241,6 +248,9 @@ pub fn init(app: &AppHandle) {
+     });
+     data::init(app);
+     broker::init(app);
++    // The plugins that ship inside the app (the standalone build): installed in the data
++    // folder, in the background, before they are needed.
++    bundled::install(app);
+     apply(app);
+ }
+ 
+@@ -253,6 +263,15 @@ fn configure(app: &AppHandle, id: &str) {
+         .unwrap_or_default();
+     let mut all = defaults;
+     all.extend(settings);
++    // Secret values live in the OS credential store: they are read here and go no further
++    // than the plugin's own configure message.
++    if let Some(m) = installed_manifest(app, id) {
++        for field in m.settings.iter().filter(|f| f.kind == SettingKind::Secret) {
++            if let Some(value) = read_secret(app, id, &field.key) {
++                all.insert(field.key.clone(), value);
++            }
++        }
++    }
+     let _ = state.hub.notify(id, "plugin.configure", serde_json::json!({ "settings": all }));
+ }
+ 
+@@ -334,6 +353,9 @@ fn apply(app: &AppHandle) {
+         stop_process(app, &id);
+     }
+     changed(app);
++    // The broker list (every installed broker plugin, on or off, and the exchange each serves) goes out
++    // with the next broker tick.
++    broker::changed(app);
+ }
+ 
+ fn stop_process(app: &AppHandle, id: &str) {
+@@ -352,10 +374,12 @@ fn start_process(app: &AppHandle, m: &Manifest, entry: &str, args: &[String], po
+     let (tx, mut stop) = oneshot::channel::<()>();
+     app.state::<Plugins>().processes.locked().insert(m.id.clone(), tx);
+     let (app, id, args, token) = (app.clone(), m.id.clone(), args.to_vec(), token.to_string());
++    // The spawn owns what it reads: the entry belongs to the manifest borrowed above.
++    let entry = entry.to_string();
+     tauri::async_runtime::spawn(async move {
+         let mut wait = Duration::from_secs(2);
+         loop {
+-            let mut cmd = tokio::process::Command::new(&exe);
++            let mut cmd = plugin_command(&dir, &entry, &exe);
+             cmd.args(&args)
+                 .current_dir(&dir)
+                 .env("OPENTRADER_PLUGIN_ADDR", format!("127.0.0.1:{port}"))
+@@ -430,6 +454,26 @@ fn start_process(app: &AppHandle, m: &Manifest, entry: &str, args: &[String], po
+     });
+ }
+ 
++/// The command that runs a plugin program. A Python entry (`plugin.py`) runs under the
++/// plugin's own virtualenv when it ships one, else the system Python: the package needs no
++/// executable bit and no per-platform launcher, and its dependencies stay inside its folder.
++fn plugin_command(dir: &Path, entry: &str, exe: &Path) -> tokio::process::Command {
++    if !entry.to_ascii_lowercase().ends_with(".py") {
++        return tokio::process::Command::new(exe);
++    }
++    let venv = if cfg!(windows) { dir.join(".venv").join("Scripts").join("python.exe") } else { dir.join(".venv").join("bin").join("python") };
++    let python = if venv.is_file() {
++        venv
++    } else if cfg!(windows) {
++        PathBuf::from("python")
++    } else {
++        PathBuf::from("python3")
++    };
++    let mut cmd = tokio::process::Command::new(python);
++    cmd.arg(exe);
++    cmd
++}
++
+ /// Stop the plugin programs (the app is quitting): now, since the tasks that would stop them end with the app.
+ pub fn shutdown(app: &AppHandle) {
+     if let Some(state) = app.try_state::<Plugins>() {
+@@ -648,12 +692,64 @@ pub fn plugin_set_enabled(app: AppHandle, id: String, enabled: bool) -> Result<P
+ #[specta::specta]
+ pub fn plugin_set_settings(app: AppHandle, id: String, settings: BTreeMap<String, String>) -> Result<PluginsStatus, String> {
+     let m = installed_manifest(&app, &id).ok_or_else(|| format!("{id} is not installed"))?;
+-    let settings = settings.into_iter().filter(|(k, _)| m.settings.iter().any(|f| &f.key == k)).collect();
+-    update_plugin(&app, &id, |p| p.settings = settings)?;
++    let mut plain = BTreeMap::new();
++    let mut secret_keys = Vec::new();
++    for (key, value) in settings {
++        let Some(field) = m.settings.iter().find(|f| f.key == key) else { continue };
++        if field.kind == SettingKind::Secret {
++            if !value.is_empty() {
++                store_secret(&app, &id, &key, &value)?;
++                secret_keys.push(key);
++            } else if read_secret(&app, &id, &key).is_some() {
++                // An empty box means "keep the stored value": the window never sees it to send back.
++                secret_keys.push(key);
++            }
++        } else {
++            plain.insert(key, value);
++        }
++    }
++    update_plugin(&app, &id, |p| {
++        p.settings = plain;
++        p.secret_keys = secret_keys;
++    })?;
+     configure(&app, &id);
+     Ok(status(&app))
+ }
+ 
++/// Remove one stored secret (`Settings > Plugins`, the Clear button beside a secret field).
++#[tauri::command]
++#[specta::specta]
++pub fn plugin_clear_secret(app: AppHandle, id: String, key: String) -> Result<PluginsStatus, String> {
++    let m = installed_manifest(&app, &id).ok_or_else(|| format!("{id} is not installed"))?;
++    if !m.settings.iter().any(|f| f.key == key && f.kind == SettingKind::Secret) {
++        return Err(format!("{key} is not a secret setting of {id}"));
++    }
++    store_secret(&app, &id, &key, "")?;
++    update_plugin(&app, &id, |p| p.secret_keys.retain(|k| k != &key))?;
++    configure(&app, &id);
++    Ok(status(&app))
++}
++
++/// The system credential store: one entry per plugin and setting key.
++fn secret_name(id: &str, key: &str) -> String {
++    format!("plugin:{id}:{key}")
++}
++
++fn read_secret(app: &AppHandle, id: &str, key: &str) -> Option<String> {
++    credentials::read(&app.config().identifier, &secret_name(id, key)).ok().flatten()
++}
++
++fn store_secret(app: &AppHandle, id: &str, key: &str, value: &str) -> Result<(), String> {
++    let service = &app.config().identifier;
++    let name = secret_name(id, key);
++    let stored = if value.is_empty() {
++        credentials::delete(service, &name)
++    } else {
++        credentials::write(service, &name, value)
++    };
++    stored.map_err(|e| format!("credential store: {e}"))
++}
++
+ /// A new token: the plugin is disconnected and must connect with the new one (its connection file is rewritten).
+ #[tauri::command]
+ #[specta::specta]
+@@ -679,6 +775,9 @@ pub async fn plugin_remove(app: AppHandle, id: String) -> Result<PluginsStatus,
+             let _ = std::fs::remove_file(p);
+         }
+     }
++    for field in m.settings.iter().filter(|f| f.kind == SettingKind::Secret) {
++        let _ = store_secret(&app, &id, &field.key, "");
++    }
+     for f in removed.map(|p| p.copied).unwrap_or_default() {
+         let _ = std::fs::remove_file(f);
+     }
+@@ -760,3 +859,29 @@ pub fn plugin_copy_files(app: AppHandle, id: String, step: u32, folders: Vec<Str
+ pub fn plugin_logs(app: AppHandle, id: String) -> Vec<String> {
+     app.state::<Plugins>().logs.locked().get(&id).map(|r| r.iter().cloned().collect()).unwrap_or_default()
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn a_plugin_config_keeps_the_secret_keys_the_installer_writes() {
++        let c: PluginConfig = serde_json::from_str(r#"{"enabled":true,"token":"t","secretKeys":["privateKey"]}"#).unwrap();
++        assert_eq!(c.secret_keys, vec!["privateKey".to_string()]);
++    }
++
++    #[test]
++    fn a_python_entry_runs_under_the_plugins_venv_when_it_has_one() {
++        let dir = std::env::temp_dir().join(format!("ot-plugin-python-{}", std::process::id()));
++        let venv = if cfg!(windows) { dir.join(".venv").join("Scripts").join("python.exe") } else { dir.join(".venv").join("bin").join("python") };
++        std::fs::create_dir_all(venv.parent().unwrap()).unwrap();
++        std::fs::write(&venv, b"").unwrap();
++        let cmd = plugin_command(&dir, "plugin.py", &dir.join("plugin.py"));
++        assert_eq!(PathBuf::from(cmd.as_std().get_program()), venv);
++        // A program entry is run as it is.
++        let exe = dir.join("plugin.exe");
++        let cmd = plugin_command(&dir, "plugin.exe", &exe);
++        assert_eq!(PathBuf::from(cmd.as_std().get_program()), exe);
++        let _ = std::fs::remove_dir_all(dir);
++    }
++}
+diff --git a/src-tauri/src/window_session.rs b/src-tauri/src/window_session.rs
+index 2593bb0..9ab0c2c 100644
+--- a/src-tauri/src/window_session.rs
++++ b/src-tauri/src/window_session.rs
+@@ -40,6 +40,13 @@ const FILE: &str = "window-session.json";
+ const MAIN: &str = "main";
+ /// The screener's own window (placement "Separate window", window-bridge.ts).
+ const SCREENER_WINDOW: &str = "screener";
++/// Analyze chart's short-lived off-screen renderer (window-bridge.ts).
++const ANALYSIS_CAPTURE_PREFIX: &str = "analysis-capture-";
++
++/// Windows that are not part of the user's workspace: not saved, not restored.
++fn ephemeral(label: &str) -> bool {
++    label == SCREENER_WINDOW || label.starts_with(ANALYSIS_CAPTURE_PREFIX)
++}
+ /// Minimum overlap (physical px) between a saved window and a monitor for the
+ /// saved position to be used.
+ const MIN_VISIBLE: i32 = 64;
+@@ -148,8 +155,8 @@ fn record(session: &Session, window: &Window) {
+ /// Window events: keep bounds / focus current, forget a window the user closes
+ /// while others stay open.
+ pub fn on_window_event(window: &Window, event: &WindowEvent) {
+-    // The screener's own window is not a chart window: not saved, not restored.
+-    if window.label() == SCREENER_WINDOW {
++    // The screener's / capture window is not a workspace window.
++    if ephemeral(window.label()) {
+         return;
+     }
+     let app = window.app_handle();
+@@ -230,7 +237,9 @@ pub fn init(app: &AppHandle) {
+             return;
+         }
+     };
+-    let saved: SessionFile = files::load_or_default(&path);
++    let mut saved: SessionFile = files::load_or_default(&path);
++    // A capture window can only be left in the file by an interrupted run.
++    saved.windows.retain(|w| !ephemeral(&w.label));
+ 
+     let Some(main) = app.get_webview_window(MAIN) else {
+         eprintln!("[window-session] main window missing");
+@@ -250,7 +259,7 @@ pub fn init(app: &AppHandle) {
+     let others: Vec<WindowState> = saved
+         .windows
+         .iter()
+-        .filter(|w| w.label != MAIN && Some(&w.label) != adopted.as_ref())
++        .filter(|w| w.label != MAIN && Some(&w.label) != adopted.as_ref() && !ephemeral(&w.label))
+         .cloned()
+         .collect();
+ 
+@@ -269,7 +278,10 @@ pub fn init(app: &AppHandle) {
+     }
+ 
+     // Focus the window that had it (an adopted label now lives in main).
+-    let focus = saved.focused.map(|f| if Some(&f) == adopted.as_ref() { MAIN.to_string() } else { f });
++    let focus = saved
++        .focused
++        .filter(|f| !ephemeral(f))
++        .map(|f| if Some(&f) == adopted.as_ref() { MAIN.to_string() } else { f });
+     if let Some(label) = &focus {
+         if let Some(win) = app.get_webview_window(label) {
+             let _ = win.set_focus();
+diff --git a/src-tauri/tauri.conf.json b/src-tauri/tauri.conf.json
+index 1c530cc..3acc8fa 100644
+--- a/src-tauri/tauri.conf.json
++++ b/src-tauri/tauri.conf.json
+@@ -6,7 +6,7 @@
+   "build": {
+     "beforeDevCommand": "npm run dev",
+     "devUrl": "http://localhost:1420",
+-    "beforeBuildCommand": "npm run build",
++    "beforeBuildCommand": "node --max-old-space-size=8192 ./node_modules/vite/bin/vite.js build",
+     "frontendDist": "../dist"
+   },
+   "app": {
+@@ -37,11 +37,14 @@
+       "icons/icon.ico"
+     ],
+     "publisher": "OpenTrader",
+-    "copyright": "© 2026 OpenTrader contributors. MIT License.",
++    "copyright": "\u00a9 2026 OpenTrader contributors. MIT License.",
+     "category": "Finance",
+     "shortDescription": "Desktop charting app",
+     "macOS": {
+       "signingIdentity": "-"
++    },
++    "resources": {
++      "ai-runtime": "ai-runtime"
+     }
+   },
+   "plugins": {
+diff --git a/src/data/trading/replay-broker.ts b/src/data/trading/replay-broker.ts
+index ec47b84..b97c266 100644
+--- a/src/data/trading/replay-broker.ts
++++ b/src/data/trading/replay-broker.ts
+@@ -31,8 +31,19 @@ import { ALL_CAPABILITIES, type TradingCapabilities } from "./capabilities";
+ import { DEFAULT_REPLAY_SETTINGS, ReplayAccount, type ReplayAccountSnapshot, type ReplaySettings } from "./replay-account";
+ import type { OrderRequest, TradingEvent, TradingExecution, TradingOrder, TradingPosition, TradingQuote } from "./types";
+ 
++/** The one place that settles an untradable ticket: a broker plugin to install or connect, the Exchanges tab
++ *  (the broker's card: keys, Connect, trading switch, symbol map), or the desktop app, where plugins run. */
++export type TicketFix = "desktop" | "install" | "connect" | "exchanges";
++
+ /** What the order ticket shows instead of the form when trading is off. */
+-export type Tradability = { ok: boolean; reason: "ok" | "launch" | "symbol" | "loading"; title: string; text: string };
++export type Tradability = {
++  ok: boolean;
++  reason: "ok" | "launch" | "symbol" | "loading";
++  title: string;
++  text: string;
++  /** The ticket's empty state offers this; nothing when there is nothing to click (no chart, still loading). */
++  fix?: TicketFix;
++};
+ 
+ /** End of a session with trades: the "Congrats, trader!" / "Keep training" dialog. */
+ export type SessionResult = {
+diff --git a/src/window/header/app-settings/PluginsTab.tsx b/src/window/header/app-settings/PluginsTab.tsx
+index 9ac168a..e5a0d51 100644
+--- a/src/window/header/app-settings/PluginsTab.tsx
++++ b/src/window/header/app-settings/PluginsTab.tsx
+@@ -2,11 +2,17 @@
+  * Settings > Plugins (#313): the plugins installed on this computer (from the catalog or a file), their settings, the
+  * files their installation copies into another application, and the local Plugin API they connect to
+  * (src-tauri/src/plugins, plugins/PROTOCOL.md).
++ *
++ * A venue plugin — one serving a list of exchanges, the crypto markets — is configured in the Exchanges tab under the
++ * charts instead (window/trading/ExchangesPanel.tsx): its card is left out here, and a note leads there.
+  */
+ import { createSignal, For, onCleanup, Show } from "solid-js";
+ import { CheckField, SelectControl } from "../../../components/form";
+ import type { CatalogEntry, InstallStep, PackagePreview, PluginInfo, PluginsStatus, SettingField } from "../../../bindings";
++import { tradingUi } from "../../../data/trading/trading-ui";
++import { isVenuePlugin } from "../../../data/venues";
+ import { translate, translateWith } from "../../../i18n/translator";
++import { setAppSettingsTab } from "../../shell/app-dialogs";
+ import { openLink, plugins, type Result } from "./io";
+ import { ConfirmButton, Section } from "./parts";
+ 
+@@ -360,18 +389,46 @@ function InstallStepRow(props: { plugin: PluginInfo; step: InstallStep; index: n
+   );
+ }
+ 
+-/** The plugin's own settings form (its manifest's fields); saved and sent to the plugin with Apply. */
+-function PluginSettings(props: { plugin: PluginInfo; take: (what: string, p: Promise<Result<PluginsStatus>>) => Promise<boolean> }) {
++/** The plugin's own settings form (its manifest's fields); saved and sent to the plugin with Apply (also in the
++ *  Exchanges tab under the chart). */
++export function PluginSettings(props: { plugin: PluginInfo; take: (what: string, p: Promise<Result<PluginsStatus>>) => Promise<boolean> }) {
+   const m = () => props.plugin.manifest;
+   const initial = () => {
+     const v: Record<string, string> = {};
+-    for (const f of m().settings ?? []) v[f.key] = props.plugin.settings[f.key] ?? f.default ?? "";
++    for (const f of m().settings ?? []) v[f.key] = f.type === "secret" ? "" : (props.plugin.settings[f.key] ?? f.default ?? "");
+     return v;
+   };
+   const [values, setValues] = createSignal<Record<string, string>>(initial());
+   const set = (k: string, v: string) => setValues((o) => ({ ...o, [k]: v }));
++  /** A secret setting with a value in the OS credential store (its value is never sent here). */
++  const stored = (k: string) => (props.plugin.secretKeys ?? []).includes(k);
+   const field = (f: SettingField) => {
+     switch (f.type) {
++      case "secret":
++        return (
++          <label class="app-settings-field">
++            <span class="app-settings-field-label" data-no-translate>{f.label}</span>
++            <input
++              class="app-settings-input"
++              type="password"
++              autocomplete="off"
++              spellcheck={false}
++              placeholder={stored(f.key) ? translate("Stored — type to replace") : ""}
++              value={values()[f.key]}
++              onInput={(e) => set(f.key, e.currentTarget.value)}
++            />
++            <Show when={stored(f.key)}>
++              <button
++                type="button"
++                class="app-settings-btn"
++                data-name="plugin-secret-clear"
++                onClick={() => void props.take(`secret:${m().id}:${f.key}`, plugins.clearSecret(m().id, f.key))}
++              >
++                {translate("Clear")}
++              </button>
++            </Show>
++          </label>
++        );
+       case "bool":
+         return <CheckField variant="settings" label={f.label} checked={values()[f.key] === "true"} onChange={(on) => set(f.key, on ? "true" : "false")} />;
+       case "select":
+@@ -427,7 +484,7 @@ function PluginSettings(props: { plugin: PluginInfo; take: (what: string, p: Pro
+ const EXAMPLE = ["NASDAQ:AAPL", "AAPL.US"] as const;
+ 
+ /** A broker plugin's tickers for chart symbols the plugin does not find by itself ("NASDAQ:AAPL" → "AAPL.US"). */
+-function SymbolMap(props: { plugin: PluginInfo; take: (what: string, p: Promise<Result<PluginsStatus>>) => Promise<boolean> }) {
++export function SymbolMap(props: { plugin: PluginInfo; take: (what: string, p: Promise<Result<PluginsStatus>>) => Promise<boolean> }) {
+   const id = () => props.plugin.manifest.id;
+   const initial = () => Object.entries(props.plugin.symbolMap ?? {}).map(([symbol, ticker]) => ({ symbol, ticker: ticker ?? "" }));
+   const [rows, setRows] = createSignal<{ symbol: string; ticker: string }[]>(initial());
+diff --git a/src/window/header/app-settings/io.ts b/src/window/header/app-settings/io.ts
+index f709ce8..a6fcc31 100644
+--- a/src/window/header/app-settings/io.ts
++++ b/src/window/header/app-settings/io.ts
+@@ -87,6 +87,8 @@ export const plugins = {
+   installFile: (path: string): Promise<Result<PluginsStatus>> => commands.pluginInstallFile(path),
+   setEnabled: (id: string, on: boolean): Promise<Result<PluginsStatus>> => commands.pluginSetEnabled(id, on),
+   setSettings: (id: string, settings: Record<string, string>): Promise<Result<PluginsStatus>> => commands.pluginSetSettings(id, settings),
++  /** Remove a secret setting from the OS credential store. */
++  clearSecret: (id: string, key: string): Promise<Result<PluginsStatus>> => commands.pluginClearSecret(id, key),
+   newToken: (id: string): Promise<Result<PluginsStatus>> => commands.pluginNewToken(id),
+   remove: (id: string): Promise<Result<PluginsStatus>> => commands.pluginRemove(id),
+   folderCandidates: (id: string, step: number): Promise<Result<string[]>> => commands.pluginFolderCandidates(id, step),

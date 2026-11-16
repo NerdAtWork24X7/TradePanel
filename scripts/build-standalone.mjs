@@ -242,7 +242,7 @@ function generateBindings() {
 // ── The AI runtime ──────────────────────────────────────────────────────────────
 function stageAiRuntime() {
   say("staging the AI runtime (Node + Pi)");
-  run(NPM, ["--prefix", APP, "run", "ai:runtime"], { cwd: ROOT });
+  run(process.execPath, [join(ROOT, "scripts", "build-ai-runtime.mjs")], { cwd: ROOT });
   const staged = join(SRC_TAURI, "ai-runtime", TARGET);
   if (!existsSync(join(staged, "manifest.json"))) {
     fail(`the AI runtime for ${TARGET} is missing: ${staged}`);
@@ -293,9 +293,9 @@ function stagePythonRuntime() {
     "--python",
     interpreter,
     "-r",
-    join(APP, "plugins", "crypto", "requirements.txt"),
+    join(ROOT, "plugins", "crypto", "requirements.txt"),
     "-r",
-    join(APP, "plugins", "ccxt-broker", "requirements.txt"),
+    join(ROOT, "plugins", "ccxt-broker", "requirements.txt"),
   ]);
   say(`the Python runtime is staged (${megabytes(sizeOf(join(PLUGINS, "runtime")))})`);
 }
@@ -342,9 +342,9 @@ function stagePluginPackages() {
   rmSync(config, { recursive: true, force: true });
 
   say("staging the plugin packages");
-  run(process.execPath, [join(APP, "scripts", "install-crypto-plugin.mjs"), "--no-deps", "--data", data, "--config", config]);
+  run(process.execPath, [join(ROOT, "scripts", "install-crypto-plugin.mjs"), "--no-deps", "--data", data, "--config", config]);
   run(process.execPath, [
-    join(APP, "scripts", "install-broker-plugins.mjs"),
+    join(ROOT, "scripts", "install-broker-plugins.mjs"),
     "--no-deps",
     "--disabled",
     "--data",

@@ -1,0 +1,215 @@
+diff --git a/src/App.tsx b/src/App.tsx
+index b2c7c14..1873cdc 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -86,6 +91,7 @@ import { BrokerPicker } from "./window/trading/BrokerPicker";
+ import { TradingToasts } from "./window/trading/TradingToasts";
+ import { tradingUi } from "./data/trading/trading-ui";
+ import { replayBroker } from "./data/trading/replay-broker";
++import { paperBroker } from "./data/trading/paper-broker";
+ import { pluginBroker } from "./data/trading/plugin-broker";
+ import { createDrawingStore } from "./window/drawings/drawing-store";
+ import { createChartBridge } from "./window/right-rail/community/chart-bridge";
+@@ -508,8 +560,8 @@ function App() {
+   // A tab switch only hides it: the tab left keeps its replay.
+   createEffect(
+     on([activeTabId, replayEnabled], ([tab, on], prev) => {
+-      // A connected broker plugin keeps it.
+-      if (!on && (!prev || prev[0] === tab) && !pluginBroker.status()?.active) tradingUi.closeTicket();
++      // A connected broker plugin or the paper account keeps it.
++      if (!on && (!prev || prev[0] === tab) && !pluginBroker.status()?.active && !paperBroker.active()) tradingUi.closeTicket();
+     }),
+   );
+ 
+@@ -976,7 +1028,7 @@ function App() {
+             for them — without this the WatchlistDetail panel gets no symbol and
+             stays blank. WatchlistDetail/Watchlist both accept the bare form. */}
+         {/* Order ticket (paper trading in Bar Replay, or a connected broker plugin), docked left of the right rail. */}
+-        <Show when={replayEnabled() || !!pluginBroker.status()?.active}>
++        <Show when={replayEnabled() || !!pluginBroker.status()?.active || paperBroker.active()}>
+           <OrderTicket />
+         </Show>
+         <RightRail
+diff --git a/src/data/trading/broker.ts b/src/data/trading/broker.ts
+index ec99ba9..30b50d0 100644
+--- a/src/data/trading/broker.ts
++++ b/src/data/trading/broker.ts
+@@ -1,22 +1,26 @@
+ /*
+- * The broker the trading UI talks to: the replay broker on a chart in Bar Replay (paper trading), else the broker
++ * The broker the trading UI talks to: the replay broker on a chart in Bar Replay (paper trading), else the paper
++ * account the user connected (built in, trading the chart's live prices with simulated money), else the broker
+  * plugin the user connected (#315). The order ticket, the DOM and the toasts follow the focused chart; the chart
+  * trading lines ask for their own chart (`paneId`).
+  */
+ import { isPaneInReplay, replayActivePane, replayEnabled, setReplayActivePane } from "../replay";
+ import { strategyTester } from "../strategy-tester-store";
++import { paperBroker } from "./paper-broker";
+ import { pluginBroker } from "./plugin-broker";
+ import { replayBroker } from "./replay-broker";
+ import type { OrderRequest, TradingEvent } from "./types";
+ 
+-/** The broker of a chart (none given: of the focused one). */
++/** The broker of a chart (none given: of the focused one): its replay account, the paper account when it is
++ *  connected, else the broker plugin. */
+ export function brokerOf(paneId?: number | null) {
+-  if (paneId != null) return isPaneInReplay(paneId) ? replayBroker : pluginBroker;
+-  return replayEnabled() && replayActivePane() !== null ? replayBroker : pluginBroker;
++  if (paneId != null) return isPaneInReplay(paneId) ? replayBroker : paperBroker.active() ? paperBroker : pluginBroker;
++  return replayEnabled() && replayActivePane() !== null ? replayBroker : paperBroker.active() ? paperBroker : pluginBroker;
+ }
+ 
+-/** A chart shows trading (its lines, the Buy / Sell buttons): in replay, or traded through the connected broker. */
+-export const tradesOn = (paneId: number) => isPaneInReplay(paneId) || pluginBroker.trades(paneId);
++/** A chart shows trading (its lines, the Buy / Sell buttons): in replay, through the paper account (a symbol with
++ *  live data), or through the connected broker plugin. */
++export const tradesOn = (paneId: number) => isPaneInReplay(paneId) || paperBroker.trades(paneId) || pluginBroker.trades(paneId);
+ 
+ /** Make a chart the focused one of its broker (its Buy / Sell buttons clicked). */
+ export function focusPane(paneId: number) {
+@@ -26,7 +30,7 @@ export function focusPane(paneId: number) {
+ 
+ /** The current broker, read through: every call goes to `brokerOf` its chart. */
+ export const broker = {
+-  version: () => replayBroker.version() + pluginBroker.version(),
++  version: () => replayBroker.version() + paperBroker.version() + pluginBroker.version(),
+   activePane: () => brokerOf().activePane(),
+   tradability: () => brokerOf().tradability(),
+   /** What the broker of a chart (none given: of the focused one) supports. */
+@@ -50,9 +54,11 @@ export const broker = {
+   setPositionBrackets: (tp: number | null, sl: number | null, paneId?: number) => brokerOf(paneId).setPositionBrackets(tp, sl, paneId),
+   onEvent(fn: (e: TradingEvent) => void): () => void {
+     const offReplay = replayBroker.onEvent(fn);
++    const offPaper = paperBroker.onEvent(fn);
+     const offPlugin = pluginBroker.onEvent(fn);
+     return () => {
+       offReplay();
++      offPaper();
+       offPlugin();
+     };
+   },
+diff --git a/src/window/chart/view/trading-lines.tsx b/src/window/chart/view/trading-lines.tsx
+index dbae0c1..b5aabac 100644
+--- a/src/window/chart/view/trading-lines.tsx
++++ b/src/window/chart/view/trading-lines.tsx
+@@ -33,6 +33,7 @@ import { Tooltip } from "../../../components/Tooltip";
+ import { tradingPrefs } from "../../../data/trading/trading-prefs";
+ import { tradingAppearance, type TradingAppearance } from "../../header/chart-settings";
+ import { broker, brokerOf, focusPane, tradesOn } from "../../../data/trading/broker";
++import { paperBroker } from "../../../data/trading/paper-broker";
+ import { pluginBroker } from "../../../data/trading/plugin-broker";
+ import { ticketQty, tradingUi } from "../../../data/trading/trading-ui";
+ import type { TradingOrder, TradingPosition } from "../../../data/trading/types";
+@@ -119,6 +120,8 @@ export function createTradingLines(cx: ChartCx): TradingLinesApi {
+   const on = () => tradesOn(paneId);
+   // The plugin broker maps this chart's symbol to its ticker.
+   onCleanup(pluginBroker.registerChart(paneId, () => cx.props.symbol));
++  // The paper account reads each chart's symbol the same way (it trades the symbol itself).
++  onCleanup(paperBroker.registerChart(paneId, () => cx.props.symbol));
+   /** This chart's Trading settings. */
+   const ta = (): TradingAppearance => cx.appearance().trading ?? DEFAULT_TRADING;
+   const tick = () => cachedSymbolSessions(cx.props.symbol ?? "")?.mintick ?? broker.quote()?.minTick ?? 0.01;
+diff --git a/src/window/header/HeaderToolbar.tsx b/src/window/header/HeaderToolbar.tsx
+index 8fe3305..71da664 100644
+--- a/src/window/header/HeaderToolbar.tsx
++++ b/src/window/header/HeaderToolbar.tsx
+@@ -23,6 +23,7 @@ import { CHART_TYPE_ICON, type ChartTypeId } from "../chart/chart-types";
+ import { iconNameForLayout, paneCount, type LayoutId } from "../chart/layouts";
+ import { ReplayHeaderButton } from "../replay/ReplayHeaderButton";
+ import { TradeHeaderButton } from "../trading/TradeHeaderButton";
++import { paperBroker } from "../../data/trading/paper-broker";
+ import { pluginBroker } from "../../data/trading/plugin-broker";
+ import { replayEnabled } from "../../data/replay";
+ import { favoriteIntervals, longIntervalLabel, shortIntervalLabel } from "../chart/interval-favorites";
+@@ -467,8 +468,8 @@ export function HeaderToolbar(props: Props) {
+             </>
+           )}
+         </For>
+-        {/* "Trade" at the right end while Bar Replay is on (paper trading) or a broker plugin is enabled. */}
+-        <Show when={replayEnabled() || (pluginBroker.status()?.brokers.length ?? 0) > 0}>
++        {/* "Trade" at the right end: Bar Replay, the built-in paper account, or a broker plugin. */}
++        <Show when={replayEnabled() || paperBroker.available || (pluginBroker.status()?.brokers.length ?? 0) > 0}>
+           <TradeHeaderButton />
+         </Show>
+       </ScrollStrip>
+diff --git a/src/window/trading/TradeHeaderButton.tsx b/src/window/trading/TradeHeaderButton.tsx
+index 3fb87d2..1b86390 100644
+--- a/src/window/trading/TradeHeaderButton.tsx
++++ b/src/window/trading/TradeHeaderButton.tsx
+@@ -1,11 +1,11 @@
+ /*
+  * Header "Trade" button. In Bar Replay it trades through the replay broker: the pill shows / hides the order ticket,
+- * the "Trading options" chevron offers "Replay settings…", "Connect to broker…" (leaves replay for the broker
+- * selection) and "Exit replay mode". Otherwise it trades through the
+- * broker plugin the user connected (#315): the pill opens the broker picker until one is connected, then the order
+- * ticket; the chevron opens the trading settings, connects another broker, turns trading on or off, shows the account
+- * manager and disconnects.
+- * DEMO / LIVE next to the title tells which account the orders go to.
++ * the "Trading options" chevron offers "Replay settings...", "Connect to broker..." (leaves replay for the broker
++ * selection) and "Exit replay mode". Otherwise it trades through the paper account when it is connected (the built-in
++ * simulated broker) or through the broker plugin the user connected (#315): the pill opens the broker picker until one
++ * is connected, then the order ticket; the chevron opens the trading settings, connects another broker, turns trading
++ * on or off (a plugin), shows the account manager and disconnects.
++ * PAPER / DEMO / LIVE next to the title tells which account the orders go to.
+  */
+ import { Show, createSignal } from "solid-js";
+ import { Icon } from "../../components/Icon";
+@@ -13,6 +13,7 @@ import { Tooltip } from "../../components/Tooltip";
+ import { Popover, PopDivider, PopItem } from "../screener/Popover";
+ import { emitAppEvent } from "../../data/app-events";
+ import { replayEnabled } from "../../data/replay";
++import { paperBroker } from "../../data/trading/paper-broker";
+ import { pluginBroker } from "../../data/trading/plugin-broker";
+ import { tradingUi } from "../../data/trading/trading-ui";
+ import { translate } from "../../i18n/translator";
+@@ -23,9 +24,11 @@ export function TradeHeaderButton() {
+   let chevron: HTMLButtonElement | undefined;
+   const [menu, setMenu] = createSignal(false);
+   const replay = () => replayEnabled();
++  const paper = () => paperBroker.active();
+   const account = () => pluginBroker.account()?.account ?? null;
++  const connected = () => paper() || !!pluginBroker.status()?.active;
+   const onPill = () => {
+-    if (!replay() && !pluginBroker.status()?.active) tradingUi.setBrokerPicker(true);
++    if (!replay() && !connected()) tradingUi.setBrokerPicker(true);
+     else tradingUi.toggleTicket();
+   };
+   const run = (fn: () => void) => () => {
+@@ -42,7 +45,10 @@ export function TradeHeaderButton() {
+             </span>
+           </Show>
+           Trade
+-          <Show when={!replay() && account()}>
++          <Show when={!replay() && paper()}>
++            <span class="trd-account-kind">PAPER</span>
++          </Show>
++          <Show when={!replay() && !paper() && account()}>
+             {(a) => (
+               <span class="trd-account-kind" classList={{ "is-live": !a().isDemo, "is-off": !pluginBroker.status()?.tradingEnabled }} data-name="trade-account-kind">
+                 {a().isDemo ? translate("DEMO") : translate("LIVE")}
+@@ -82,7 +88,7 @@ export function TradeHeaderButton() {
+             <PopItem iconSpace title={translate("Trading settings…")} onClick={run(() => emitAppEvent("chart-open-settings", { tab: "trading" }))} />
+             <PopItem
+               iconSpace
+-              title={pluginBroker.status()?.active ? translate("Connect another broker…") : translate("Connect broker…")}
++              title={connected() ? translate("Connect another broker…") : translate("Connect broker…")}
+               onClick={run(() => tradingUi.setBrokerPicker(true))}
+             />
+             <Show when={pluginBroker.status()?.active}>
+@@ -92,9 +98,15 @@ export function TradeHeaderButton() {
+                 description={pluginBroker.status()?.tradingEnabled ? undefined : translate("Orders can't be placed until trading is on.")}
+                 onClick={run(() => void pluginBroker.setTradingEnabled(!pluginBroker.status()?.tradingEnabled))}
+               />
++            </Show>
++            <Show when={connected()}>
+               <PopItem iconSpace title={translate("Account manager")} onClick={run(() => tradingUi.showAccountManager())} />
+               <PopDivider />
+-              <PopItem iconSpace title={translate("Disconnect the broker")} onClick={run(() => void pluginBroker.setActive(null))} />
++              <PopItem
++                iconSpace
++                title={translate("Disconnect the broker")}
++                onClick={run(() => (paper() ? paperBroker.disconnect() : void pluginBroker.setActive(null)))}
++              />
+             </Show>
+           </Show>
+         </Popover>

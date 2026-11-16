@@ -1,0 +1,26 @@
+{
+  "id": "branding",
+  "name": "TradePanel product shell",
+  "version": "1.0.0",
+  "description": "Splash, English-only interface and shell defaults.",
+  "order": 5,
+  "dependsOn": [],
+  "patch": "core.patch",
+  "remove": [
+    "src/i18n/__tests__/es-de-ja.test.ts",
+    "src/i18n/__tests__/french-drawings.test.ts",
+    "src/i18n/__tests__/french.test.ts",
+    "src/i18n/de.json",
+    "src/i18n/es.json",
+    "src/i18n/fr.json",
+    "src/i18n/glossary/de.json",
+    "src/i18n/glossary/es.json",
+    "src/i18n/glossary/fr.json",
+    "src/i18n/glossary/ja.json",
+    "src/i18n/glossary/zh-Hans.json",
+    "src/i18n/glossary/zh-Hant.json",
+    "src/i18n/ja.json",
+    "src/i18n/zh-Hans.json",
+    "src/i18n/zh-Hant.json"
+  ]
+}

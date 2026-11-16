@@ -1,2 +1,0 @@
-port/zscore on penny: 900 bars, first 978411600, last 1088136000
-runtime error RE10141 at bar 837

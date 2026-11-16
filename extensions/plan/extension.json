@@ -1,0 +1,12 @@
+{
+  "id": "plan",
+  "name": "Trade plan projections",
+  "version": "1.0.0",
+  "description": "Entry/stop/target risk, reward and balance projections in the ticket.",
+  "order": 50,
+  "dependsOn": [
+    "core",
+    "venues"
+  ],
+  "patch": "core.patch"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "core",
+  "name": "TradePanel core seams",
+  "version": "1.0.0",
+  "description": "Plugin API 2 secret settings and Python runtime, bundled plugin install, credential-store helper, Pi supervisor, capture-window plumbing.",
+  "order": 10,
+  "dependsOn": [
+    "branding"
+  ],
+  "patch": "core.patch"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "paper",
+  "name": "Paper trading",
+  "version": "1.0.0",
+  "description": "The built-in simulated broker, its account view and ticket wiring.",
+  "order": 30,
+  "dependsOn": [
+    "core"
+  ],
+  "patch": "core.patch"
+}

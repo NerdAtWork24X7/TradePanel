@@ -1,0 +1,12 @@
+{
+  "id": "venues",
+  "name": "Crypto venues and Exchanges tab",
+  "version": "1.0.0",
+  "description": "Venue logos, symbol search prefixes, the Exchanges tab and plugin settings surface.",
+  "order": 40,
+  "dependsOn": [
+    "core",
+    "paper"
+  ],
+  "patch": "core.patch"
+}

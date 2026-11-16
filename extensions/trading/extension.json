@@ -1,0 +1,14 @@
+{
+  "id": "trading",
+  "name": "Trading shell",
+  "version": "1.0.0",
+  "description": "Broker picker, ticket composition and trading status wiring shared by the packs.",
+  "order": 70,
+  "dependsOn": [
+    "core",
+    "paper",
+    "venues",
+    "plan"
+  ],
+  "patch": "core.patch"
+}

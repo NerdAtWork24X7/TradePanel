@@ -1,0 +1,574 @@
+diff --git a/index.html b/index.html
+index b903680..a294cfe 100644
+--- a/index.html
++++ b/index.html
+@@ -19,63 +19,22 @@
+         align-items: center;
+         justify-content: center;
+         background: #0f0f0f;
++        color: #a1a1aa;
+         font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
++        font-size: 14px;
++        letter-spacing: 0.02em;
+         transition: opacity 200ms ease;
+       }
+       #splash.is-hidden {
+         opacity: 0;
+         pointer-events: none;
+       }
+-      .splash-card {
+-        width: 440px;
+-        padding: 24px 28px 20px;
+-        border-radius: 12px;
+-        background: #ffffff;
+-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+-        text-align: center;
+-      }
+-      .splash-card img {
+-        display: block;
+-        width: 100%;
+-      }
+-      .splash-version {
+-        margin-top: 8px;
+-        color: #6a6d78;
+-        font-size: 13px;
+-      }
+-      .splash-warning {
+-        margin-top: 16px;
+-        padding: 8px 12px;
+-        border-radius: 6px;
+-        background: #fff3e0;
+-        color: #8a4b00;
+-        font-size: 13px;
+-        line-height: 18px;
+-      }
+-      .splash-web {
+-        margin-top: 10px;
+-        color: #555;
+-        font-size: 13px;
+-        line-height: 18px;
+-        text-align: center;
+-      }
+-      /* The text waits for the interface language (index.tsx), so it is not shown in English first. */
+-      #splash:not(.is-translated) :is(.splash-version, .splash-warning, .splash-web) {
+-        color: transparent;
+-      }
+     </style>
+   </head>
+ 
+   <body>
+     <noscript>You need to enable JavaScript to run this app.</noscript>
+-    <div id="splash" role="status">
+-      <div class="splash-card">
+-        <img src="/docs/assets/banner.png" alt="OpenTrader" />
+-        <div class="splash-version">Version <span data-no-translate>__APP_VERSION__</span></div>
+-        <div class="splash-warning">Market data is delayed by 15 minutes.</div>
+-        <!--web-desktop-app-->
+-      </div>
+-    </div>
++    <div id="splash" role="status">Loading Chart...</div>
+     <script>
+       // Only the main window shows the splash; detached chart windows load
+       // straight into their tabs.
+diff --git a/src/data/assistant/panel.ts b/src/data/assistant/panel.ts
+index 2587a52..2b38382 100644
+--- a/src/data/assistant/panel.ts
++++ b/src/data/assistant/panel.ts
+@@ -1,7 +1,7 @@
+ /*
+- * The AI assistant panel at the window's right, as the reference app's: an overlay over the charts (the default) or a
+- * split view the charts shrink for ("Move overlay to split-view"), its width dragged on its left edge, and "Collapse
+- * panel" (it closes, the rail button keeps a dot). Kept in kv, but whether it shows starts closed.
++ * The AI assistant panel at the window's right: a split view the charts shrink for (the default — an overlay would
++ * cover the price axis), or an overlay over the charts ("Move split-view to overlay"), its width dragged on its left
++ * edge, and "Collapse panel" (it closes, the rail button keeps a dot). Kept in kv, but whether it shows starts closed.
+  */
+ import { createRoot, createSignal } from "solid-js";
+ import * as kv from "../kv";
+@@ -15,7 +15,7 @@ const WIDTH_KEY = "ot:assistant:width";
+ const panel = createRoot(() => {
+   const [open, setOpen] = createSignal(false);
+   const [collapsed, setCollapsed] = createSignal(false);
+-  const [mode, setMode] = createSignal<AssistantMode>(kv.getItem(MODE_KEY) === "split" ? "split" : "overlay");
++  const [mode, setMode] = createSignal<AssistantMode>(kv.getItem(MODE_KEY) === "overlay" ? "overlay" : "split");
+   const w = Number(kv.getItem(WIDTH_KEY));
+   const [width, setWidth] = createSignal<number | null>(Number.isFinite(w) && w >= ASSISTANT_MIN_WIDTH ? w : null);
+   return { open, setOpen, collapsed, setCollapsed, mode, setMode, width, setWidth };
+diff --git a/src/data/header-toolbar.ts b/src/data/header-toolbar.ts
+index ab4efc0..a306b20 100644
+--- a/src/data/header-toolbar.ts
++++ b/src/data/header-toolbar.ts
+@@ -91,7 +91,7 @@ export const SECTIONS: Section[] = [
+       // undo stack); these entries only carry the icons + hotkey hints.
+       { id: "undo-toggle-maximized-pane-state", label: "Undo", iconName: "header-undo-toggle-maximized-pane-state", hotkey: "Ctrl+Z" },
+       { id: "redo-toggle-maximized-pane-state", label: "Redo", iconName: "header-redo-toggle-maximized-pane-state", hotkey: "Ctrl+Y" },
+-      { id: "layout-setup", label: "Layout setup", iconName: "header-layout-setup" },
++      { id: "layout-setup", label: "Layout setup", text: "Layout setup", iconName: "header-layout-setup" },
+       { id: "all-changes-saved", label: "All changes saved", text: "DailySave" },
+       { id: "save-load-menu", label: "Manage layouts", iconName: "header-manage-layouts", chevron: true },
+     ],
+diff --git a/src/i18n/__tests__/catalog.test.ts b/src/i18n/__tests__/catalog.test.ts
+index 5918823..a65a59e 100644
+--- a/src/i18n/__tests__/catalog.test.ts
++++ b/src/i18n/__tests__/catalog.test.ts
+@@ -37,12 +37,9 @@ describe("the English catalog (#288)", () => {
+ 
+ describe("the dictionaries (#288)", () => {
+   const known = knownStudyTexts(registry);
+-  it("each glossary is a registered language's, each term translated", () => {
+-    const glossaries = import.meta.glob("../glossary/*.json", { import: "default", eager: true }) as Record<string, Record<string, { translation?: string }>>;
+-    for (const [path, terms] of Object.entries(glossaries)) {
+-      expect(LANGUAGES.some((l) => path.endsWith(`/${l.id}.json`)), path).toBe(true);
+-      expect(Object.entries(terms).filter(([, t]) => !t.translation).map(([term]) => term), path).toEqual([]);
+-    }
++  it("ships English alone: the catalog is the only dictionary file", () => {
++    expect(LANGUAGES.map((l) => l.id)).toEqual(["en"]);
++    expect(Object.keys(DICTIONARIES)).toEqual(["../catalog.json"]);
+   });
+   for (const l of LANGUAGES.filter((x) => x.dictionary)) {
+     // A pseudo-language is generated from the catalog (#289).
+diff --git a/src/i18n/__tests__/drawing-labels.test.ts b/src/i18n/__tests__/drawing-labels.test.ts
+index 0476ed9..22b9abd 100644
+--- a/src/i18n/__tests__/drawing-labels.test.ts
++++ b/src/i18n/__tests__/drawing-labels.test.ts
+@@ -4,7 +4,6 @@ import { drawingLabelFormatter } from "../drawing-labels";
+ import { setDictionary } from "../translator";
+ import { translatedPlotConfig, translatedStudyResult } from "../study-text";
+ import type { IndicatorResult } from "oakscriptjs";
+-import zhHans from "../zh-Hans.json";
+ import { libraryMonthRule } from "../format";
+ 
+ const ctx = { kind: "long-position", drawingId: "d1" };
+@@ -13,6 +12,27 @@ const fmt = (l: { id: DrawingLabel["id"]; text: string; [field: string]: unknown
+   return f ? f({ ...l, ...ctx } as DrawingLabel) : "(none)";
+ };
+ 
++/** The words these labels carry, translated as a fixture (no language ships but English). */
++const DICT = {
++  "Head": "头部",
++  "Add text": "添加文本",
++  "{0} bars": "{0} 根K线",
++  "{0}d": "{0}天",
++  "{0}h": "{0}小时",
++  "{0}m": "{0}分",
++  "distance: {0} px": "距离：{0} 像素",
++  "Vol {0}": "成交量 {0}",
++  "Target": "目标",
++  "Amount": "金额",
++  "Open PnL": "未平仓盈亏",
++  "Qty": "数量",
++  "Risk/reward ratio": "风险回报比",
++  "{0} in {1}": "{0}，用时 {1}",
++  "Strong": "强烈",
++  "Buy": "买入",
++  "Upper Band #1": "上轨 #1",
++};
++
+ afterEach(() => setDictionary({}));
+ 
+ describe("drawing labels in the interface language (#190)", () => {
+@@ -21,7 +41,7 @@ describe("drawing labels in the interface language (#190)", () => {
+   });
+ 
+   it("words, values kept", () => {
+-    setDictionary(zhHans);
++    setDictionary(DICT);
+     expect(fmt({ id: "caption", text: "Head" })).toBe("头部");
+     expect(fmt({ id: "caption", text: "Add text" })).toBe("添加文本");
+     expect(fmt({ id: "bars-range", text: "15 bars", bars: 15 })).toBe("15 根K线");
+@@ -53,7 +73,7 @@ describe("study text in the interface language (#190)", () => {
+   });
+ 
+   it("labels, shapes and tables; what the dictionary lacks stays", () => {
+-    setDictionary(zhHans, [libraryMonthRule("zh-CN")]);
++    setDictionary(DICT, [libraryMonthRule("zh-CN")]);
+     const r = translatedStudyResult(result);
+     expect(r.markers?.[0].text).toBe("强烈\n买入");
+     expect(r.labels?.[0]).toBe(result.labels?.[0]);
+diff --git a/src/i18n/__tests__/format.test.ts b/src/i18n/__tests__/format.test.ts
+index 6bd8c17..29dbe1f 100644
+--- a/src/i18n/__tests__/format.test.ts
++++ b/src/i18n/__tests__/format.test.ts
+@@ -1,13 +1,19 @@
+ import { afterEach, describe, expect, it } from "vitest";
+ import { formatChartTime, formatTickMark } from "../../window/chart/time-format";
+ import { dateText, durationText, largestUnitText, monthName, numberText } from "../format";
+-import { ENGLISH, languageEntry } from "../languages";
++import { ENGLISH, LANGUAGES, type Formats } from "../languages";
+ import { inEnglish, setDictionary } from "../translator";
+ 
+-const as = (id: string) => {
+-  const l = languageEntry(id)!;
+-  setDictionary({}, [], l.pluralLocale, l.formats);
++/** Formats of a language that is not shipped: the fixtures here check `format.ts`, not the language list. */
++const ZH: Formats = {
++  dateLocale: "zh-CN",
++  numberLocale: "en-US",
++  chartDate: "{yyyy}年{M}月{d}日",
++  chartWeekdayDate: "{yyyy}年{M}月{d}日 {wd}",
++  listSeparator: "、",
+ };
++const ZH_HANT: Formats = { ...ZH, dateLocale: "zh-TW" };
++const as = (formats: Formats, pluralLocale = "zh") => setDictionary({}, [], pluralLocale, formats);
+ afterEach(() => setDictionary({}));
+ 
+ // Mon 26 Oct 2026 14:30 UTC.
+@@ -29,25 +35,25 @@ describe("formats of the interface language (#288)", () => {
+   });
+ 
+   it("Chinese writes its dates as the text rules did", () => {
+-    as("zh-Hans");
++    as(ZH);
+     expect(formatChartTime(SEC, "UTC", true, false)).toBe("2026年10月26日 周一   14:30");
+     expect(formatChartTime(SEC, "UTC", false, false, { dayOfWeek: false })).toBe("2026年10月26日");
+     expect(formatTickMark(SEC, "Month", "UTC")).toBe("10月");
+     expect(dateText(Date.UTC(2003, 8, 10), { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })).toBe("2003年9月10日");
+     expect(dateText(Date.UTC(2026, 10, 1), { month: "long", year: "numeric", timeZone: "UTC" })).toBe("2026年11月");
+     expect(numberText(1250.5)).toBe("1,250.5");
+-    as("zh-Hant");
++    as(ZH_HANT);
+     expect(formatChartTime(SEC + 86400, "UTC", false, false)).toBe("2026年10月27日 週二");
+   });
+ 
+   it("inEnglish formats in English", () => {
+-    as("zh-Hans");
++    as(ZH);
+     expect(inEnglish(() => formatTickMark(SEC, "Month", "UTC"))).toBe("Oct");
+     expect(formatTickMark(SEC, "Month", "UTC")).toBe("10月");
+   });
+ 
+-  it("each language has its formats and a direction", () => {
++  it("English is the only interface language, and it reads left to right", () => {
+     expect(ENGLISH.direction).toBe("ltr");
+-    for (const id of ["zh-Hans", "zh-Hant"]) expect(languageEntry(id)?.direction).toBe("ltr");
++    expect(LANGUAGES.map((l) => l.id)).toEqual(["en"]);
+   });
+ });
+diff --git a/src/i18n/__tests__/pseudo-rtl.test.ts b/src/i18n/__tests__/pseudo-rtl.test.ts
+index 5034f5e..76fb56f 100644
+--- a/src/i18n/__tests__/pseudo-rtl.test.ts
++++ b/src/i18n/__tests__/pseudo-rtl.test.ts
+@@ -1,6 +1,5 @@
+ import { describe, expect, it } from "vitest";
+ import catalogJson from "../catalog.json";
+-import { languageEntry } from "../languages";
+ import { pseudoRtl, pseudoRtlDictionary } from "../pseudo-rtl";
+ import type { Catalog } from "../tools/catalog";
+ import { valuesOf } from "../tools/catalog";
+@@ -9,13 +8,6 @@ const RLM = String.fromCharCode(0x200f);
+ const plain = (s: string) => s.split(RLM).join("");
+ 
+ describe("the right-to-left pseudo-language en-XB (#290)", () => {
+-  it("is registered in the development build, right to left, English formats", () => {
+-    const l = languageEntry("en-XB")!;
+-    expect(l.direction).toBe("rtl");
+-    expect(l.pseudo).toBe(true);
+-    expect(l.formats).toEqual(languageEntry("en")!.formats);
+-  });
+-
+   it("keeps the words and the values, each word followed by a right-to-left mark, inside ⟦ ⟧", () => {
+     expect(pseudoRtl("Add alert")).toBe(`${RLM}⟦Add${RLM} alert${RLM}⟧${RLM}`);
+     expect(plain(pseudoRtl("{0} bars of {1}"))).toBe("⟦{0} bars of {1}⟧");
+diff --git a/src/i18n/__tests__/pseudo.test.ts b/src/i18n/__tests__/pseudo.test.ts
+index 01a1c60..6151575 100644
+--- a/src/i18n/__tests__/pseudo.test.ts
++++ b/src/i18n/__tests__/pseudo.test.ts
+@@ -44,10 +44,8 @@ describe("the pseudo-language (#289)", () => {
+     expect(translateWith("{0} of {1}", 2, 9)).toBe(pseudo("{0} of {1}").replace("{0}", "2").replace("{1}", "9"));
+   });
+ 
+-  it("is registered without a dictionary file, in the menu of a development build", () => {
+-    const l = languageEntry("en-XA");
+-    expect(l?.pseudo).toBe(true);
+-    expect(l?.partial).toBeUndefined();
+-    expect(menuLanguages().some((x) => x.id === "en-XA")).toBe(import.meta.env.DEV);
++  it("ships no other interface language", () => {
++    expect(languageEntry("en-XA")).toBeUndefined();
++    expect(menuLanguages().map((l) => l.id)).toEqual(["en"]);
+   });
+ });
+diff --git a/src/i18n/__tests__/translator.test.ts b/src/i18n/__tests__/translator.test.ts
+index ece9880..e6d5f68 100644
+--- a/src/i18n/__tests__/translator.test.ts
++++ b/src/i18n/__tests__/translator.test.ts
+@@ -1,11 +1,9 @@
+ import { afterEach, describe, expect, it } from "vitest";
+ import { inEnglish, lookUp, setDictionary, translate, translateAs, translateDrawn, translatePlural, translateWith } from "../translator";
+-import { languageEntry } from "../languages";
+ import { libraryMonthRule } from "../format";
+-import zhHans from "../zh-Hans.json";
+ 
+ const D = { Save: "保存", "Open…": "打开…" };
+-const ZH = languageEntry("zh-Hans")!;
++const ZH = { dateLocale: "zh-CN" };
+ 
+ afterEach(() => setDictionary({}));
+ 
+@@ -65,7 +63,7 @@ describe("text with values from the code (#190)", () => {
+     expect(translateWith("{0} bars", 2)).toBe("2 根K线");
+   });
+   it("translateDrawn: each line; a library's month name in the language's", () => {
+-    setDictionary({ Strong: "强烈", Buy: "买入" }, [libraryMonthRule(ZH.formats.dateLocale)]);
++    setDictionary({ Strong: "强烈", Buy: "买入" }, [libraryMonthRule(ZH.dateLocale)]);
+     expect(translateDrawn("Strong\nBuy")).toBe("强烈\n买入");
+     expect(translateDrawn("Jan")).toBe("1月");
+     expect(translateDrawn("HH")).toBe("HH");
+@@ -101,8 +99,9 @@ describe("counted text (#288)", () => {
+   it("the page reads a counted entry by its other form", () => {
+     expect(translate("{0} bars", { "{0} bars": { one: "{0} barre", other: "{0} barres" } })).toBe("{0} barres");
+   });
+-  it("Chinese has the dictionary's forms", () => {
+-    setDictionary(zhHans, [], "zh");
++  it("a language with one plural form reads it for every count", () => {
++    setDictionary({ "{0} drawings": "{0} 个绘图" }, [], "zh");
+     expect(translatePlural(1, { one: "{0} drawing", other: "{0} drawings" })).toBe("1 个绘图");
++    expect(translatePlural(5, { one: "{0} drawing", other: "{0} drawings" })).toBe("5 个绘图");
+   });
+ });
+diff --git a/src/i18n/languages.ts b/src/i18n/languages.ts
+index a8f88a0..03f9151 100644
+--- a/src/i18n/languages.ts
++++ b/src/i18n/languages.ts
+@@ -74,124 +74,14 @@ export const ENGLISH: LanguageEntry = {
+   direction: "ltr",
+ };
+ 
+-export const LANGUAGES: readonly LanguageEntry[] = [
+-  ENGLISH,
+-  {
+-    id: "zh-Hans",
+-    name: "简体中文",
+-    dictionary: () => import("./zh-Hans.json"),
+-    pluralLocale: "zh",
+-    // Numbers grouped as in English.
+-    formats: { dateLocale: "zh-CN", numberLocale: "en-US", chartDate: "{yyyy}年{M}月{d}日", chartWeekdayDate: "{yyyy}年{M}月{d}日 {wd}", listSeparator: "、" },
+-    direction: "ltr",
+-  },
+-  {
+-    id: "zh-Hant",
+-    name: "繁體中文",
+-    dictionary: () => import("./zh-Hant.json"),
+-    pluralLocale: "zh",
+-    formats: { dateLocale: "zh-TW", numberLocale: "en-US", chartDate: "{yyyy}年{M}月{d}日", chartWeekdayDate: "{yyyy}年{M}月{d}日 {wd}", listSeparator: "、" },
+-    direction: "ltr",
+-  },
+-  {
+-    id: "ja",
+-    name: "日本語",
+-    dictionary: () => import("./ja.json"),
+-    // One plural form ("other"), as Chinese.
+-    pluralLocale: "ja",
+-    // Numbers as English. The chart's dates "2026-09-11 (金)", its months "9月"; the calendar "7月 2026" with its
+-    // weekday heads in single kanji. Hours and minutes run together ("2時間16分"), days and hours take a connector.
+-    formats: {
+-      dateLocale: "ja-JP",
+-      numberLocale: "ja-JP",
+-      chartDate: "{yyyy}-{MM}-{dd}",
+-      chartWeekdayDate: "{yyyy}-{MM}-{dd} ({wd})",
+-      shortMonths: ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"],
+-      calendarWeekdays: ["月", "火", "水", "木", "金", "土", "日"],
+-      calendarTitle: "{M}月 {yyyy}",
+-      listSeparator: "、",
+-      durationJoin: { daysHours: "{0}と{1}", hoursMinutes: "{0}{1}" },
+-    },
+-    direction: "ltr",
+-  },
+-  {
+-    id: "fr",
+-    name: "Français",
+-    dictionary: () => import("./fr.json"),
+-    pluralLocale: "fr",
+-    // "1 234,5" (narrow no-break spaces), "103,47 M", "+5,81%"; the chart's months capitalised without a dot.
+-    formats: {
+-      dateLocale: "fr-FR",
+-      numberLocale: "fr-FR",
+-      chartDate: "{dd} {MMM} '{yy}",
+-      chartWeekdayDate: "{wd} {dd} {MMM} '{yy}",
+-      shortMonths: ["Janv", "Févr", "Mars", "Avr", "Mai", "Juin", "Juill", "Août", "Sept", "Oct", "Nov", "Déc"],
+-      calendarWeekdays: ["Lu", "Ma", "Me", "Je", "Ve", "Sa", "Di"],
+-      numberMarks: { group: "\u202f", decimal: ",", unitSpace: "\u202f" },
+-    },
+-    direction: "ltr",
+-  },
+-  {
+-    id: "es",
+-    name: "Español",
+-    dictionary: () => import("./es.json"),
+-    pluralLocale: "es",
+-    // "1.234,5" (grouped from four digits, as German: Intl's es-ES leaves "1234,5"), "103,47 M", "+5,81%"; the
+-    // chart's months capitalised, May written whole; "vie 11 Sep '26"; the calendar "Julio 2026"; quarters "T3".
+-    formats: {
+-      dateLocale: "es-ES",
+-      numberLocale: "de-DE",
+-      chartDate: "{dd} {MMM} '{yy}",
+-      chartWeekdayDate: "{wd} {dd} {MMM} '{yy}",
+-      shortMonths: ["Ene", "Feb", "Mar", "Abr", "Mayo", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"],
+-      calendarWeekdays: ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"],
+-      calendarTitle: "{MMMM} {yyyy}",
+-      quarter: "T{q}",
+-      numberMarks: { group: ".", decimal: ",", unitSpace: "\u202f" },
+-    },
+-    direction: "ltr",
+-  },
+-  {
+-    id: "de",
+-    name: "Deutsch",
+-    dictionary: () => import("./de.json"),
+-    pluralLocale: "de",
+-    // "1.234,5", "103,47 M", "+5,81%"; the chart's months "Mrz", "Okt"; "Fr 11 Sep '26"; the calendar "Juli 2026".
+-    formats: {
+-      dateLocale: "de-DE",
+-      numberLocale: "de-DE",
+-      chartDate: "{dd} {MMM} '{yy}",
+-      chartWeekdayDate: "{wd} {dd} {MMM} '{yy}",
+-      shortMonths: ["Jan", "Feb", "Mrz", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"],
+-      calendarWeekdays: ["Mo.", "Di.", "Mi.", "Do.", "Fr.", "Sa.", "So."],
+-      numberMarks: { group: ".", decimal: ",", unitSpace: "\u202f" },
+-      capitalNouns: true,
+-    },
+-    direction: "ltr",
+-  },
+-  {
+-    // Accented, longer text between markers: what is left in English or cut shows (#289).
+-    id: "en-XA",
+-    name: "Pseudo",
+-    dictionary: () => import("./pseudo").then((m) => m.loadPseudoDictionary()),
+-    pluralLocale: "en",
+-    formats: ENGLISH.formats,
+-    direction: "ltr",
+-    pseudo: true,
+-  },
+-  {
+-    // Right to left with readable English words (pseudo-rtl.ts): panels, menus, icons and values in a mirrored page (#290).
+-    id: "en-XB",
+-    name: "English, right to left (test)",
+-    dictionary: () => import("./pseudo-rtl").then((m) => m.loadPseudoRtl()),
+-    pluralLocale: "en",
+-    formats: ENGLISH.formats,
+-    direction: "rtl",
+-    pseudo: true,
+-  },
+-];
++/**
++ * The interface languages. Only English ships: the catalog and the translator
++ * stay in place, so another language is still one entry here and one
++ * `<id>.json` dictionary, but this build offers English alone.
++ */
++export const LANGUAGES: readonly LanguageEntry[] = [ENGLISH];
+ 
+-/** The languages the language menu offers: the pseudo-languages in a development build only. */
++/** The languages the language menu offers (English only: see `LANGUAGES`). */
+ export function menuLanguages(): LanguageEntry[] {
+   return LANGUAGES.filter((l) => !l.pseudo || import.meta.env.DEV);
+ }
+diff --git a/src/i18n/tools/run-time-texts.ts b/src/i18n/tools/run-time-texts.ts
+index 0b62cf8..59ddaee 100644
+--- a/src/i18n/tools/run-time-texts.ts
++++ b/src/i18n/tools/run-time-texts.ts
+@@ -111,7 +111,6 @@ const GROUPS: Record<string, string[]> = {
+     "Housing",
+     "Taxes",
+   ],
+-  "index.html, the splash card": ["Version"],
+   "data/chart-properties.ts, Scales > Time hours format (written like an id, the scanner leaves them)": ["24-hours", "12-hours"],
+   "data/community/api.ts, the errors the community panel shows when the server can't be reached (offline, or online but no answer)": [
+     "Community is unreachable. Check your connection.",
+diff --git a/src/window/header/AppSettingsDialog.tsx b/src/window/header/AppSettingsDialog.tsx
+index 1b332da..88986e0 100644
+--- a/src/window/header/AppSettingsDialog.tsx
++++ b/src/window/header/AppSettingsDialog.tsx
+@@ -57,7 +57,7 @@ const TABS: { id: AppSettingsTabId; label: string; icon: string }[] = [
+   // The local endpoint coding agents connect to (desktop app only).
+   ...(isTauri() ? [{ id: "agents" as const, label: "Coding agents", icon: "settings-agents" }] : []),
+   // Data and broker plugins on this computer (desktop app only: they connect to a local endpoint).
+-  ...(isTauri() ? [{ id: "plugins" as const, label: "Plugins", icon: "settings-plugins" }] : []),
++  { id: "plugins", label: "Plugins", icon: "settings-plugins" },
+   // Folders of CSV files kept in sync with the imported series (desktop app only: they need the disk).
+   ...(isTauri() ? [{ id: "local-data" as const, label: "Local data", icon: "settings-local-data" }] : []),
+   { id: "about", label: "About", icon: "settings-about" },
+diff --git a/src/window/header/ProfileMenu.tsx b/src/window/header/ProfileMenu.tsx
+index 0d59e7c..6073b05 100644
+--- a/src/window/header/ProfileMenu.tsx
++++ b/src/window/header/ProfileMenu.tsx
+@@ -46,7 +46,10 @@ function rows(): Row[] {
+   const out: Row[] = [SETTINGS_ROW];
+   if (isTauri()) out.push(ONBOARDING_ROW);
+   out.push(DRAWINGS_ROW);
+-  out.push({ type: "item", label: "Language", icon: "profile-language", value: currentLanguageLabel(), submenu: true, action: "language" });
++  // One interface language: no picker to open.
++  if (menuLanguages().length > 1) {
++    out.push({ type: "item", label: "Language", icon: "profile-language", value: currentLanguageLabel(), submenu: true, action: "language" });
++  }
+   out.push(SHORTCUTS_ROW);
+   return out;
+ }
+diff --git a/src/window/header/header-menus/registry.ts b/src/window/header/header-menus/registry.ts
+index 9b758a1..0f1a575 100644
+--- a/src/window/header/header-menus/registry.ts
++++ b/src/window/header/header-menus/registry.ts
+@@ -555,7 +555,7 @@ export const HEADER_MENUS: Record<string, HeaderMenuDef> = {
+     "width": 428,
+     "sections": [
+       {
+-        "header": null,
++        "header": "Layouts of several charts.",
+         "items": [
+           {
+             "id": "layouts-list-item-s",
+diff --git a/src/window/right-rail/RightRailTabs.tsx b/src/window/right-rail/RightRailTabs.tsx
+index e9576ac..0bc4a30 100644
+--- a/src/window/right-rail/RightRailTabs.tsx
++++ b/src/window/right-rail/RightRailTabs.tsx
+@@ -17,12 +17,11 @@ import { Icon } from "../../components/Icon";
+ import { Tooltip } from "../../components/Tooltip";
+ import { TOP_TABS, type Tab } from "../../data/right-rail-tabs";
+ import { COMMUNITY_ENABLED } from "../../data/community/api";
+-import { isTauri } from "../shell/window-bridge";
+ import { unread as communityUnread } from "../../data/community/notifications";
+ import { moveInLayout, railLayout, resetRailLayout, setHiddenInLayout, setRailLayout, type RailGroup } from "../../data/right-rail-layout";
+ 
+ // The AI assistant needs the desktop app (its requests go through Rust).
+-const SHOWN_TABS = TOP_TABS.filter((t) => (t.id !== "community" || COMMUNITY_ENABLED) && (t.id !== "assistant-button" || isTauri()));
++const SHOWN_TABS = TOP_TABS.filter((t) => (t.id !== "community" || COMMUNITY_ENABLED));
+ const TAB_BY_ID = new Map(SHOWN_TABS.map((t) => [t.id, t]));
+ const IDS = SHOWN_TABS.map((t) => t.id);
+ /** Pointer travel (px) before a press becomes a drag. */
+diff --git a/vite.config.ts b/vite.config.ts
+index 501a8b7..1ff4bf1 100644
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -82,15 +82,6 @@ export default defineConfig(async ({ mode }: { mode: string }) => ({
+     indicatorManifest(),
+     // Vite watches only this project: also watch the drawing core so edits
+     // there hot-reload here.
+-    // The splash in index.html shows the app version (the installer's, from
+-    // tauri.conf.json).
+-    { name: "app-version", transformIndexHtml: (html: string) => html.replace("__APP_VERSION__", tauriConf.version) },
+-    // Web version: the splash says the app also exists for the desktop.
+-    {
+-      name: "web-desktop-app",
+-      transformIndexHtml: (html: string) =>
+-        html.replace("<!--web-desktop-app-->", mode === "web" ? '<div class="splash-web">Also available as a free desktop app.</div>' : ""),
+-    },
+     // Web version: what search engines and link previews show for the demo, and a robots.txt that keeps
+     // crawlers off the API (the single-page fallback would otherwise answer it with the app).
+     ...(mode === "web" ? [webSeo()] : []),
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -7,12 +7,12 @@
+   "scripts": {
+     "start": "vite",
+     "dev": "vite",
+-    "build": "vite build",
++    "build": "node --max-old-space-size=8192 ./node_modules/vite/bin/vite.js build",
+     "serve": "vite preview",
+     "dev:web": "vite --mode web",
+-    "build:web": "vite build --mode web",
++    "build:web": "node --max-old-space-size=8192 ./node_modules/vite/bin/vite.js build --mode web",
+     "dev:community": "vite --mode community",
+-    "build:community": "vite build --mode community",
++    "build:community": "node --max-old-space-size=8192 ./node_modules/vite/bin/vite.js build --mode community",
+     "tauri": "tauri",
+     "test": "vitest run",
+     "test:watch": "vitest",

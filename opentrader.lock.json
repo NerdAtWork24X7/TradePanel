@@ -1,0 +1,48 @@
+{
+  "upstream": "https://github.com/deepentropy/opentrader.git",
+  "ref": "v0.4.25",
+  "commit": "680735daf98f461cdbaf1c0bdba8254fbe23fd1c",
+  "updatedAt": "2026-11-16T04:31:47.490Z",
+  "extensions": [
+    {
+      "id": "branding",
+      "version": "1.0.0",
+      "sha256": "c096124d4128437e17bdf110c6ef74f45abb0c7b0a792ae452e73ffcd856fc4c"
+    },
+    {
+      "id": "core",
+      "version": "1.0.0",
+      "sha256": "2c8c261c39ca68a6c356ae3bc2eb526ace3299e44a3d9e57f10e7ea4dd2a0459"
+    },
+    {
+      "id": "chart",
+      "version": "1.0.0",
+      "sha256": "fb764f34ea85d13489f8cfe46721690775ec162b347036cc443c850e26732533"
+    },
+    {
+      "id": "paper",
+      "version": "1.0.0",
+      "sha256": "0f51988ee96f09e119ab984f895d38a1e0e165e292ec699835392e218cbb4281"
+    },
+    {
+      "id": "venues",
+      "version": "1.0.0",
+      "sha256": "70ca596f931bb2b8ca21a2248fb7f52e33ef15de15bd8e0bca8f201c951ad2e1"
+    },
+    {
+      "id": "plan",
+      "version": "1.0.0",
+      "sha256": "65154acad5d10196b75460e858cfe65b4e5829d2c2a1717eed8948c2019c9a8f"
+    },
+    {
+      "id": "analyst",
+      "version": "1.0.0",
+      "sha256": "d4853a76d71104ba7ef8fb8b5416311a0a11a177f0ccf7c9d3d3607546c27e71"
+    },
+    {
+      "id": "trading",
+      "version": "1.0.0",
+      "sha256": "09d5e192cc51d0096beffa11d0d0e0ba904c4b91a0be9ddba6b34bc57a51fb7b"
+    }
+  ]
+}

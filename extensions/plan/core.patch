@@ -1,0 +1,152 @@
+diff --git a/src/styles/trading.css b/src/styles/trading.css
+index 8d34643..d1d1a7b 100644
+--- a/src/styles/trading.css
++++ b/src/styles/trading.css
+@@ -366,6 +366,25 @@ html.theme-light {
+   color: var(--color-text-secondary);
+   font: 400 14px/20px var(--trd-font);
+ }
++/* The one way out of an empty ticket: the broker's card (Exchanges) or Settings > Plugins. */
++.trd-tk-empty-action {
++  margin-top: 4px;
++  padding: 6px 14px;
++  border: 1px solid var(--trd-input-border);
++  border-radius: 6px;
++  background: transparent;
++  color: var(--color-text-primary);
++  font: 500 13px/18px var(--trd-font);
++  cursor: pointer;
++  transition: background-color 160ms ease, border-color 160ms ease;
++}
++.trd-tk-empty-action:hover {
++  background: var(--trd-side-hover);
++}
++.trd-tk-empty-action:focus-visible {
++  outline: 2px solid var(--trd-buy-selected-text);
++  outline-offset: 2px;
++}
+ .trd-switch {
+   position: relative;
+   width: 34px;
+@@ -1727,3 +1758,108 @@ html.theme-light {
+     transform: rotate(360deg);
+   }
+ }
++
++/* ─── Trade plan (the ticket's projections) ─── */
++.trd-plan {
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++  margin: 8px 16px 0;
++  padding: 10px 12px;
++  border: 1px solid var(--trd-divider);
++  border-radius: 8px;
++  background: var(--trd-values-bg);
++}
++.trd-plan-head {
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  font: 600 13px/17px var(--trd-font);
++  color: var(--color-text-primary);
++}
++.trd-plan-rr {
++  font-variant-numeric: tabular-nums;
++  color: var(--color-text-primary);
++}
++.trd-plan-rr.is-idle {
++  color: var(--color-text-secondary);
++}
++.trd-plan-levels {
++  display: grid;
++  grid-template-columns: repeat(3, minmax(0, 1fr));
++  gap: 6px;
++}
++.trd-plan-level {
++  display: flex;
++  flex-direction: column;
++  gap: 1px;
++  min-width: 0;
++}
++.trd-plan-level > span {
++  font-size: 11px;
++  color: var(--color-text-secondary);
++}
++.trd-plan-level > strong {
++  overflow: hidden;
++  color: var(--color-text-primary);
++  font: 600 12px/16px var(--trd-font);
++  font-variant-numeric: tabular-nums;
++  text-overflow: ellipsis;
++}
++.trd-plan-level.is-loss > strong {
++  color: var(--trd-sell-selected-text);
++}
++.trd-plan-level.is-profit > strong {
++  color: var(--trd-toast-success);
++}
++.trd-plan-bar {
++  display: flex;
++  height: 6px;
++  overflow: hidden;
++  border-radius: 3px;
++  background: var(--trd-divider);
++}
++.trd-plan-bar .is-risk {
++  background: var(--trd-sell-selected-text);
++}
++.trd-plan-bar .is-reward {
++  background: var(--trd-toast-success);
++}
++.trd-plan-rows {
++  display: flex;
++  flex-direction: column;
++}
++.trd-plan-rows .trd-tk-row {
++  min-height: 22px;
++}
++.trd-plan-risk {
++  color: var(--trd-sell-selected-text);
++}
++.trd-plan-reward {
++  color: var(--trd-toast-success);
++}
++.trd-plan-pct {
++  margin-inline-start: 6px;
++  opacity: 0.8;
++}
++.trd-plan-balance {
++  display: flex;
++  flex-wrap: wrap;
++  justify-content: space-between;
++  gap: 4px 12px;
++  padding-block-start: 4px;
++  border-block-start: 1px solid var(--trd-divider);
++  color: var(--color-text-secondary);
++  font-size: 12px;
++  line-height: 16px;
++}
++.trd-plan-balance strong {
++  color: var(--color-text-primary);
++  font-variant-numeric: tabular-nums;
++}
++.trd-plan-warning {
++  margin: 0;
++  color: var(--color-content-primary-danger);
++  font-size: 12px;
++  line-height: 16px;
++}
+diff --git a/src/window/trading/ticket-model.ts b/src/window/trading/ticket-model.ts
+index c7fb0ba..9dbfc8b 100644
+--- a/src/window/trading/ticket-model.ts
++++ b/src/window/trading/ticket-model.ts
+@@ -392,7 +392,7 @@ export function createTicketModel() {
+ 
+   return {
+     d, q, tick, dec, ccy, state, r, types, caps, qtyTypes, isPos, editing, editingPos, errorText, qtyTip, setQtyTip, slTip, setSlTip, boxes,
+-    patch, spread, setType,
++    patch, spread, setType, entry, exitPx, ctx,
+     exitOn, exitType, exitEquiv, qtyNum, exitValueText, exitInputValue, setExit, setExitType, setExitEquiv, swapExit, exitStep,
+     setQtyType, qtyValueText, priceMode, swapPrice, stepKey,
+     submit, changed, rr, currentPreset, applyPreset, presetApplied,

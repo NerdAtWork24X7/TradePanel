@@ -1,0 +1,11 @@
+{
+  "id": "chart",
+  "name": "Chart and Bar Replay fixes",
+  "version": "1.0.0",
+  "description": "Replay bar slicing, legend, live paint, navigation, pane geometry and stop-limit lines.",
+  "order": 20,
+  "dependsOn": [
+    "core"
+  ],
+  "patch": "core.patch"
+}

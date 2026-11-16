@@ -1,0 +1,1235 @@
+diff --git a/src/data/__tests__/symbol-search.test.ts b/src/data/__tests__/symbol-search.test.ts
+index d4d8f26..772296a 100644
+--- a/src/data/__tests__/symbol-search.test.ts
++++ b/src/data/__tests__/symbol-search.test.ts
+@@ -7,7 +7,7 @@ vi.mock("../providers", async () => {
+   return { searchResultToRow: m.searchResultToRow, typeFilters: () => m.typeFilters, defaultExchange: () => m.defaultExchange };
+ });
+ 
+-import { SYMBOLS, filterSymbols, liveResultsToRows } from "../symbol-search";
++import { SYMBOLS, filterSymbols, liveOnlyCategory, liveResultsToRows, searchesLive, symbolExchangePrefix } from "../symbol-search";
+ 
+ const res = (ticker: string, over: Partial<SymbolSearchResult> = {}): SymbolSearchResult => ({
+   ticker,
+@@ -55,6 +55,47 @@ describe("filterSymbols", () => {
+   });
+ });
+ 
++describe("liveOnlyCategory", () => {
++  it("marks the tabs the static catalogue cannot fill, so they ask the provider at once", () => {
++    expect(liveOnlyCategory("crypto")).toBe(true);
++    expect(liveOnlyCategory("forex")).toBe(true);
++    expect(liveOnlyCategory("futures")).toBe(true);
++    expect(liveOnlyCategory("indices")).toBe(true);
++    expect(liveOnlyCategory("bonds")).toBe(true);
++    // The catalogue's own tabs, and the local series, keep waiting for a query.
++    expect(liveOnlyCategory("all")).toBe(false);
++    expect(liveOnlyCategory("stocks")).toBe(false);
++    expect(liveOnlyCategory("funds")).toBe(false);
++    expect(liveOnlyCategory("economy")).toBe(false);
++    expect(liveOnlyCategory("local")).toBe(false);
++  });
++});
++
++describe("symbolExchangePrefix", () => {
++  it("reads the exchange prefix of a full symbol", () => {
++    expect(symbolExchangePrefix("BINANCE:SOLUSDT", "SOLUSDT")).toBe("BINANCE:");
++    expect(symbolExchangePrefix("NASDAQ:AAPL", "AAPL")).toBe("NASDAQ:");
++    expect(symbolExchangePrefix("ECONOMICS:GDP", "GDP")).toBe("ECONOMICS:");
++  });
++
++  it("gives no prefix to a bare ticker", () => {
++    expect(symbolExchangePrefix("AAPL", "AAPL")).toBeNull();
++    expect(symbolExchangePrefix("", "AAPL")).toBeNull();
++  });
++});
++
++describe("searchesLive", () => {
++  it("searches a provider-only tab at once, and the catalogue's tabs once a query is typed", () => {
++    expect(searchesLive("", "crypto")).toBe(true);
++    expect(searchesLive("   ", "crypto")).toBe(true);
++    expect(searchesLive("", "all")).toBe(false);
++    expect(searchesLive("", "stocks")).toBe(false);
++    expect(searchesLive("", "local")).toBe(false);
++    expect(searchesLive("BTC", "all")).toBe(true);
++    expect(searchesLive("BTC", "stocks")).toBe(true);
++  });
++});
++
+ describe("liveResultsToRows", () => {
+   it("ranks by match quality then listing quality, stable within a rank", () => {
+     const rows = liveResultsToRows(
+diff --git a/src/data/providers/__tests__/gateway.test.ts b/src/data/providers/__tests__/gateway.test.ts
+index 315ad88..4418e0a 100644
+--- a/src/data/providers/__tests__/gateway.test.ts
++++ b/src/data/providers/__tests__/gateway.test.ts
+@@ -85,6 +85,12 @@ describe("searchResultToRow", () => {
+     expect(f).toMatchObject({ marketType: "forex", category: "forex", country: undefined });
+   });
+ 
++  it("a crypto listing carries its venue mark", () => {
++    const r = searchResultToRow(res({ ticker: "SOLUSDT", market: "crypto", type: null, exchange: "BINANCE", locale: null }));
++    expect(r.symbolName).toBe("BINANCE:SOLUSDT");
++    expect(r.venueLogoSrc).toBeTruthy();
++  });
++
+   it("defaults: stocks market, empty description, unknown exchange as is", () => {
+     const r = searchResultToRow(res({ market: null, name: null, type: null, exchange: "XLON", locale: null }));
+     expect(r).toMatchObject({ symbolName: "XLON:AAPL", description: "", marketType: "stock", exchange: "XLON", category: "stocks", country: undefined });
+diff --git a/src/data/providers/gateway.ts b/src/data/providers/gateway.ts
+index 4516882..e78a335 100644
+--- a/src/data/providers/gateway.ts
++++ b/src/data/providers/gateway.ts
+@@ -15,6 +15,7 @@
+ import type { SymbolSearchResult } from "../../bindings";
+ import type { SymbolRow, SymbolCategoryId, TypeFilter } from "../symbol-search";
+ import { flagUrl } from "../country-flags";
++import { exchangeLogoSrc } from "../exchange-logos";
+ 
+ /** Bare tickers with no "EXCHANGE:" prefix default to this exchange. */
+ export const defaultExchange = "NASDAQ";
+@@ -142,6 +143,7 @@ export function searchResultToRow(r: SymbolSearchResult): SymbolRow {
+   const marketType =
+     (r.type && TYPE_LABELS[r.type]) ||
+     (market === "crypto" ? "crypto" : market === "fx" ? "forex" : market === "indices" ? "index" : "stock");
++  const venueLogoSrc = exchangeLogoSrc(code);
+   return {
+     symbolName: code ? `${code}:${r.ticker}` : r.ticker,
+     ticker: r.ticker,
+@@ -150,6 +152,7 @@ export function searchResultToRow(r: SymbolSearchResult): SymbolRow {
+     exchange: ex,
+     exchangeTooltip: ex || undefined,
+     primaryExchange: !!ex,
++    ...(venueLogoSrc ? { venueLogoSrc } : {}),
+     // Security type wins over the market bucket so ETFs/ETNs/funds land in Funds
+     // (they are listed under the "stocks" market) rather than the Stocks tab.
+     category: (r.type && TYPE_CATEGORY[r.type]) || MARKET_CATEGORY[market] || "stocks",
+diff --git a/src/data/symbol-search.ts b/src/data/symbol-search.ts
+index b3dc400..29943c0 100644
+--- a/src/data/symbol-search.ts
++++ b/src/data/symbol-search.ts
+@@ -31,6 +31,8 @@ export type SymbolRow = {
+   primaryExchange?: boolean;
+   /** Logo URL. No source is wired up, so rows fall back to a letter avatar. */
+   logoSrc?: string;
++  /** Venue brand mark (crypto exchanges), shown on the right of the row. */
++  venueLogoSrc?: string;
+   /** Country / exchange flag URL. Unset — the flag is omitted when absent. */
+   flagSrc?: string;
+   /** Listing country (ISO 3166 alpha-2) from the search data; rows without
+@@ -160,6 +162,33 @@ export const SYMBOLS: SymbolRow[] = [
+ 
+ ];
+ 
++/**
++ * Whether a tab's symbols can only come from the provider (a data plugin): the
++ * static catalogue has none of them (crypto, forex, futures, indices, bonds), so
++ * the tab asks the live search even before a character is typed.
++ */
++export function liveOnlyCategory(category: SymbolCategoryId): boolean {
++  return category !== 'all' && category !== 'local' && !SYMBOLS.some((s) => s.category === category);
++}
++
++/**
++ * Whether the symbol search asks the provider for `query` on `category`: always on a tab only the
++ * provider can fill, else once a character is typed. Shared by the request and the rows so the
++ * dialog never shows rows it did not ask for.
++ */
++export function searchesLive(query: string, category: SymbolCategoryId): boolean {
++  return query.trim().length > 0 || liveOnlyCategory(category);
++}
++
++/** The exchange prefix of a row's full symbol ("BINANCE:" of "BINANCE:SOLUSDT"),
++ *  or null when the name has none (a bare ticker). Shown in the ticker cell so
++ *  the same ticker listed on several venues is distinguishable at a glance. */
++export function symbolExchangePrefix(symbolName: string, ticker: string): string | null {
++  if (!symbolName || !ticker || !symbolName.endsWith(ticker)) return null;
++  const prefix = symbolName.slice(0, symbolName.length - ticker.length);
++  return prefix.length > 1 && prefix.endsWith(":") ? prefix : null;
++}
++
+ /**
+  * Filter the catalogue by an active tab + query string.  Highlight ranges
+  * are returned alongside so the renderer can wrap `<em>` around matched
+diff --git a/src/data/trading/trading-ui.ts b/src/data/trading/trading-ui.ts
+index 9b4e15a..83c998a 100644
+--- a/src/data/trading/trading-ui.ts
++++ b/src/data/trading/trading-ui.ts
+@@ -170,7 +170,9 @@ export const tradingUi = createRoot(() => {
+   const [settingsOpen, setSettingsOpen] = createSignal(false);
+   /** Bumped to bring the Replay Trading tab forward (open, selected). */
+   const [reportRequest, setReportRequest] = createSignal(0);
+-  /** Bumped to bring the broker's account manager tab forward (Trade menu). */
++  /** Bumped to bring the Exchanges tab forward (Settings > Plugins, to configure a venue plugin). */
++  const [exchangesRequest, setExchangesRequest] = createSignal(0);
++  /** Bumped to bring the Exchanges tab forward on the broker's account manager (Trade menu). */
+   const [accountRequest, setAccountRequest] = createSignal(0);
+   /** The broker picker ("Connect broker…"). */
+   const [brokerPicker, setBrokerPicker] = createSignal(false);
+@@ -395,6 +397,9 @@ export const tradingUi = createRoot(() => {
+     },
+     reportView,
+     setReportView,
++    exchangesRequest,
++    /** Open the Exchanges tab under the chart. */
++    showExchanges: () => setExchangesRequest((n) => n + 1),
+     accountRequest,
+     showAccountManager: () => setAccountRequest((n) => n + 1),
+     brokerPicker,
+diff --git a/src/styles.css b/src/styles.css
+index e49c9b0..6399ed3 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -64,6 +64,7 @@
+ @import "./styles/screener.css";
+ @import "./styles/replay.css";
+ @import "./styles/trading.css";
++@import "./styles/exchanges.css";
+ @import "./styles/trading-dom.css";
+ @import "./styles/replay-trading.css";
+ @import "./styles/trading-lines.css";
+diff --git a/src/styles/app-settings.css b/src/styles/app-settings.css
+index 71248ad..1788619 100644
+--- a/src/styles/app-settings.css
++++ b/src/styles/app-settings.css
+@@ -640,3 +640,21 @@
+ .app-settings-plugin-entry .app-settings-btn { flex: none; white-space: nowrap; }
+ .app-settings-plugin-map-row { display: flex; align-items: center; gap: 8px; }
+ .app-settings-plugin-map-row .app-settings-input { flex: 1; min-width: 0; }
++
++/* A venue plugin (the crypto markets) lives in the Exchanges tab under the charts, not here: the note leads there. */
++.app-settings-venue-note {
++  display: flex;
++  align-items: center;
++  gap: 12px;
++  padding: 10px 12px;
++  border: 1px solid var(--color-divider);
++  border-radius: 8px;
++  background: var(--color-bg-secondary);
++  color: var(--color-content-secondary-neutral);
++  font-size: 12px;
++  line-height: 17px;
++}
++.app-settings-venue-note .app-settings-btn {
++  flex: none;
++  margin-inline-start: auto;
++}
+diff --git a/src/styles/strategy-tester.css b/src/styles/strategy-tester.css
+index 4837f04..c687202 100644
+--- a/src/styles/strategy-tester.css
++++ b/src/styles/strategy-tester.css
+@@ -160,6 +160,13 @@
+ .st-footer-btn:hover {
+   color: var(--ot-text-max);
+ }
++.st-footer-btn:disabled {
++  opacity: 0.4;
++  cursor: default;
++}
++.st-footer-btn:disabled:hover {
++  color: var(--color-text-primary);
++}
+ 
+ /* ─── Report ─── */
+ .st-report {
+diff --git a/src/styles/symbol-search.css b/src/styles/symbol-search.css
+index 506e151..4258382 100644
+--- a/src/styles/symbol-search.css
++++ b/src/styles/symbol-search.css
+@@ -695,6 +695,15 @@
+   color: var(--color-brand);
+ }
+ 
++/* Exchange prefix of the full symbol ("BINANCE:"), muted so the ticker keeps
++ * the rank: the same ticker on several venues reads apart at a glance. */
++.symbol-search-exchange-prefix {
++  margin-inline-end: 3px;
++  color: var(--color-text-tertiary);
++  font-size: 13px;
++  letter-spacing: 0.01em;
++}
++
+ /* ── Description cell (middle) ────────────────────────────────── */
+ .symbol-search-desc-cell {
+   font-size: 14px;
+@@ -741,6 +750,16 @@
+   color: var(--color-cold-gray-400);
+ }
+ 
++/* Venue brand mark in the exchange cell (crypto exchanges). The SVGs carry
++ * their own brand colours; 16 px keeps them a mark, not a picture. */
++.symbol-search-exchange-logo {
++  width: 16px;
++  height: 16px;
++  flex: 0 0 auto;
++  object-fit: contain;
++  border-radius: 3px;
++}
++
+ .symbol-search-flag {
+   width: 20px;
+   height: 20px;
+diff --git a/src/styles/trading.css b/src/styles/trading.css
+index 8d34643..d1d1a7b 100644
+--- a/src/styles/trading.css
++++ b/src/styles/trading.css
+@@ -1296,6 +1322,11 @@ html.theme-light {
+   font-size: 18px;
+   background: #2962ff;
+ }
++.trd-broker-card-mark.is-logo {
++  background: none;
++  object-fit: contain;
++  padding: 6px;
++}
+ .trd-broker-card.is-active {
+   border-color: #2962ff;
+ }
+diff --git a/src/window/header/SymbolSearchDialog.tsx b/src/window/header/SymbolSearchDialog.tsx
+index b604998..36778bd 100644
+--- a/src/window/header/SymbolSearchDialog.tsx
++++ b/src/window/header/SymbolSearchDialog.tsx
+@@ -16,6 +16,7 @@ import { deleteLocalSeries, localSymbol, renameLocalSeries } from "../../data/lo
+ import { ImportSeriesHost, pickSeriesFiles, pickSeriesFolder } from "./ImportSeriesDialog";
+ import { showConfirm, showNotice, showRename } from "../../components/Dialogs";
+ import { flagUrl } from "../../data/country-flags";
++import { exchangeLogoSrc } from "../../data/exchange-logos";
+ import { ECONOMIC_DATA_NOTICE } from "../../data/economic-notice";
+ import { Tooltip } from "../../components/Tooltip";
+ import { isRtl } from "../../components/reading-direction";
+@@ -405,10 +406,15 @@ export function SymbolSearchDialog(props: Props) {
+                     const ticker = colon >= 0 ? a.symbol.slice(colon + 1) : a.symbol;
+                     return (
+                       <div class="symbol-search-row cmp-search-row is-added" data-role="added-symbol-item" data-symbol-name={a.symbol} role="option">
+-                        {compareInfo(ticker, a.description || cat()?.description || "", cat()?.logoSrc)}
++                        {compareInfo(ticker, a.description || cat()?.description || "", cat()?.logoSrc, null, null, a.symbol)}
+                         <div class="symbol-search-cell symbol-search-exchange-cell cmp-search-exchange">
+                           <div class="symbol-search-market-type" data-i18n-sense="market">{cat()?.marketType ?? ""}</div>
+-                          <div class="symbol-search-exchange-source"><span class="symbol-search-exchange" data-no-translate>{exchange}</span></div>
++                          <div class="symbol-search-exchange-source">
++                            <Show when={cat()?.venueLogoSrc ?? exchangeLogoSrc(exchange)}>
++                              {(src) => <img class="symbol-search-exchange-logo" src={src()} alt="" decoding="async" onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />}
++                            </Show>
++                            <span class="symbol-search-exchange" data-no-translate>{exchange}</span>
++                          </div>
+                           <Show when={rowFlag({ exchange })}>
+                             {(src) => <span class="symbol-search-flag" aria-hidden="true"><img src={src()} alt="" /></span>}
+                           </Show>
+diff --git a/src/window/header/app-settings/PluginsTab.tsx b/src/window/header/app-settings/PluginsTab.tsx
+index 9ac168a..e5a0d51 100644
+--- a/src/window/header/app-settings/PluginsTab.tsx
++++ b/src/window/header/app-settings/PluginsTab.tsx
+@@ -72,7 +78,30 @@ export function PluginsTab() {
+       <Show when={st()}>
+         {(s) => (
+           <>
+-            <For each={s().plugins} fallback={<div class="app-settings-note app-settings-local-note">No plugin installed.</div>}>
++            <Show when={s().plugins.some(isVenuePlugin)}>
++              <div class="app-settings-venue-note" data-name="plugins-exchanges-note">
++                <span>{translate("Crypto venues are configured in the Exchanges tab under the chart.")}</span>
++                <button
++                  type="button"
++                  class="app-settings-btn"
++                  data-name="plugins-open-exchanges"
++                  onClick={() => {
++                    setAppSettingsTab(null);
++                    tradingUi.showExchanges();
++                  }}
++                >
++                  Open Exchanges
++                </button>
++              </div>
++            </Show>
++            <For
++              each={s().plugins.filter((p) => !isVenuePlugin(p))}
++              fallback={
++                s().plugins.length === 0 ? (
++                  <div class="app-settings-note app-settings-local-note">No plugin installed.</div>
++                ) : null
++              }
++            >
+               {(p) => <PluginCard plugin={p} busy={busy()} take={take} />}
+             </For>
+             <div class="app-settings-local-add">
+diff --git a/src/window/header/symbol-search/ResultRows.tsx b/src/window/header/symbol-search/ResultRows.tsx
+index 073781c..8d2b422 100644
+--- a/src/window/header/symbol-search/ResultRows.tsx
++++ b/src/window/header/symbol-search/ResultRows.tsx
+@@ -3,7 +3,7 @@
+  * / go to), and the Compare dialog's rows with their placement buttons.
+  */
+ import { For, Show } from "solid-js";
+-import type { FilteredRow } from "../../../data/symbol-search";
++import { symbolExchangePrefix, type FilteredRow } from "../../../data/symbol-search";
+ import type { ComparePlacement } from "../../shell/tabs";
+ import { renderHighlighted, rowFlag } from "./parts";
+ import type { SymbolSearch } from "./search-model";
+@@ -37,7 +37,8 @@ const ICON_REMOVE =
+ const ICON_GOTO =
+   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M14 9.5a.5.5 0 0 0 1 0V7.02A6.5 6.5 0 0 1 20.98 13H18.5a.5.5 0 0 0 0 1h2.48A6.5 6.5 0 0 1 15 19.98V17.5a.5.5 0 0 0-1 0v2.48A6.5 6.5 0 0 1 8.02 14h2.48a.5.5 0 0 0 0-1H8.02A6.5 6.5 0 0 1 14 7.02V9.5zm1-3.48V4.5a.5.5 0 0 0-1 0v1.52A7.5 7.5 0 0 0 7.02 13H5.5a.5.5 0 0 0 0 1h1.52A7.5 7.5 0 0 0 14 20.98v1.52a.5.5 0 0 0 1 0v-1.52A7.5 7.5 0 0 0 21.98 14h1.52a.5.5 0 0 0 0-1h-1.52A7.5 7.5 0 0 0 15 6.02z"></path></svg>';
+ 
+-export function compareInfo(ticker: string, description: string, logo?: string | null, tr?: [number, number] | null, dr?: [number, number] | null) {
++export function compareInfo(ticker: string, description: string, logo?: string | null, tr?: [number, number] | null, dr?: [number, number] | null, symbolName?: string) {
++  const prefix = () => symbolExchangePrefix(symbolName ?? "", ticker);
+   return (
+     <div class="symbol-search-cell cmp-search-info">
+       <span class="symbol-search-logo" aria-hidden="true">
+@@ -46,7 +47,10 @@ export function compareInfo(ticker: string, description: string, logo?: string |
+         </Show>
+       </span>
+       <div class="cmp-search-titles">
+-        <div class="cmp-search-ticker" data-name="list-item-title">{renderHighlighted(ticker, tr ?? null)}</div>
++        <div class="cmp-search-ticker" data-name="list-item-title" title={symbolName}>
++          <Show when={prefix()}>{(p) => <span class="symbol-search-exchange-prefix">{p()}</span>}</Show>
++          {renderHighlighted(ticker, tr ?? null)}
++        </div>
+         <div class="cmp-search-desc">{renderHighlighted(description, dr ?? null)}</div>
+       </div>
+     </div>
+@@ -68,7 +72,7 @@ export function compareRow(ctx: RowContext, row: FilteredRow, i: () => number) {
+       onMouseEnter={() => s.setHighlightIdx(i())}
+       onClick={() => ctx.addCompare(row.symbolName, "percent")}
+     >
+-      {compareInfo(row.ticker, row.description, row.logoSrc, row.titleHighlight, row.descriptionHighlight)}
++      {compareInfo(row.ticker, row.description, row.logoSrc, row.titleHighlight, row.descriptionHighlight, row.symbolName)}
+       <div class="cmp-search-buttons" data-name="compare-buttons-group">
+         <For each={COMPARE_BUTTONS}>
+           {(b) => (
+@@ -85,6 +89,15 @@ export function compareRow(ctx: RowContext, row: FilteredRow, i: () => number) {
+       <div class="symbol-search-cell symbol-search-exchange-cell cmp-search-exchange">
+         <div class="symbol-search-market-type" data-i18n-sense="market">{row.marketType}</div>
+         <div class="symbol-search-exchange-source">
++          <Show when={row.venueLogoSrc}>
++            <img
++              class="symbol-search-exchange-logo"
++              src={row.venueLogoSrc!}
++              alt=""
++              decoding="async"
++              onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
++            />
++          </Show>
+           <span class="symbol-search-exchange" data-no-translate title={row.exchangeTooltip ?? row.exchange}>{row.exchange}</span>
+         </div>
+         <Show when={rowFlag(row)}>
+@@ -145,7 +158,10 @@ export function ResultRow(props: { ctx: RowContext; row: FilteredRow; i: () => n
+             />
+           </Show>
+         </span>
+-        <div class="symbol-search-title-cell" data-no-translate>
++        <div class="symbol-search-title-cell" data-no-translate title={row.symbolName}>
++          <Show when={symbolExchangePrefix(row.symbolName, row.ticker)}>
++            {(prefix) => <span class="symbol-search-exchange-prefix">{prefix()}</span>}
++          </Show>
+           {renderHighlighted(row.ticker, row.titleHighlight)}
+         </div>
+       </div>
+@@ -160,7 +176,16 @@ export function ResultRow(props: { ctx: RowContext; row: FilteredRow; i: () => n
+           {row.marketType === "economic" ? "" : row.marketType}
+         </div>
+         <div class="symbol-search-exchange-source">
+-          <Show when={row.primaryExchange}>
++          <Show when={row.venueLogoSrc}>
++            <img
++              class="symbol-search-exchange-logo"
++              src={row.venueLogoSrc!}
++              alt=""
++              decoding="async"
++              onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
++            />
++          </Show>
++          <Show when={row.primaryExchange && !row.venueLogoSrc}>
+             <span class="symbol-search-primary-icon" title="Primary exchange" aria-hidden="true">
+               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="14" height="14" fill="none">
+                 <path fill="currentColor" d="M15 11.5V14H3v-2.5zm-2.25-3.75L15 6v4H3V6l2.25 1.75L9 4z" />
+diff --git a/src/window/header/symbol-search/search-model.ts b/src/window/header/symbol-search/search-model.ts
+index 9caf18f..bcc56bc 100644
+--- a/src/window/header/symbol-search/search-model.ts
++++ b/src/window/header/symbol-search/search-model.ts
+@@ -8,6 +8,7 @@ import {
+   TYPE_FILTERS,
+   migrateTypeCode,
+   SYMBOLS,
++  searchesLive,
+   filterSymbols,
+   liveResultsToRows,
+   type FilteredRow,
+@@ -155,6 +156,10 @@ export function createSymbolSearch(props: SymbolSearchProps) {
+   // The type filter belongs to the Stocks tab (the reference shows it there
+   // only): other tabs and the Compare dialog search without it.
+   const activeType = createMemo(() => (!props.compare && category() === "stocks" ? typeCode() : null));
++  // A tab the static catalogue cannot fill (Crypto, Forex, …) asks the live search even before a
++  // character is typed: the data plugin answers it with its popular symbols. A memo, so switching
++  // tabs that answer alike does not fire the request again.
++  const liveSearch = createMemo(() => searchesLive(searchText(), category()));
+ 
+   // Results: live gateway typeahead inside Tauri (debounced per keystroke),
+   // else the static local filter. `searching` suppresses the empty state while
+@@ -207,12 +212,14 @@ export function createSymbolSearch(props: SymbolSearchProps) {
+       (r) => r.countries.length > 0,
+     );
+   });
+-  // Network fetch — depends on query + type only, NOT category.
++  // Network fetch — depends on query + type, and on the tab only while the query is empty (a
++  // provider-only tab searches at once). The results of a typed query hold for every tab.
+   createEffect(() => {
+     const q = searchText().trim();
+     const type = activeType();
+-    // On the Economy tab too: its empty state counts the symbols of the other markets.
+-    if (!HAS_TAURI || q.length < 1) {
++    // A tab only the provider can fill is asked at once (its popular symbols); the others wait for
++    // a character. On the Economy tab too: its empty state counts the symbols of the other markets.
++    if (!HAS_TAURI || !liveSearch()) {
+       reqSeq++; // cancel any in-flight request
+       setLiveRaw(null);
+       setSearching(false);
+@@ -273,7 +280,7 @@ export function createSymbolSearch(props: SymbolSearchProps) {
+     const raw = liveRaw();
+     // All tab: the imported series that match come first.
+     const local = cat === "all" && q.length > 0 ? localRows(q) : [];
+-    if (!HAS_TAURI || q.length < 1 || raw == null) {
++    if (!HAS_TAURI || raw == null || !liveSearch()) {
+       const base = filterSymbols(cat, q);
+       return q.length < 1 && cat === "all" ? [...historyRows(), ...base] : [...local, ...base];
+     }
+diff --git a/src/window/strategy-tester/StrategyTesterPanel.tsx b/src/window/strategy-tester/StrategyTesterPanel.tsx
+index 6a66c62..a184b72 100644
+--- a/src/window/strategy-tester/StrategyTesterPanel.tsx
++++ b/src/window/strategy-tester/StrategyTesterPanel.tsx
+@@ -29,8 +29,7 @@ import { ImportTradesHost } from "../trade-journal/ImportTradesDialog";
+ import { tradeJournal } from "../../data/trade-journal";
+ import { replayStarted } from "../../data/replay";
+ import { tradingUi } from "../../data/trading/trading-ui";
+-import { pluginBroker } from "../../data/trading/plugin-broker";
+-import { AccountManager, AccountTabTitle } from "../trading/AccountManager";
++import { ExchangesPanel } from "../trading/ExchangesPanel";
+ import { replayBroker } from "../../data/trading/replay-broker";
+ import { cachedSymbolSessions, symbolSessions } from "../../data/session";
+ import { DEFAULT_SYMBOL, type BacktestReport } from "../../backtester/types";
+@@ -41,10 +40,10 @@ import { buildXlsx } from "./xlsx-writer";
+ const REPLAY_TAB = "replay-trading";
+ /** Tab id of the trade journal tab. */
+ const JOURNAL_TAB = "trade-journal";
+-/** Tab id of the connected broker's account manager. */
+-const ACCOUNT_TAB = "broker-account";
++/** Tab id of the Exchanges tab (it replaced the broker's account tab). */
++const EXCHANGES_TAB = "exchanges";
+ /** The tabs that are not strategies. */
+-const OWN_TABS = [REPLAY_TAB, JOURNAL_TAB, ACCOUNT_TAB];
++const OWN_TABS = [EXCHANGES_TAB, REPLAY_TAB, JOURNAL_TAB];
+ 
+ /** Report content height when the panel opens (MEASURED: 275 px under the 38 px bar). */
+ const DEFAULT_HEIGHT = 275;
+@@ -83,34 +82,42 @@ type Props = {
+ 
+ export function StrategyTesterPanel(props: Props) {
+   let rootRef: HTMLElement | undefined;
+-  /** A broker plugin is connected: its account manager is a tab. */
+-  const accountShown = () => !!pluginBroker.status()?.active;
+   const [selected, setSelected] = createSignal<string | null>(null);
+   const [menuFor, setMenuFor] = createSignal<{ id: string; anchor: HTMLElement } | null>(null);
++  /** The Exchanges tab's page: its list, or the connected broker's account (Trade > Account manager). */
++  const [exchangesView, setExchangesView] = createSignal<"list" | "account">("list");
++  /** A tab is selected: the panel has something to show (a collapsed footer alone otherwise). */
++  const shown = () => selected() !== null;
+ 
+   // Keep a valid selection: the last strategy added when the current one left
+   // (the Replay Trading tab while it exists and no strategy is left).
+   createEffect(() => {
+     const ids = props.strategyIds;
+     const cur = selected();
++    if (cur === EXCHANGES_TAB) return;
+     if (cur === REPLAY_TAB && props.replayTab) return;
+     if (cur === JOURNAL_TAB && tradeJournal.open()) return;
+-    if (cur === ACCOUNT_TAB && accountShown()) return;
+     if (!cur || !ids.includes(cur))
+-      setSelected(ids[ids.length - 1] ?? (props.replayTab ? REPLAY_TAB : tradeJournal.open() ? JOURNAL_TAB : accountShown() ? ACCOUNT_TAB : null));
++      setSelected(ids[ids.length - 1] ?? (props.replayTab ? REPLAY_TAB : tradeJournal.open() ? JOURNAL_TAB : null));
+   });
+-  // The account manager tab comes forward when a broker is connected (Trade > Account manager asks for it too).
++  // The Exchanges tab comes forward for Trade > Account manager (a broker connected) and for Settings' link.
+   createEffect(
+-    on(accountShown, (shown, was) => {
+-      if (shown && !was) setSelected(ACCOUNT_TAB);
+-    }),
++    on(
++      tradingUi.accountRequest,
++      () => {
++        setExchangesView("account");
++        setSelected(EXCHANGES_TAB);
++        strategyTester.setCollapsed(false);
++      },
++      { defer: true },
++    ),
+   );
+   createEffect(
+     on(
+-      tradingUi.accountRequest,
++      tradingUi.exchangesRequest,
+       () => {
+-        if (!accountShown()) return;
+-        setSelected(ACCOUNT_TAB);
++        setExchangesView("list");
++        setSelected(EXCHANGES_TAB);
+         strategyTester.setCollapsed(false);
+       },
+       { defer: true },
+@@ -212,8 +219,8 @@ export function StrategyTesterPanel(props: Props) {
+   }
+ 
+   const style = () => {
+-    if (strategyTester.maximized()) return { height: "100%" };
+-    if (strategyTester.collapsed()) return { height: `${FOOTER}px` };
++    if (strategyTester.maximized() && shown()) return { height: "100%" };
++    if (strategyTester.collapsed() || !shown()) return { height: `${FOOTER}px` };
+     return { height: `${FOOTER + contentHeight()}px` };
+   };
+ 
+@@ -228,305 +235,304 @@ export function StrategyTesterPanel(props: Props) {
+   };
+ 
+   return (
+-    <Show when={props.strategyIds.length > 0 || props.replayTab || tradeJournal.open() || accountShown()}>
+-      <section
+-        ref={rootRef}
+-        class="st-panel"
+-        classList={{ "is-collapsed": strategyTester.collapsed(), "is-maximized": strategyTester.maximized() }}
+-        style={style()}
+-        data-name="strategy-tester"
+-        aria-label="Strategy report"
+-      >
+-        <Show when={!strategyTester.collapsed() && !strategyTester.maximized()}>
+-          <div class="st-resize-handle" onMouseDown={beginResize} />
+-        </Show>
++    <section
++      ref={rootRef}
++      class="st-panel"
++      classList={{ "is-collapsed": strategyTester.collapsed() || !shown(), "is-maximized": strategyTester.maximized() }}
++      style={style()}
++      data-name="strategy-tester"
++      aria-label="Bottom panel"
++    >
++      <Show when={shown() && !strategyTester.collapsed() && !strategyTester.maximized()}>
++        <div class="st-resize-handle" onMouseDown={beginResize} />
++      </Show>
+ 
+-        {/* Footer bar: strategy tabs | Collapse / Maximize */}
+-        <div class="st-footer" id="footer-chart-panel">
+-          <div class="st-tabbar">
+-            <div class="st-tabs" role="tablist">
+-              <Show when={props.replayTab}>
+-                {(() => {
+-                  const active = () => selected() === REPLAY_TAB && !strategyTester.collapsed();
+-                  let caretRef: HTMLButtonElement | undefined;
+-                  return (
+-                    <div class="st-tab rt-tab" classList={{ "is-active": active() }} role="tab" aria-selected={active()} data-name="replay-trading-tab">
+-                      <Tooltip text={active() ? "Close Replay Trading" : "Open Replay Trading"} side="top">
+-                        <button type="button" class="st-tab-btn" onClick={() => onTabClick(REPLAY_TAB)}>
+-                          <span class="st-tab-icon rt-tab-icon">
+-                            <Icon name="replay-status" size={18} />
+-                            <Show when={replayStarted()}>
+-                              <span class="rt-tab-dot" />
+-                            </Show>
+-                          </span>
+-                          <span class="st-tab-title">Replay Trading</span>
+-                        </button>
+-                      </Tooltip>
+-                      <Tooltip text="Open context menu" side="top">
+-                        <button
+-                          type="button"
+-                          ref={caretRef}
+-                          class="st-tab-caret"
+-                          classList={{ "is-open": menuFor()?.id === REPLAY_TAB }}
+-                          aria-label="Open context menu"
+-                          onClick={() => setMenuFor(menuFor()?.id === REPLAY_TAB ? null : { id: REPLAY_TAB, anchor: caretRef! })}
+-                        >
+-                          <Icon name="st-footer-tab-caret" />
+-                        </button>
+-                      </Tooltip>
+-                    </div>
+-                  );
+-                })()}
+-              </Show>
+-              <Show when={accountShown()}>
+-                {(() => {
+-                  const active = () => selected() === ACCOUNT_TAB && !strategyTester.collapsed();
+-                  return (
+-                    <div class="st-tab" classList={{ "is-active": active() }} role="tab" aria-selected={active()} data-name="broker-account-tab">
+-                      <Tooltip text={active() ? "Close account manager" : "Open account manager"} side="top">
+-                        <button type="button" class="st-tab-btn" onClick={() => onTabClick(ACCOUNT_TAB)}>
+-                          <span class="st-tab-icon">
+-                            <span class="trd-status-dot" classList={{ "is-ok": pluginBroker.connected(), "is-failed": !pluginBroker.connected() }} />
+-                          </span>
+-                          <span class="st-tab-title">
+-                            <AccountTabTitle />
+-                          </span>
+-                        </button>
+-                      </Tooltip>
+-                    </div>
+-                  );
+-                })()}
+-              </Show>
+-              <Show when={tradeJournal.open()}>
+-                {(() => {
+-                  const active = () => selected() === JOURNAL_TAB && !strategyTester.collapsed();
+-                  let caretRef: HTMLButtonElement | undefined;
+-                  return (
+-                    <div class="st-tab" classList={{ "is-active": active() }} role="tab" aria-selected={active()} data-name="trade-journal-tab">
+-                      <Tooltip text={active() ? "Close trade journal" : "Open trade journal"} side="top">
+-                        <button type="button" class="st-tab-btn" onClick={() => onTabClick(JOURNAL_TAB)}>
+-                          <span class="st-tab-icon">
+-                            <Icon name="st-footer-tab-journal" size={24} />
+-                          </span>
+-                          <span class="st-tab-title">Trade journal</span>
+-                        </button>
+-                      </Tooltip>
+-                      <Tooltip text="Open context menu" side="top">
+-                        <button
+-                          type="button"
+-                          ref={caretRef}
+-                          class="st-tab-caret"
+-                          classList={{ "is-open": menuFor()?.id === JOURNAL_TAB }}
+-                          aria-label="Open context menu"
+-                          onClick={() => setMenuFor(menuFor()?.id === JOURNAL_TAB ? null : { id: JOURNAL_TAB, anchor: caretRef! })}
+-                        >
+-                          <Icon name="st-footer-tab-caret" />
+-                        </button>
+-                      </Tooltip>
+-                    </div>
+-                  );
+-                })()}
+-              </Show>
+-              <For each={props.strategyIds}>
+-                {(id) => {
+-                  const active = () => id === selected() && !strategyTester.collapsed();
+-                  let caretRef: HTMLButtonElement | undefined;
+-                  return (
+-                    <div class="st-tab" classList={{ "is-active": active() }} role="tab" aria-selected={active()}>
+-                      {/* "Close strategy report" while this tab's report shows
+-                          (panel open, tab active), else "Open strategy report". */}
+-                      <Tooltip text={active() ? "Close strategy report" : "Open strategy report"} side="top">
+-                        <button type="button" class="st-tab-btn" onClick={() => onTabClick(id)}>
+-                          <span class="st-tab-icon"><Icon name="st-footer-tab-strategy-icon" size={24} /></span>
+-                          <span class="st-tab-title">{title(id)}</span>
+-                        </button>
+-                      </Tooltip>
+-                      <Tooltip text="Open context menu" side="top">
+-                        <button
+-                          type="button"
+-                          ref={caretRef}
+-                          class="st-tab-caret"
+-                          classList={{ "is-open": menuFor()?.id === id }}
+-                          aria-label="Open context menu"
+-                          onClick={() => setMenuFor(menuFor()?.id === id ? null : { id, anchor: caretRef! })}
+-                        >
+-                          <Icon name="st-footer-tab-caret" />
+-                        </button>
+-                      </Tooltip>
+-                    </div>
+-                  );
+-                }}
+-              </For>
+-            </div>
+-          </div>
+-          <div class="st-footer-buttons">
+-            <Tooltip text={strategyTester.collapsed() ? "Open panel" : "Collapse panel"} side="top">
+-              <button
+-                type="button"
+-                class="st-footer-btn"
+-                aria-label={strategyTester.collapsed() ? "Open panel" : "Collapse panel"}
+-                onClick={() => {
+-                  const c = !strategyTester.collapsed();
+-                  strategyTester.setCollapsed(c);
+-                  if (c) strategyTester.setMaximized(false);
+-                }}
+-              >
+-                <Icon name={strategyTester.collapsed() ? "st-footer-collapsed-visibility" : "st-footer-normal-visibility"} size={28} />
+-              </button>
+-            </Tooltip>
+-            <Tooltip text={strategyTester.maximized() ? "Restore panel" : "Maximize panel"} side="top">
+-              <button
+-                type="button"
+-                class="st-footer-btn"
+-                aria-label={strategyTester.maximized() ? "Restore panel" : "Maximize panel"}
+-                onClick={() => {
+-                  const m = !strategyTester.maximized();
+-                  strategyTester.setMaximized(m);
+-                  if (m) strategyTester.setCollapsed(false);
+-                }}
+-              >
+-                <Icon name={strategyTester.maximized() ? "st-footer-maximized-maximize" : "st-footer-normal-maximize"} size={28} />
++      {/* Footer bar: strategy tabs | Collapse / Maximize */}
++      <div class="st-footer" id="footer-chart-panel">
++        <div class="st-tabbar">
++          <div class="st-tabs" role="tablist">
++            <div
++              class="st-tab"
++              classList={{ "is-active": selected() === EXCHANGES_TAB && !strategyTester.collapsed() }}
++              role="tab"
++              aria-selected={selected() === EXCHANGES_TAB}
++              data-name="exchanges-tab"
++            >
++              <button type="button" class="st-tab-btn" onClick={() => onTabClick(EXCHANGES_TAB)}>
++                <span class="st-tab-icon">
++                  <Icon name="exchange-venues" size={24} />
++                </span>
++                <span class="st-tab-title">Exchanges</span>
+               </button>
+-            </Tooltip>
++            </div>
++            <Show when={props.replayTab}>
++              {(() => {
++                const active = () => selected() === REPLAY_TAB && !strategyTester.collapsed();
++                let caretRef: HTMLButtonElement | undefined;
++                return (
++                  <div class="st-tab rt-tab" classList={{ "is-active": active() }} role="tab" aria-selected={active()} data-name="replay-trading-tab">
++                    <Tooltip text={active() ? "Close Replay Trading" : "Open Replay Trading"} side="top">
++                      <button type="button" class="st-tab-btn" onClick={() => onTabClick(REPLAY_TAB)}>
++                        <span class="st-tab-icon rt-tab-icon">
++                          <Icon name="replay-status" size={18} />
++                          <Show when={replayStarted()}>
++                            <span class="rt-tab-dot" />
++                          </Show>
++                        </span>
++                        <span class="st-tab-title">Replay Trading</span>
++                      </button>
++                    </Tooltip>
++                    <Tooltip text="Open context menu" side="top">
++                      <button
++                        type="button"
++                        ref={caretRef}
++                        class="st-tab-caret"
++                        classList={{ "is-open": menuFor()?.id === REPLAY_TAB }}
++                        aria-label="Open context menu"
++                        onClick={() => setMenuFor(menuFor()?.id === REPLAY_TAB ? null : { id: REPLAY_TAB, anchor: caretRef! })}
++                      >
++                        <Icon name="st-footer-tab-caret" />
++                      </button>
++                    </Tooltip>
++                  </div>
++                );
++              })()}
++            </Show>
++            <Show when={tradeJournal.open()}>
++              {(() => {
++                const active = () => selected() === JOURNAL_TAB && !strategyTester.collapsed();
++                let caretRef: HTMLButtonElement | undefined;
++                return (
++                  <div class="st-tab" classList={{ "is-active": active() }} role="tab" aria-selected={active()} data-name="trade-journal-tab">
++                    <Tooltip text={active() ? "Close trade journal" : "Open trade journal"} side="top">
++                      <button type="button" class="st-tab-btn" onClick={() => onTabClick(JOURNAL_TAB)}>
++                        <span class="st-tab-icon">
++                          <Icon name="st-footer-tab-journal" size={24} />
++                        </span>
++                        <span class="st-tab-title">Trade journal</span>
++                      </button>
++                    </Tooltip>
++                    <Tooltip text="Open context menu" side="top">
++                      <button
++                        type="button"
++                        ref={caretRef}
++                        class="st-tab-caret"
++                        classList={{ "is-open": menuFor()?.id === JOURNAL_TAB }}
++                        aria-label="Open context menu"
++                        onClick={() => setMenuFor(menuFor()?.id === JOURNAL_TAB ? null : { id: JOURNAL_TAB, anchor: caretRef! })}
++                      >
++                        <Icon name="st-footer-tab-caret" />
++                      </button>
++                    </Tooltip>
++                  </div>
++                );
++              })()}
++            </Show>
++            <For each={props.strategyIds}>
++              {(id) => {
++                const active = () => id === selected() && !strategyTester.collapsed();
++                let caretRef: HTMLButtonElement | undefined;
++                return (
++                  <div class="st-tab" classList={{ "is-active": active() }} role="tab" aria-selected={active()}>
++                    {/* "Close strategy report" while this tab's report shows
++                        (panel open, tab active), else "Open strategy report". */}
++                    <Tooltip text={active() ? "Close strategy report" : "Open strategy report"} side="top">
++                      <button type="button" class="st-tab-btn" onClick={() => onTabClick(id)}>
++                        <span class="st-tab-icon"><Icon name="st-footer-tab-strategy-icon" size={24} /></span>
++                        <span class="st-tab-title">{title(id)}</span>
++                      </button>
++                    </Tooltip>
++                    <Tooltip text="Open context menu" side="top">
++                      <button
++                        type="button"
++                        ref={caretRef}
++                        class="st-tab-caret"
++                        classList={{ "is-open": menuFor()?.id === id }}
++                        aria-label="Open context menu"
++                        onClick={() => setMenuFor(menuFor()?.id === id ? null : { id, anchor: caretRef! })}
++                      >
++                        <Icon name="st-footer-tab-caret" />
++                      </button>
++                    </Tooltip>
++                  </div>
++                );
++              }}
++            </For>
+           </div>
+         </div>
++        <div class="st-footer-buttons">
++          <Tooltip text={strategyTester.collapsed() ? "Open panel" : "Collapse panel"} side="top">
++            <button
++              type="button"
++              class="st-footer-btn"
++              aria-label={strategyTester.collapsed() ? "Open panel" : "Collapse panel"}
++              onClick={() => {
++                const c = !strategyTester.collapsed();
++                strategyTester.setCollapsed(c);
++                if (c) strategyTester.setMaximized(false);
++              }}
++            >
++              <Icon name={strategyTester.collapsed() ? "st-footer-collapsed-visibility" : "st-footer-normal-visibility"} size={28} />
++            </button>
++          </Tooltip>
++          <Tooltip text={strategyTester.maximized() ? "Restore panel" : "Maximize panel"} side="top">
++            <button
++              type="button"
++              class="st-footer-btn"
++              disabled={!shown()}
++              aria-label={strategyTester.maximized() ? "Restore panel" : "Maximize panel"}
++              onClick={() => {
++                const m = !strategyTester.maximized();
++                strategyTester.setMaximized(m);
++                if (m) strategyTester.setCollapsed(false);
++              }}
++            >
++              <Icon name={strategyTester.maximized() ? "st-footer-maximized-maximize" : "st-footer-normal-maximize"} size={28} />
++            </button>
++          </Tooltip>
++        </div>
++      </div>
+ 
+-        <Show when={!strategyTester.collapsed()}>
+-          <div class="st-report">
+-            <Show when={selected() === REPLAY_TAB}>
+-              <ReplayTradingReport
+-                intraday={props.intraday}
+-                intervalSec={props.intervalSec}
+-                interval={props.interval}
+-                symbol={props.symbol}
+-                height={strategyTester.maximized() ? Infinity : contentHeight()}
+-                onShowOnChart={props.onShowOnChart}
+-              />
+-            </Show>
+-            <Show when={selected() === JOURNAL_TAB && tradeJournal.open()}>
+-              <TradeJournalView timeZone={props.timeZone.iana} />
+-            </Show>
+-            <Show when={selected() === ACCOUNT_TAB && accountShown()}>
+-              <AccountManager onSymbol={props.onSymbol} height={strategyTester.maximized() ? Infinity : contentHeight()} />
+-            </Show>
+-            <Show when={!OWN_TABS.includes(selected() ?? "") && selected()}>
+-              {(id) => (
+-                <>
++      <Show when={shown() && !strategyTester.collapsed()}>
++        <div class="st-report">
++          <Show when={selected() === REPLAY_TAB}>
++            <ReplayTradingReport
++              intraday={props.intraday}
++              intervalSec={props.intervalSec}
++              interval={props.interval}
++              symbol={props.symbol}
++              height={strategyTester.maximized() ? Infinity : contentHeight()}
++              onShowOnChart={props.onShowOnChart}
++            />
++          </Show>
++          <Show when={selected() === JOURNAL_TAB && tradeJournal.open()}>
++            <TradeJournalView timeZone={props.timeZone.iana} />
++          </Show>
++          <Show when={selected() === EXCHANGES_TAB}>
++            <ExchangesPanel
++              onSymbol={props.onSymbol}
++              height={strategyTester.maximized() ? Infinity : contentHeight()}
++              view={exchangesView()}
++              onView={setExchangesView}
++            />
++          </Show>
++          <Show when={!OWN_TABS.includes(selected() ?? "") && selected()}>
++            {(id) => (
++              <>
++                <Show
++                  when={strategyTester.equityExpanded() && strategyTester.view() === "metrics" && run()?.report}
++                  fallback={
++                    <ReportToolbar
++                      report={run()?.report ?? null}
++                      properties={props.properties(id())}
++                      onPatchProperties={(patch) => props.onPatchProperties(id(), patch)}
++                      onSettings={() => props.onSettings(id(), "properties")}
++                      symbol={props.symbol}
++                      interval={props.interval}
++                      chartStyle={props.chartStyle}
++                      defaults={strategyDefaults(id())}
++                      historyTicks={hasHistoryTickOption(id())}
++                      strategyName={title(id())}
++                    />
++                  }
++                >
++                  {(report) => <KeyStatsInline report={report()} />}
++                </Show>
++                <div class="st-report-body">
+                   <Show
+-                    when={strategyTester.equityExpanded() && strategyTester.view() === "metrics" && run()?.report}
++                    when={run()?.report}
+                     fallback={
+-                      <ReportToolbar
+-                        report={run()?.report ?? null}
+-                        properties={props.properties(id())}
+-                        onPatchProperties={(patch) => props.onPatchProperties(id(), patch)}
+-                        onSettings={() => props.onSettings(id(), "properties")}
+-                        symbol={props.symbol}
+-                        interval={props.interval}
+-                        chartStyle={props.chartStyle}
+-                        defaults={strategyDefaults(id())}
+-                        historyTicks={hasHistoryTickOption(id())}
+-                        strategyName={title(id())}
+-                      />
++                      <Show when={run()?.status === "error"}>
++                        <div class="st-report-message">{run()?.error?.message}</div>
++                      </Show>
+                     }
+                   >
+-                    {(report) => <KeyStatsInline report={report()} />}
++                    {(report) => (
++                      <Show
++                        when={strategyTester.view() === "metrics"}
++                        fallback={
++                          <TradesView
++                            report={report()}
++                            intraday={props.intraday}
++                            onShowOnChart={props.onShowOnChart}
++                            title={title(id())}
++                            symbol={props.symbol}
++                            interval={props.interval}
++                          />
++                        }
++                      >
++                        <MetricsView report={report()} intraday={props.intraday} intervalSec={props.intervalSec} onShowOnChart={props.onShowOnChart} symbol={props.symbol} />
++                      </Show>
++                    )}
+                   </Show>
+-                  <div class="st-report-body">
+-                    <Show
+-                      when={run()?.report}
+-                      fallback={
+-                        <Show when={run()?.status === "error"}>
+-                          <div class="st-report-message">{run()?.error?.message}</div>
+-                        </Show>
+-                      }
+-                    >
+-                      {(report) => (
+-                        <Show
+-                          when={strategyTester.view() === "metrics"}
+-                          fallback={
+-                            <TradesView
+-                              report={report()}
+-                              intraday={props.intraday}
+-                              onShowOnChart={props.onShowOnChart}
+-                              title={title(id())}
+-                              symbol={props.symbol}
+-                              interval={props.interval}
+-                            />
+-                          }
+-                        >
+-                          <MetricsView report={report()} intraday={props.intraday} intervalSec={props.intervalSec} onShowOnChart={props.onShowOnChart} symbol={props.symbol} />
+-                        </Show>
+-                      )}
+-                    </Show>
+-                  </div>
+-                </>
+-              )}
+-            </Show>
+-          </div>
+-        </Show>
++                </div>
++              </>
++            )}
++          </Show>
++        </div>
++      </Show>
+ 
+-        <Show when={menuFor()?.id === REPLAY_TAB ? menuFor() : null}>
+-          {(m) => (
+-            <Popover anchor={m().anchor} onClose={() => setMenuFor(null)} class="st-tab-menu" offset={{ x: 0, y: 4 }}>
+-              <PopItem
+-                title="Settings…"
+-                icon="st-toolbar-settings"
+-                disabled={!replayStarted()}
+-                onClick={() => {
+-                  setMenuFor(null);
+-                  tradingUi.openReplaySettings();
+-                }}
+-              />
+-              <PopItem
+-                title="Download data as XLSX"
+-                icon="st-trades-download-csv"
+-                disabled={!replayBroker.report()}
+-                onClick={() => {
+-                  setMenuFor(null);
+-                  void downloadXlsx(REPLAY_TAB);
+-                }}
+-              />
+-            </Popover>
+-          )}
+-        </Show>
+-        <Show when={menuFor()?.id === JOURNAL_TAB ? menuFor() : null}>
+-          {(m) => <JournalMenu anchor={m().anchor} onClose={() => setMenuFor(null)} />}
+-        </Show>
+-        <Show when={tradeJournal.open()}>
+-          <ImportTradesHost defaultSymbol={props.symbol} chartTimeZone={props.timeZone} />
+-        </Show>
+-        <Show when={!OWN_TABS.includes(menuFor()?.id ?? "") ? menuFor() : null}>
+-          {(m) => (
+-            <Popover anchor={m().anchor} onClose={() => setMenuFor(null)} class="st-tab-menu" offset={{ x: 0, y: 4 }}>
+-              <PopItem
+-                title="Settings…"
+-                onClick={() => {
+-                  const id = m().id; // read before closing: the menu's accessor goes stale
+-                  setMenuFor(null);
+-                  props.onSettings(id);
+-                }}
+-              />
+-              <PopItem
+-                title="Download data as XLSX"
+-                disabled={!reportOf(m().id)}
+-                onClick={() => {
+-                  const id = m().id;
+-                  setMenuFor(null);
+-                  void downloadXlsx(id);
+-                }}
+-              />
+-              <PopDivider />
+-              <PopItem
+-                title="Add strategy…"
+-                onClick={() => {
+-                  setMenuFor(null);
+-                  props.onAddStrategy();
+-                }}
+-              />
+-            </Popover>
+-          )}
+-        </Show>
+-      </section>
+-    </Show>
++      <Show when={menuFor()?.id === REPLAY_TAB ? menuFor() : null}>
++        {(m) => (
++          <Popover anchor={m().anchor} onClose={() => setMenuFor(null)} class="st-tab-menu" offset={{ x: 0, y: 4 }}>
++            <PopItem
++              title="Settings…"
++              icon="st-toolbar-settings"
++              disabled={!replayStarted()}
++              onClick={() => {
++                setMenuFor(null);
++                tradingUi.openReplaySettings();
++              }}
++            />
++            <PopItem
++              title="Download data as XLSX"
++              icon="st-trades-download-csv"
++              disabled={!replayBroker.report()}
++              onClick={() => {
++                setMenuFor(null);
++                void downloadXlsx(REPLAY_TAB);
++              }}
++            />
++          </Popover>
++        )}
++      </Show>
++      <Show when={menuFor()?.id === JOURNAL_TAB ? menuFor() : null}>
++        {(m) => <JournalMenu anchor={m().anchor} onClose={() => setMenuFor(null)} />}
++      </Show>
++      <Show when={tradeJournal.open()}>
++        <ImportTradesHost defaultSymbol={props.symbol} chartTimeZone={props.timeZone} />
++      </Show>
++      <Show when={!OWN_TABS.includes(menuFor()?.id ?? "") ? menuFor() : null}>
++        {(m) => (
++          <Popover anchor={m().anchor} onClose={() => setMenuFor(null)} class="st-tab-menu" offset={{ x: 0, y: 4 }}>
++            <PopItem
++              title="Settings…"
++              onClick={() => {
++                const id = m().id; // read before closing: the menu's accessor goes stale
++                setMenuFor(null);
++                props.onSettings(id);
++              }}
++            />
++            <PopItem
++              title="Download data as XLSX"
++              disabled={!reportOf(m().id)}
++              onClick={() => {
++                const id = m().id;
++                setMenuFor(null);
++                void downloadXlsx(id);
++              }}
++            />
++            <PopDivider />
++            <PopItem
++              title="Add strategy…"
++              onClick={() => {
++                setMenuFor(null);
++                props.onAddStrategy();
++              }}
++            />
++          </Popover>
++        )}
++      </Show>
++    </section>
+   );
+ }
+diff --git a/src/window/trading/AccountManager.tsx b/src/window/trading/AccountManager.tsx
+index bf09d8e..5ac07ba 100644
+--- a/src/window/trading/AccountManager.tsx
++++ b/src/window/trading/AccountManager.tsx
+@@ -137,7 +137,9 @@ const DownloadIcon = () => (
+   </svg>
+ );
+ 
+-export function AccountManager(props: { onSymbol: (symbol: string) => void; height: number }) {
++/** The broker's account, a page of the bottom panel. `fill`: the parent sizes it (a flex child, the Exchanges tab)
++ *  instead of `height`. */
++export function AccountManager(props: { onSymbol: (symbol: string) => void; height: number; fill?: boolean }) {
+   const [page, setPage] = createSignal<Page>("positions");
+   const [exporting, setExporting] = createSignal(false);
+   const [filter, setFilter] = createSignal<Filter>("all");
+@@ -163,7 +165,7 @@ export function AccountManager(props: { onSymbol: (symbol: string) => void; heig
+     ["rejected", () => translate("Rejected")],
+   ];
+   return (
+-    <div class="trd-am" style={{ height: Number.isFinite(props.height) ? `${props.height}px` : "100%" }} data-name="account-manager">
++    <div class="trd-am" style={props.fill ? undefined : { height: Number.isFinite(props.height) ? `${props.height}px` : "100%" }} data-name="account-manager">
+       <Show
+         when={pluginBroker.connected()}
+         fallback={
+@@ -172,7 +174,7 @@ export function AccountManager(props: { onSymbol: (symbol: string) => void; heig
+             <div class="trd-empty-text">
+               {pluginBroker.status()?.pluginConnected
+                 ? translate("The plugin is not connected to its broker.")
+-                : translate("The broker plugin is not connected. Check it in Settings > Plugins.")}
++                : translate("The broker plugin is not connected. Check it in the Exchanges tab under the chart.")}
+             </div>
+           </div>
+         }
+@@ -592,21 +594,3 @@ function NotificationsTable() {
+     />
+   );
+ }
+-
+-/** The bottom panel's tab: the broker's name, then DEMO or LIVE once the account is known. */
+-export function AccountTabTitle() {
+-  const s = () => pluginBroker.status();
+-  const a = () => s()?.state?.account ?? null;
+-  return (
+-    <>
+-      <span data-no-translate>{s()?.activeName ?? ""}</span>
+-      <Show when={a()}>
+-        {(acc) => (
+-          <span class="trd-account-kind" classList={{ "is-live": !acc().isDemo }}>
+-            {acc().isDemo ? translate("DEMO") : translate("LIVE")}
+-          </span>
+-        )}
+-      </Show>
+-    </>
+-  );
+-}

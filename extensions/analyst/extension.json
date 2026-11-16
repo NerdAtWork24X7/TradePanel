@@ -1,0 +1,16 @@
+{
+  "id": "analyst",
+  "name": "AI chart analyst",
+  "version": "1.0.0",
+  "description": "Analyze chart panel, hidden capture renderer and the Pi analysis runtime.",
+  "order": 60,
+  "dependsOn": [
+    "core",
+    "chart",
+    "venues",
+    "plan"
+  ],
+  "patch": "core.patch",
+  "runtime": "runtime",
+  "tests": "tests"
+}

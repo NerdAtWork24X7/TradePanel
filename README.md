@@ -85,6 +85,9 @@ npm run update:opentrader -- --without analyst  # assemble without one pack
 npm run update:opentrader -- --only core,paper  # or only selected packs (dependencies explicit)
 ```
 
+The same command without npm: `./update` (Linux, macOS, Git Bash) or `update.cmd` (Windows).
+Flags such as `--ref`, `--check`, `--without` and `--locked` pass straight through.
+
 The updater fetches tags, resets `opentrader/` to the resolved commit, overlays the packs in
 dependency order, regenerates `src/bindings.ts` and the i18n catalog, and writes
 `opentrader.lock.json`. A pack whose `core.patch` no longer applies is named in the error and

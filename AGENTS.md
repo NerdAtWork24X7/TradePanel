@@ -44,6 +44,7 @@ npm run update:opentrader -- --ref main       # upstream HEAD
 npm run update:opentrader:check               # assemble + tsc + vitest
 npm run update:opentrader:full                # ... + cargo test --lib
 npm run update:opentrader:dry                 # resolve/list only
+./update --check                              # the standalone launcher (update.cmd on Windows)
 node scripts/update-opentrader.mjs --locked   # reapply the pin in opentrader.lock.json
 node scripts/update-opentrader.mjs --without analyst --check   # prove a pack is independent
 ```

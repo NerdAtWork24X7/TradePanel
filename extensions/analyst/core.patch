@@ -688,10 +688,10 @@ index 0e2d543..3a865af 100644
 +  color: var(--color-content-primary-danger-bold, #b22833);
 +}
 diff --git a/src/window/assistant/AssistantPanel.tsx b/src/window/assistant/AssistantPanel.tsx
-index 25c41d6..2264ad8 100644
+index 25c41d6..3760ba5 100644
 --- a/src/window/assistant/AssistantPanel.tsx
 +++ b/src/window/assistant/AssistantPanel.tsx
-@@ -1,8 +1,8 @@
+@@ -1,13 +1,16 @@
  import { translate, translateWith } from "../../i18n/translator";
  /*
   * The AI assistant panel (right rail's AI button), laid out as the reference desktop app's (3.5.0, measured over CDP
@@ -702,7 +702,15 @@ index 25c41d6..2264ad8 100644
   * Open chat…), the greeting and its suggestions on an empty chat, the messages, then the composer with Send, and the
   * note under it.
   *
-@@ -17,6 +17,8 @@ import { activeChat, answerConfirm, chats, deleteChat, newChat, openChat, rateAn
+  * Unlike the reference, the model is OpenTrader's own and runs on this computer (downloaded once, then offline), so
+  * there is no model or effort picker. The chat runs the app's agent tools (src/data/assistant/session.ts).
++ *
++ * The mode switch under the header leads with "Analyze chart" and opens on it (this app's chart read); "Chat" is the
++ * second segment.
+  */
+ import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+ import { Icon } from "../../components/Icon";
+@@ -17,6 +20,8 @@ import { activeChat, answerConfirm, chats, deleteChat, newChat, openChat, rateAn
  import { attach, MAX_ATTACHMENT_BYTES } from "../../data/assistant/attachments";
  import { Popup } from "./Popup";
  import { AssistantSetup } from "./LocalModel";
@@ -711,24 +719,25 @@ index 25c41d6..2264ad8 100644
  import { gb, localError, localInfo, localProgress, refreshLocal, removeLocal, setUpdateLater, updateBytes, updateLater, updateLocal } from "../../data/assistant/local";
  import { stepTitle } from "./steps";
  import "../../styles/screener.css";
-@@ -37,7 +39,7 @@ export function AssistantPanel(props: { ticker: string }) {
+@@ -37,7 +42,7 @@ export function AssistantPanel(props: { ticker: string }) {
    onMount(() => void refreshLocal());
    const ready = () => !!localInfo()?.installed;
    const overlay = () => assistantPanel.mode() === "overlay";
 -  const [view, setView] = createSignal<"chat" | "chats">("chat");
-+  const [view, setView] = createSignal<"chat" | "chats" | "analyze">("chat");
++  const [view, setView] = createSignal<"chat" | "chats" | "analyze">("analyze");
  
  
    // Resizer: drag the 4 px strip; the panel grows to the left.
-@@ -95,8 +97,22 @@ export function AssistantPanel(props: { ticker: string }) {
+@@ -95,8 +100,23 @@ export function AssistantPanel(props: { ticker: string }) {
              </button>
            </div>
          </header>
 +        <div class="asst-mode">
++          {/* Analyze chart leads and is the panel's default mode; Chat is the second segment. */}
 +          <SegmentedControl<"chat" | "analyze">
 +            items={[
-+              { id: "chat", label: translate("Chat") },
 +              { id: "analyze", label: translate("Analyze chart") },
++              { id: "chat", label: translate("Chat") },
 +            ]}
 +            value={view() === "analyze" ? "analyze" : "chat"}
 +            onChange={(id) => setView(id)}

@@ -189,13 +189,17 @@ index e49c9b0..6399ed3 100644
  @import "./styles/replay-trading.css";
  @import "./styles/trading-lines.css";
 diff --git a/src/styles/app-settings.css b/src/styles/app-settings.css
-index 71248ad..1788619 100644
+index 71248ad..5e48262 100644
 --- a/src/styles/app-settings.css
 +++ b/src/styles/app-settings.css
-@@ -640,3 +640,21 @@
+@@ -640,3 +640,25 @@
  .app-settings-plugin-entry .app-settings-btn { flex: none; white-space: nowrap; }
  .app-settings-plugin-map-row { display: flex; align-items: center; gap: 8px; }
  .app-settings-plugin-map-row .app-settings-input { flex: 1; min-width: 0; }
++
++/* A plugin's action row (Settings / Symbols / Log / Website / New token / Remove) does not fit one line in a narrow
++   Settings dialog: wrap it, rather than let the buttons spill past the card's edge. */
++.app-settings-plugin-actions { flex-wrap: wrap; }
 +
 +/* A venue plugin (the crypto markets) lives in the Exchanges tab under the charts, not here: the note leads there. */
 +.app-settings-venue-note {
@@ -351,6 +355,15 @@ index 9ac168a..e5a0d51 100644
                {(p) => <PluginCard plugin={p} busy={busy()} take={take} />}
              </For>
              <div class="app-settings-local-add">
+@@ -259,7 +259,7 @@
+       <Show when={m().setup}>
+         <div class="app-settings-plugin-setup" data-no-translate>{m().setup}</div>
+       </Show>
+-      <div class="app-settings-local-head">
++      <div class="app-settings-local-head app-settings-plugin-actions">
+         <Show when={(m().settings ?? []).length > 0}>
+           <button type="button" class="app-settings-btn" onClick={() => setOpen(open() === "settings" ? null : "settings")}>
+             Settings
 diff --git a/src/window/header/symbol-search/ResultRows.tsx b/src/window/header/symbol-search/ResultRows.tsx
 index 073781c..8d2b422 100644
 --- a/src/window/header/symbol-search/ResultRows.tsx

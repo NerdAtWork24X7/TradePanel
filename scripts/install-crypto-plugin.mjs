@@ -41,15 +41,15 @@ export function appDirs(platform = process.platform, env = process.env, home = h
   };
 }
 
-/** `plugins.json` with the crypto plugin enabled; every other plugin and preference kept. */
-export function mergeConfig(config, token) {
+/** Enable one plugin in `plugins.json`; every other plugin and preference is kept. */
+export function enablePlugin(config, id, token) {
   const next = { ...config };
   next.port ??= 47822;
   next.plugins ??= {};
   next.active_broker ??= null;
   next.trading_enabled ??= false;
-  const previous = next.plugins[PLUGIN_ID] ?? {};
-  next.plugins[PLUGIN_ID] = {
+  const previous = next.plugins[id] ?? {};
+  next.plugins[id] = {
     ...previous,
     enabled: true,
     token: previous.token || token,
@@ -61,6 +61,11 @@ export function mergeConfig(config, token) {
     symbolMap: previous.symbolMap ?? {},
   };
   return next;
+}
+
+/** `plugins.json` with the crypto plugin enabled; every other plugin and preference kept. */
+export function mergeConfig(config, token) {
+  return enablePlugin(config, PLUGIN_ID, token);
 }
 
 function copyPlugin(target) {
@@ -86,6 +91,14 @@ function makeVenv(target) {
   if (installed.status !== 0) throw new Error("pip install failed");
 }
 
+function manifestVersion(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8")).version;
+  } catch {
+    return null;
+  }
+}
+
 function alreadyInstalled(target, configDir, argv = []) {
   const file = join(configDir, "plugins.json");
   if (!existsSync(join(target, "plugin.py"))) return false;
@@ -95,7 +108,10 @@ function alreadyInstalled(target, configDir, argv = []) {
     if (!cfg?.plugins?.crypto?.enabled) return false;
   } catch { return false; }
   // A venv is expected when deps were installed; allow --no-deps installs without one.
-  return existsSync(join(target, ".venv")) || argv.includes("--no-deps");
+  if (!existsSync(join(target, ".venv")) && !argv.includes("--no-deps")) return false;
+  // Reinstall on a version change so --if-needed cannot pin an old plugin forever.
+  const expected = manifestVersion(join(ROOT, "plugins", PLUGIN_ID, "opentrader-plugin.json"));
+  return !!expected && manifestVersion(join(target, "opentrader-plugin.json")) === expected;
 }
 
 function main(argv) {

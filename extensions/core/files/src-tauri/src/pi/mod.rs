@@ -15,5 +15,6 @@ pub mod paths;
 pub mod runtime;
 pub mod settings;
 pub mod spawn;
+pub mod update;
 
 pub use manager::PiManager;

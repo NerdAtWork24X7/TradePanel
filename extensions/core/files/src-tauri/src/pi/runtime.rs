@@ -39,6 +39,8 @@ pub struct PiRuntime {
     pub root: PathBuf,
     pub node: PathBuf,
     pub pi_cli: PathBuf,
+    /// npm CLI bundled with the runtime (needed by the in-app updater).
+    pub npm_cli: Option<PathBuf>,
     pub extension: PathBuf,
     pub system_prompt: PathBuf,
     pub node_version: Option<String>,
@@ -52,6 +54,8 @@ struct Manifest {
     target: String,
     node: String,
     pi_cli: String,
+    #[serde(default)]
+    npm_cli: Option<String>,
     extension: String,
     system_prompt: String,
     #[serde(default)]
@@ -80,6 +84,7 @@ impl Manifest {
         };
         let node = file(&self.node, "the Node executable")?;
         let pi_cli = file(&self.pi_cli, "the Pi CLI")?;
+        let npm_cli = self.npm_cli.as_deref().map(|relative| file(relative, "the npm CLI")).transpose()?;
         let extension = file(&self.extension, "the analysis extension")?;
         let system_prompt = file(&self.system_prompt, "the analysis prompt")?;
         Ok(PiRuntime {
@@ -87,12 +92,47 @@ impl Manifest {
             root,
             node,
             pi_cli,
+            npm_cli,
             extension,
             system_prompt,
             node_version: self.node_version,
             pi_version: self.pi_version,
         })
     }
+}
+
+/// Read a staged manifest from a specific root (used to verify an update
+/// before it is moved into the overlay).
+pub fn validate_at(root: &Path, expected: &str) -> Result<PiRuntime, String> {
+    let manifest_path = root.join("manifest.json");
+    let text = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("Cannot read {}: {e}", manifest_path.display()))?;
+    let manifest: Manifest = serde_json::from_str(&text)
+        .map_err(|e| format!("Cannot parse {}: {e}", manifest_path.display()))?;
+    manifest.into_runtime(root.to_path_buf(), expected)
+}
+
+/// Resolve only the runtime shipped with the app, never a user overlay. The
+/// updater needs its pristine Node/npm/extension files even when an older
+/// overlay is in use.
+pub fn bundled(app: &AppHandle) -> Result<PiRuntime, String> {
+    let target = target_id().ok_or_else(|| {
+        format!(
+            "This platform ({}-{}) has no bundled AI runtime. Build one with `npm run ai:runtime -- --target <id>`.",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        )
+    })?;
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Ok(dir) = app.path().resource_dir() {
+        roots.push(dir.join("ai-runtime"));
+    }
+    // `tauri dev` starts the binary from `src-tauri/target/debug`, where the
+    // resource directory may not have been staged yet: the source tree is the
+    // same checkout the build script writes to.
+    #[cfg(debug_assertions)]
+    roots.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("ai-runtime"));
+    resolve_in(roots, target)
 }
 
 pub fn resolve(app: &AppHandle) -> Result<PiRuntime, String> {
@@ -110,23 +150,17 @@ pub fn resolve(app: &AppHandle) -> Result<PiRuntime, String> {
     if let Ok(dir) = app.path().resource_dir() {
         roots.push(dir.join("ai-runtime"));
     }
-    // `tauri dev` starts the binary from `src-tauri/target/debug`, where the
-    // resource directory may not have been staged yet: the source tree is the
-    // same checkout the build script writes to.
     #[cfg(debug_assertions)]
     roots.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("ai-runtime"));
+    resolve_in(roots, target)
+}
 
+fn resolve_in(roots: Vec<PathBuf>, target: &str) -> Result<PiRuntime, String> {
     for root in roots {
         let dir = root.join(target);
-        let manifest_path = dir.join("manifest.json");
-        if !manifest_path.is_file() {
-            continue;
+        if dir.join("manifest.json").is_file() {
+            return validate_at(&dir, target);
         }
-        let text = std::fs::read_to_string(&manifest_path)
-            .map_err(|e| format!("Cannot read {}: {e}", manifest_path.display()))?;
-        let manifest: Manifest = serde_json::from_str(&text)
-            .map_err(|e| format!("Cannot parse {}: {e}", manifest_path.display()))?;
-        return manifest.into_runtime(dir, target);
     }
     Err(format!(
         "The AI runtime for {target} is not staged. Run `npm run ai:runtime` in opentrader/ and restart the app."
@@ -158,6 +192,7 @@ mod tests {
             target: "linux-x64".into(),
             node: "node/node".into(),
             pi_cli: "pi/node_modules/pi/dist/cli.js".into(),
+            npm_cli: None,
             extension: "pi/extensions/tradepanel-analysis.mjs".into(),
             system_prompt: "pi/prompts/analysis.md".into(),
             node_version: Some("v22.23.4".into()),
@@ -178,6 +213,7 @@ mod tests {
             target: "linux-x64".into(),
             node: "node/node".into(),
             pi_cli: "pi/cli.js".into(),
+            npm_cli: None,
             extension: "pi/ext.mjs".into(),
             system_prompt: "pi/prompt.md".into(),
             node_version: None,

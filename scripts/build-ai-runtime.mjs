@@ -9,6 +9,7 @@
  * The output (opentrader/src-tauri/ai-runtime) is a build artifact and is git-ignored:
  *
  *   node/node                     Node.js executable (pinned, or the dev one)
+ *   npm/bin/npm-cli.js            npm CLI from the same Node distribution
  *   pi/node_modules/...           pinned @earendil-works/pi-coding-agent + deps
  *   pi/extensions/*.mjs           read-only analysis tools
  *   pi/prompts/analysis.md        analysis system prompt
@@ -48,6 +49,7 @@ const NODE_VERSION = process.env.OPENTRADER_NODE_VERSION || "22.23.4";
 const PI_VERSION = "1.5.0";
 const PI_PACKAGE = "@earendil-works/pi-coding-agent";
 const PI_CLI = `node_modules/${PI_PACKAGE}/dist/bundle/cli.js`;
+const NPM_CLI = "npm/bin/npm-cli.js";
 
 const TARGETS = {
   "linux-x64": { platform: "linux", arch: "x64", nodeDir: "linux-x64", archive: "tar.xz", binary: "bin/node", exe: "node" },
@@ -161,6 +163,30 @@ function extract(archivePath, destination) {
   }
 }
 
+/** npm ships inside the Node distribution (or the running Node in dev). */
+function npmSource(staging, base, dev) {
+  if (dev) {
+    const root = execFileSync(npmCommand(), ["root", "-g"], { encoding: "utf8" }).trim();
+    const source = join(root, "npm");
+    if (!existsSync(join(source, "bin", "npm-cli.js"))) throw new Error(`Global npm CLI missing: ${source}`);
+    return source;
+  }
+  for (const source of [join(staging, base, "lib", "node_modules", "npm"), join(staging, base, "node_modules", "npm")]) {
+    if (existsSync(join(source, "bin", "npm-cli.js"))) return source;
+  }
+  throw new Error(`The Node archive has no npm CLI: ${base}`);
+}
+
+function stageNpm(source, out) {
+  const destination = join(out, "npm");
+  rmSync(destination, { recursive: true, force: true });
+  cpSync(source, destination, { recursive: true });
+  // The updater needs the CLI and its dependencies, not npm's manual.
+  for (const name of ["docs", "man"]) rmSync(join(destination, name), { recursive: true, force: true });
+  removeMaps(destination);
+  if (!existsSync(join(destination, "bin", "npm-cli.js"))) throw new Error(`npm CLI missing after staging: ${destination}`);
+}
+
 function installPi(staging) {
   const prefix = join(staging, "pi");
   rmSync(prefix, { recursive: true, force: true });
@@ -218,6 +244,7 @@ async function buildTarget(target, installedPiDir, dev) {
   rmSync(out, { recursive: true, force: true });
   mkdirSync(join(out, "node"), { recursive: true });
   const nodeOut = join(out, "node", spec.exe);
+  let npmDir;
 
   if (dev) {
     // Development: the Node running this script, so no download is needed.
@@ -240,16 +267,22 @@ async function buildTarget(target, installedPiDir, dev) {
     if (!existsSync(nodeBinary)) throw new Error(`Node binary missing after extraction: ${nodeBinary}`);
     copyFileSync(nodeBinary, nodeOut);
     if (spec.exe !== "node.exe") chmodSync(nodeOut, 0o755);
+    npmDir = npmSource(staging, base, false);
   }
 
   cpSync(installedPiDir, join(out, "pi"), { recursive: true });
+  // npm's bin links point into the build cache. The runtime calls the CLI by
+  // path, and Tauri must not ship symlinks that break when that cache is gone.
+  rmSync(join(out, "pi", "node_modules", ".bin"), { recursive: true, force: true });
+  stageNpm(dev ? npmSource("", "", dev) : npmDir, out);
 
   // Verify the staged runtime actually runs before it is shipped.
   const piDir = join(out, "pi");
   const cli = join(piDir, PI_CLI);
+  const npmCli = join(out, NPM_CLI);
   const prompt = join(piDir, "prompts", "analysis.md");
   const extension = join(piDir, "extensions", "tradepanel-analysis.mjs");
-  for (const required of [nodeOut, cli, prompt, extension]) {
+  for (const required of [nodeOut, cli, npmCli, prompt, extension]) {
     if (!existsSync(required)) throw new Error(`Staged runtime file missing: ${required}`);
   }
   const nodeVersion = execFileSync(nodeOut, ["--version"], { encoding: "utf8" }).trim();
@@ -260,6 +293,8 @@ async function buildTarget(target, installedPiDir, dev) {
     encoding: "utf8",
     env: { ...process.env, PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", PI_OFFLINE: "1" },
   }).trim();
+  const npmVersion = execFileSync(nodeOut, [npmCli, "--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  log(`bundled npm ${npmVersion}`);
   if (!piVersion.includes(PI_VERSION)) {
     throw new Error(`Staged Pi version mismatch: ${piVersion}`);
   }
@@ -273,6 +308,7 @@ async function buildTarget(target, installedPiDir, dev) {
     piVersion: PI_VERSION,
     node: `node/${spec.exe}`,
     piCli: `pi/${PI_CLI}`,
+    npmCli: NPM_CLI,
     extension: "pi/extensions/tradepanel-analysis.mjs",
     systemPrompt: "pi/prompts/analysis.md",
     builtAt: new Date().toISOString(),

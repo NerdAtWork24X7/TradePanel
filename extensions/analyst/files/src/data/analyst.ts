@@ -66,6 +66,19 @@ export async function loadRuntimeStatus(): Promise<PiStatus | null> {
 
 export type AnalystResult = { status: "ok"; data: PiStatus } | { status: "error"; error: string };
 
+/** Install the newest Pi in the user's runtime overlay; progress arrives on `onStep`. */
+export async function updatePiRuntime(onStep: (step: string) => void): Promise<AnalystResult> {
+  try {
+    const channel = new Channel<string>();
+    channel.onmessage = (step) => onStep(step);
+    const r = await commands.piUpdate(channel);
+    if (r.status === "error") return { status: "error", error: r.error };
+    return { status: "ok", data: r.data };
+  } catch (e) {
+    return { status: "error", error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /** Save the base URL and model; `apiKey` (when given) replaces the stored key. */
 export async function saveAnalystSettings(baseUrl: string, model: string, apiKey?: string): Promise<AnalystResult> {
   try {

@@ -343,6 +343,7 @@ function stagePluginPackages() {
 
   say("staging the plugin packages");
   run(process.execPath, [join(ROOT, "scripts", "install-crypto-plugin.mjs"), "--no-deps", "--data", data, "--config", config]);
+  run(process.execPath, [join(ROOT, "scripts", "install-nse-plugin.mjs"), "--data", data, "--config", config]);
   run(process.execPath, [
     join(ROOT, "scripts", "install-broker-plugins.mjs"),
     "--no-deps",

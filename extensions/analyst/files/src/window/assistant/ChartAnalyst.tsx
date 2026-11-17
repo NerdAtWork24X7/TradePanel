@@ -32,6 +32,7 @@ import {
   newAnalystSession,
   saveAnalystSettings,
   stopAnalysis,
+  updatePiRuntime,
   type AnalystPlan,
   type ToolStep,
 } from "../../data/analyst";
@@ -196,6 +197,8 @@ export function ChartAnalyst(props: { ticker: string }) {
   const [logs, setLogs] = createSignal<AnalystLogEntry[]>([]);
   const [logsOpen, setLogsOpen] = createSignal(false);
   const [logBusy, setLogBusy] = createSignal(false);
+  const [updating, setUpdating] = createSignal(false);
+  const [updateStep, setUpdateStep] = createSignal("");
   const [currentLogId, setCurrentLogId] = createSignal<string | null>(null);
   const [loadedFromLog, setLoadedFromLog] = createSignal(false);
   /** One analysis at a time: a stopped or replaced run must not write state. */
@@ -227,6 +230,28 @@ export function ChartAnalyst(props: { ticker: string }) {
     }
     setLoaded(true);
     return status;
+  };
+
+  /** Install a newer Pi in place; the button stays disabled while npm runs. */
+  const updateRuntime = async () => {
+    if (updating() || busy()) return;
+    setUpdating(true);
+    setUpdateStep(translate("Checking for a Pi update…"));
+    setError("");
+    try {
+      const r = await updatePiRuntime(setUpdateStep);
+      if (r.status === "error") {
+        setUpdateStep("");
+        setError(r.error);
+        return;
+      }
+      setRuntime(r.data);
+      setBase(r.data.baseUrl);
+      setModel(r.data.model);
+      setHasKey(r.data.hasKey);
+    } finally {
+      setUpdating(false);
+    }
   };
 
   /** Put a stored analysis back on screen (pictures, card, answer). */
@@ -518,6 +543,15 @@ export function ChartAnalyst(props: { ticker: string }) {
           </div>
         </div>
         <div class="asst-analyst-actions">
+          <button
+            type="button"
+            class="asst-link"
+            disabled={updating() || busy()}
+            onClick={() => void updateRuntime()}
+            title={translate("Install the latest Pi coding agent")}
+          >
+            {updating() ? translate("Updating Pi…") : translate("Update Pi")}
+          </button>
           <button type="button" class="asst-link" onClick={() => setLogsOpen(!logsOpen())}>
             {logsOpen() ? translate("Hide log") : translateWith("Log ({0})", logs().length)}
           </button>
@@ -526,6 +560,13 @@ export function ChartAnalyst(props: { ticker: string }) {
           </button>
         </div>
       </div>
+
+      <Show when={updateStep()}>
+        <div class="asst-update" role="status" aria-live="polite">
+          <span class="asst-runtime-dot" classList={{ "is-busy": updating() }} aria-hidden="true" />
+          <span data-no-translate>{updateStep()}</span>
+        </div>
+      </Show>
 
       <Show when={logsOpen()}>
         <section class="asst-log" aria-label={translate("Analysis log")}>
@@ -687,7 +728,7 @@ export function ChartAnalyst(props: { ticker: string }) {
       </Show>
 
       <div class="asst-analyst-actions asst-analyst-start">
-        <button type="button" class="asst-primary" disabled={busy() || !configured() || !!runtimeError()} onClick={() => void run(true)}>
+        <button type="button" class="asst-primary" disabled={busy() || updating() || !configured() || !!runtimeError()} onClick={() => void run(true)}>
           {busy()
             ? translate("Analyzing...")
             : hasResult()
@@ -806,7 +847,7 @@ export function ChartAnalyst(props: { ticker: string }) {
             }}
           />
           <div class="asst-analyst-actions">
-            <button type="button" class="asst-primary" disabled={busy() || !question().trim() || !!runtimeError()} onClick={() => void run(false)}>
+            <button type="button" class="asst-primary" disabled={busy() || updating() || !question().trim() || !!runtimeError()} onClick={() => void run(false)}>
               {translate("Send")}
             </button>
             <Show when={busy()}>

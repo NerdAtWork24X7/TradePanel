@@ -10,7 +10,7 @@ opentrader/                  generated upstream checkout (git-ignored, pinned by
 opentrader.config.json       upstream repository + default ref
 opentrader.lock.json         resolved commit + extension hashes (tracked)
 extensions/<pack>/           TradePanel packs: extension.json, files/, core.patch
-plugins/                     OpenTrader Plugin API 2 programs (crypto datafeed, ccxt brokers)
+plugins/                     OpenTrader Plugin API 2 programs (crypto datafeed, NSE datafeed, ccxt brokers)
 lightweight-charts-drawing/  drawing core (sibling checkout read by Vite)
 scripts/                     update, launch, build, install and test tooling
 ```
@@ -28,6 +28,8 @@ pack's `core.patch`.
 - `chart` — Bar Replay slicing, legend/live/navigation, pane geometry, stop-limit lines.
 - `paper` — built-in simulated broker and account view.
 - `venues` — venue logos, symbol-search prefixes, Exchanges tab, plugin settings surface.
+- `nse` — NSE exchange mark in symbol search, refresh button and the narrow Tauri command that
+  rebuilds the runtime plugin's symbol cache. Depends on `core` and `venues`.
 - `plan` — entry/stop/target risk, reward and balance projections in the ticket.
 - `analyst` — Analyze chart panel, hidden capture renderer, `runtime/` (Pi source) and
   `tests/analyst-rpc-smoke.mjs`.
@@ -63,6 +65,7 @@ npm run test:standalone
 npm run test:ai
 (cd opentrader/src-tauri && cargo test --lib)
 python3 -m unittest discover -s plugins/crypto/tests
+python3 -m unittest discover -s plugins/nse/tests
 python3 -m unittest discover -s plugins/ccxt-broker/tests
 ```
 

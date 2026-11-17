@@ -1,7 +1,7 @@
 {
   "id": "crypto",
   "name": "Crypto markets & Hyperliquid",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "publisher": "TradePanel",
   "description": "Binance, Bybit, OKX, Coinbase, Kraken, KuCoin, Gate.io, Bitget and Hyperliquid market data, with a Hyperliquid perpetuals account for the order ticket. Hyperliquid starts on testnet.",
   "api": 2,

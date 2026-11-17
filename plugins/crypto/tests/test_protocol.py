@@ -52,9 +52,14 @@ class StubSource:
     def __init__(self):
         self.subscribed = None
         self.configured = None
+        self.refreshed = False
 
     def search(self, query):
         return [{"ticker": f"BINANCE:{query.upper()}", "description": "x", "type": "crypto"}]
+
+    def refresh_symbols(self):
+        self.refreshed = True
+        return {"reloaded": True}
 
     def symbol_info(self, ticker):
         return {"timezone": "Etc/UTC"}
@@ -139,6 +144,10 @@ class DispatchTests(unittest.TestCase):
     def test_data_methods(self):
         self.assertEqual(self.call("data.search", {"query": "btc"})["symbols"][0]["ticker"], "BINANCE:BTC")
         self.assertEqual(self.call("data.symbolInfo", {"ticker": "BINANCE:BTC/USDT"})["timezone"], "Etc/UTC")
+
+    def test_data_refresh_rebuilds_the_symbol_cache(self):
+        self.assertEqual(self.call("data.refreshSymbols"), {"reloaded": True})
+        self.assertTrue(self.source.refreshed)
 
     def test_bars_use_from_and_to(self):
         result = self.call("data.bars", {"ticker": "B", "resolution": "1", "from": 60, "to": 120, "countBack": 1})

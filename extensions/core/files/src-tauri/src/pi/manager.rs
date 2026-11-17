@@ -246,6 +246,16 @@ impl PiManager {
         self.stop_child().await;
     }
 
+    /// The runtime is about to be swapped on disk: release its files first.
+    pub(crate) async fn prepare_update(&self) {
+        self.stop_child().await;
+    }
+
+    /// A successful update makes a previous launch failure stale.
+    pub(crate) fn clear_runtime_error(&self) {
+        *self.last_error.locked() = None;
+    }
+
     // ── Process lifecycle ─────────────────────────────────────────────────
 
     async fn ensure_child(self: &Arc<Self>) -> Result<(), String> {

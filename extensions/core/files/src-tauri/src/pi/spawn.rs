@@ -132,6 +132,7 @@ mod tests {
             root: PathBuf::from("/rt"),
             node: PathBuf::from("/rt/node/node"),
             pi_cli: PathBuf::from("/rt/pi/cli.js"),
+            npm_cli: None,
             extension: PathBuf::from("/rt/pi/extensions/tradepanel-analysis.mjs"),
             system_prompt: PathBuf::from("/rt/pi/prompts/analysis.md"),
             node_version: None,

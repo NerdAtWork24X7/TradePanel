@@ -149,10 +149,10 @@ index 93401f3..e51ca6e 100644
  /** Fade out the startup splash (index.html) once the App has rendered and the
   *  minimum time has passed. */
 diff --git a/src/styles/assistant.css b/src/styles/assistant.css
-index 0e2d543..3a865af 100644
+index 0e2d543..3a865b0 100644
 --- a/src/styles/assistant.css
 +++ b/src/styles/assistant.css
-@@ -652,3 +652,534 @@
+@@ -652,3 +652,552 @@
  .asst-rate-btn.is-on {
    color: var(--color-cold-gray-200);
  }
@@ -206,6 +206,11 @@ index 0e2d543..3a865af 100644
 +.asst-link:focus-visible {
 +  outline: 2px solid var(--color-brand, var(--color-cold-gray-200));
 +  outline-offset: 2px;
++}
++.asst-link:disabled {
++  opacity: 0.45;
++  cursor: default;
++  text-decoration: none;
 +}
 +.asst-primary {
 +  padding: 6px 12px;
@@ -638,6 +643,19 @@ index 0e2d543..3a865af 100644
 +}
 +.asst-runtime.is-error .asst-runtime-dot {
 +  background-color: var(--color-content-primary-danger, #f23645);
++}
++.asst-update {
++  display: flex;
++  align-items: center;
++  gap: 6px;
++  font-size: 11px;
++  line-height: 16px;
++  color: var(--color-text-secondary);
++  overflow-wrap: anywhere;
++}
++.asst-update .asst-runtime-dot.is-busy {
++  background-color: var(--color-brand, #2962ff);
++  animation: asst-blink 1.2s infinite ease-in-out;
 +}
 +.asst-analyst-sep {
 +  color: var(--color-cold-gray-450);

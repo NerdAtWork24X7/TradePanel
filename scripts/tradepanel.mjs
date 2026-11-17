@@ -225,6 +225,16 @@ if (!noInstall) {
     });
     if (crypto.status !== 0) warn("crypto plugin install failed; run `npm run ot:crypto` manually.");
   }
+  const nseScript = join(ROOT, "scripts", "install-nse-plugin.mjs");
+  if (existsSync(nseScript)) {
+    say("ensuring the NSE plugin is installed (npm run ot:nse)");
+    const nse = spawnSync(process.execPath, [nseScript, "--if-needed"], {
+      cwd: ROOT,
+      stdio: "inherit",
+      shell: WIN,
+    });
+    if (nse.status !== 0) warn("NSE plugin install failed; run `npm run ot:nse` manually.");
+  }
   // One broker plugin per venue, installed off: every broker is a card in Exchanges > Brokers and in
   // Trade > Connect broker, and enabling the one the user trades starts its process.
   const brokerScript = join(ROOT, "scripts", "install-broker-plugins.mjs");

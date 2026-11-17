@@ -32,7 +32,7 @@ from hyperliquid_broker import HyperliquidBroker
 
 PLUGIN_ID = "crypto"
 API = 2
-VERSION = "1.1.1"
+VERSION = "1.2.0"
 HELLO_TIMEOUT = 12.0
 
 
@@ -246,6 +246,8 @@ class CryptoPlugin:
             return {}
         if method == "data.search":
             return {"symbols": self._source.search(str(params.get("query") or ""))}
+        if method == "data.refreshSymbols":
+            return self._source.refresh_symbols()
         if method == "data.symbolInfo":
             return self._source.symbol_info(str(params.get("ticker") or ""))
         if method == "data.bars":

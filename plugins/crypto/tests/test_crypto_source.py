@@ -200,6 +200,15 @@ class SearchTests(unittest.TestCase):
             "BINANCE:ETH/USDT", "BINANCE:ETH/USDT.P",
         })
 
+    def test_refresh_drops_the_symbol_caches(self):
+        self.source.search("btc")
+        self.assertTrue(self.source._search_cache)
+        self.assertTrue(self.source._loaded)
+        self.assertEqual(self.source.refresh_symbols(), {"reloaded": True})
+        self.assertEqual(self.source._search_cache, {})
+        self.assertEqual(self.source._loaded, {})
+        self.assertEqual(self.source._failed, {})
+
 
 class BarsCacheTests(unittest.TestCase):
     """Repeated history reads reuse fetched spans; the live edge stays live."""

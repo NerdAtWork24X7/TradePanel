@@ -219,7 +219,7 @@ index e3f994b..3d826cd 100644
              commands::local_series::local_series_list,
              commands::local_series::local_series_save,
              commands::local_series::local_series_read,
-@@ -109,6 +114,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
+@@ -109,6 +114,13 @@ fn specta_builder() -> Builder<tauri::Wry> {
              agent::agent_ready,
              assistant::assistant_chat,
              assistant::assistant_cancel,
@@ -229,6 +229,7 @@ index e3f994b..3d826cd 100644
 +            pi::commands::pi_analyze,
 +            pi::commands::pi_abort,
 +            pi::commands::pi_new_session,
++            pi::commands::pi_update,
              local_model::local_model_info,
              local_model::local_model_install,
              local_model::local_model_cancel,

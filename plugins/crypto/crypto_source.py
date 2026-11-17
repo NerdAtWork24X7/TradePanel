@@ -314,6 +314,16 @@ class CryptoSource:
 
     # ── search ───────────────────────────────────────────────────────────────
 
+    def refresh_symbols(self) -> dict[str, bool]:
+        """Drop the venue index and typeahead caches so the next search reloads them."""
+        with self._lock:
+            self._loaded.clear()
+            self._failed.clear()
+            self._failed_at.clear()
+            self._search_cache.clear()
+            self._loading_done.notify_all()
+        return {"reloaded": True}
+
     def search(self, query: str) -> list[dict[str, str]]:
         q = query.strip().upper()
         now = time.time()

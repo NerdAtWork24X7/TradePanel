@@ -7,6 +7,7 @@ use tauri::ipc::Channel;
 use tauri::State;
 
 use super::manager::{PiManager, PiStatus};
+use super::update;
 
 #[tauri::command]
 #[specta::specta]
@@ -66,4 +67,18 @@ pub async fn pi_new_session(manager: State<'_, Arc<PiManager>>) -> Result<(), St
     let manager = Arc::clone(manager.inner());
     manager.new_session().await;
     Ok(())
+}
+
+/// Install the latest Pi into the user's runtime overlay. Progress lines are
+/// sent on `on_event`; the returned status is the one the panel renders.
+#[tauri::command]
+#[specta::specta]
+pub async fn pi_update(
+    app: tauri::AppHandle,
+    manager: State<'_, Arc<PiManager>>,
+    on_event: Channel<String>,
+) -> Result<PiStatus, String> {
+    let manager = Arc::clone(manager.inner());
+    update::run(&app, &manager, on_event).await?;
+    Ok(manager.status())
 }

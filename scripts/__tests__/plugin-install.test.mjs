@@ -2,7 +2,14 @@
  * camelCase fields the plugin host's `PluginConfig` reads. */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appDirs, mergeConfig } from "../install-crypto-plugin.mjs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { appDirs, enablePlugin, mergeConfig } from "../install-crypto-plugin.mjs";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 test("app folders follow the app identifier on each platform", () => {
   const linux = appDirs("linux", {}, "/home/me");
@@ -42,4 +49,59 @@ test("a fresh config gets a token and the defaults the Rust side expects", () =>
   assert.equal(after.trading_enabled, false);
   assert.equal(after.plugins.crypto.token, "abc");
   assert.deepEqual(after.plugins.crypto.symbolMap, {});
+});
+
+test("enabling the NSE plugin keeps existing plugins and settings", () => {
+  const before = {
+    plugins: { crypto: { enabled: true, token: "keep", settings: { pollSeconds: "15" } } },
+    active_broker: "hyperliquid",
+    trading_enabled: true,
+  };
+  const after = enablePlugin(before, "nse", "new-token");
+  assert.deepEqual(after.plugins.crypto, before.plugins.crypto);
+  assert.equal(after.plugins.nse.enabled, true);
+  assert.equal(after.plugins.nse.token, "new-token");
+  assert.deepEqual(after.plugins.nse.settings, {});
+  assert.equal(after.active_broker, "hyperliquid");
+  assert.equal(after.trading_enabled, true);
+});
+
+test("the NSE installer replaces an older --if-needed install but keeps the token", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tradepanel-nse-"));
+  try {
+    const installer = join(ROOT, "scripts", "install-nse-plugin.mjs");
+    const args = ["--if-needed", "--data", join(dir, "data"), "--config", join(dir, "config")];
+    const installed = join(dir, "data", "plugins", "nse", "opentrader-plugin.json");
+    const config = join(dir, "config", "plugins.json");
+    const run = () => spawnSync(process.execPath, [installer, ...args], { encoding: "utf8" });
+    assert.equal(run().status, 0);
+    const token = JSON.parse(readFileSync(config, "utf8")).plugins.nse.token;
+    const manifest = JSON.parse(readFileSync(installed, "utf8"));
+    writeFileSync(installed, JSON.stringify({ ...manifest, version: "0.0.1" }));
+    assert.equal(run().status, 0);
+    assert.equal(JSON.parse(readFileSync(installed, "utf8")).version, manifest.version);
+    assert.equal(JSON.parse(readFileSync(config, "utf8")).plugins.nse.token, token);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the crypto installer replaces an older --if-needed install but keeps the token", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tradepanel-crypto-"));
+  try {
+    const installer = join(ROOT, "scripts", "install-crypto-plugin.mjs");
+    const args = ["--if-needed", "--no-deps", "--data", join(dir, "data"), "--config", join(dir, "config")];
+    const installed = join(dir, "data", "plugins", "crypto", "opentrader-plugin.json");
+    const config = join(dir, "config", "plugins.json");
+    const run = () => spawnSync(process.execPath, [installer, ...args], { encoding: "utf8" });
+    assert.equal(run().status, 0);
+    const token = JSON.parse(readFileSync(config, "utf8")).plugins.crypto.token;
+    const manifest = JSON.parse(readFileSync(installed, "utf8"));
+    writeFileSync(installed, JSON.stringify({ ...manifest, version: "0.0.1" }));
+    assert.equal(run().status, 0);
+    assert.equal(JSON.parse(readFileSync(installed, "utf8")).version, manifest.version);
+    assert.equal(JSON.parse(readFileSync(config, "utf8")).plugins.crypto.token, token);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

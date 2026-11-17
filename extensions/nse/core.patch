@@ -1,0 +1,237 @@
+diff --git a/src/window/header/symbol-search/search-model.ts b/src/window/header/symbol-search/search-model.ts
+--- a/src/window/header/symbol-search/search-model.ts
++++ b/src/window/header/symbol-search/search-model.ts
+@@ -18,7 +18,7 @@
+ import { economicSources, getTickerInfo, searchEconomic, searchSymbols } from "../../../data/datafeed";
+ import { LOCAL_EXCHANGE, localSeriesList, localSymbol } from "../../../data/local-series";
+ import { recentSymbols } from "../../../data/recent-symbols";
+-import type { SymbolSearchResult } from "../../../bindings";
++import { commands, type SymbolSearchResult } from "../../../bindings";
+ import { searchResultToRow } from "../../../data/providers";
+ import * as kv from "../../../data/kv";
+ import type { SymbolSearchProps } from "./types";
+@@ -165,6 +165,8 @@
+   // else the static local filter. `searching` suppresses the empty state while
+   // a request is in flight; the previous rows stay visible (no flicker).
+   const [searching, setSearching] = createSignal(false);
++  /** Rebuilds every data plugin's symbol cache; disables the refresh button. */
++  const [refreshingSymbols, setRefreshingSymbols] = createSignal(false);
+   // Raw live results for the CURRENT (query, type). Null → use the static
+   // catalogue (no Tauri, empty query, or a failed request). Kept separate from
+   // the category so a tab switch re-filters instantly via the memo below,
+@@ -324,9 +326,26 @@
+   /** Rows of the list (compare home: the recent symbols). */
+   const listRows = () => (compareHome() ? recentRows() : rows());
+ 
++  /** Rebuild every data plugin's symbol cache, then re-run the current search. */
++  const refreshSymbols = async (): Promise<void> => {
++    if (refreshingSymbols()) return;
++    setRefreshingSymbols(true);
++    try {
++      await commands.pluginRefreshSymbols();
++      if (!HAS_TAURI || !liveSearch()) return;
++      const my = ++reqSeq;
++      setSearching(true);
++      const data = await searchSymbols(searchText().trim(), activeType());
++      if (reqSeq === my) setLiveRaw(data);
++    } finally {
++      setRefreshingSymbols(false);
++      setSearching(false);
++    }
++  };
++
+   return {
+     category, setCategory, query, setQuery, caret, setCaret, multiMode, searchText, highlightIdx, setHighlightIdx,
+-    typeCode, setTypeCode, typeMenuOpen, setTypeMenuOpen, typeLabel, searching, economy, sources,
++    typeCode, setTypeCode, typeMenuOpen, setTypeMenuOpen, typeLabel, searching, refreshingSymbols, refreshSymbols, economy, sources,
+     countryPanel, setCountryPanel, countryQuery, setCountryQuery, countryRegions,
+     rows, otherCount, categoryLabel, dialogTitle, compareHome, listRows,
+   };
+diff --git a/src/window/header/SymbolSearchDialog.tsx b/src/window/header/SymbolSearchDialog.tsx
+--- a/src/window/header/SymbolSearchDialog.tsx
++++ b/src/window/header/SymbolSearchDialog.tsx
+@@ -29,6 +29,7 @@
+ import {
+   TOKEN_ESCAPE_RE,
+   createSymbolSearch,
++  HAS_TAURI,
+   econCategory,
+   econCountry,
+   econCountryName,
+@@ -46,7 +47,7 @@
+ export function SymbolSearchDialog(props: Props) {
+   const s = createSymbolSearch(props);
+   const { category, setCategory, query, setQuery, setCaret, multiMode, searchText, highlightIdx, setHighlightIdx } = s;
+-  const { typeCode, setTypeCode, typeMenuOpen, setTypeMenuOpen, typeLabel, searching, economy, sources, setCountryPanel, setCountryQuery } = s;
++  const { typeCode, setTypeCode, typeMenuOpen, setTypeMenuOpen, typeLabel, searching, refreshingSymbols, refreshSymbols, economy, sources, setCountryPanel, setCountryQuery } = s;
+   const { rows, otherCount, categoryLabel, dialogTitle, compareHome, listRows } = s;
+ 
+   let input!: HTMLInputElement;
+@@ -273,6 +274,27 @@
+                       <path d="M5 5l6 6M11 5l-6 6" stroke="#000" stroke-width="1.5" stroke-linecap="round" />
+                     </mask>
+                     <circle cx="8" cy="8" r="8" fill="currentColor" mask="url(#symbol-search-clear-knockout)" />
++                  </svg>
++                </button>
++              </Tooltip>
++            </Show>
++            {/* Rebuild every data plugin's symbol cache without restarting the app. */}
++            <Show when={HAS_TAURI && !props.compare}>
++              <Tooltip text="Refresh symbols" side="bottom">
++                <button
++                  type="button"
++                  aria-label="Refresh symbols"
++                  class="symbol-search-refresh"
++                  classList={{ "is-refreshing": refreshingSymbols() }}
++                  disabled={refreshingSymbols()}
++                  onMouseDown={(e) => e.preventDefault()}
++                  onClick={() => {
++                    refreshSymbols().catch((e) => showNotice({ title: "Refresh symbols", text: e instanceof Error ? e.message : String(e) }));
++                  }}
++                >
++                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" fill="none">
++                    <path d="M13.1 6.2A5.2 5.2 0 1 0 13 9.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
++                    <path d="M13.4 2.8v3.7H9.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                   </svg>
+                 </button>
+               </Tooltip>
+diff --git a/src/styles/symbol-search.css b/src/styles/symbol-search.css
+--- a/src/styles/symbol-search.css
++++ b/src/styles/symbol-search.css
+@@ -120,6 +120,28 @@
+   height: 18px;
+ }
+ 
++/* Refresh every data plugin's symbol cache from the search box. */
++.symbol-search-refresh {
++  flex-shrink: 0;
++  width: 24px;
++  height: 24px;
++  padding: 0;
++  border: 0;
++  border-radius: 4px;
++  background: transparent;
++  color: var(--color-cold-gray-400);
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  cursor: pointer;
++}
++.symbol-search-refresh:hover:not(:disabled) { color: var(--color-content-primary-neutral-semi-bold); }
++.symbol-search-refresh:focus-visible { outline: 2px solid var(--color-focus-outline-color-blue); outline-offset: 1px; }
++.symbol-search-refresh:disabled { opacity: 0.5; cursor: default; }
++.symbol-search-refresh svg { width: 16px; height: 16px; }
++.symbol-search-refresh.is-refreshing svg { animation: symbol-search-spin 0.8s linear infinite; }
++@keyframes symbol-search-spin { to { transform: rotate(360deg); } }
++
+ .symbol-search-input-icon {
+   display: inline-flex;
+   align-items: center;
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -860,6 +860,13 @@
+     app.state::<Plugins>().logs.locked().get(&id).map(|r| r.iter().cloned().collect()).unwrap_or_default()
+ }
+ 
++/// Rebuild every connected data plugin's symbol cache (the symbol-search refresh button).
++#[tauri::command]
++#[specta::specta]
++pub async fn plugin_refresh_symbols(app: AppHandle) {
++    crate::plugins::data::refresh_symbols(&app).await;
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/src-tauri/src/plugins/data.rs b/src-tauri/src/plugins/data.rs
+--- a/src-tauri/src/plugins/data.rs
++++ b/src-tauri/src/plugins/data.rs
+@@ -387,6 +387,25 @@
+         }
+     });
+     futures_util::future::join_all(asks).await.into_iter().flatten().flatten().collect()
++}
++
++/// Ask each connected data plugin to rebuild its symbol universe. A plugin without a
++/// refresh handler answers "method not found"; one slow or broken plugin cannot hold up the others.
++pub async fn refresh_symbols(app: &AppHandle) {
++    let plugins: BTreeSet<String> = {
++        let s = state(app);
++        s.exchanges.locked().values().cloned().collect()
++    };
++    let hub = app.state::<Plugins>().hub.clone();
++    let asks = plugins.into_iter().filter(|p| hub.connected(p).is_some()).map(|plugin| {
++        let hub = hub.clone();
++        async move {
++            if let Err(error) = hub.request(&plugin, "data.refreshSymbols", json!({}), Duration::from_secs(30)).await {
++                eprintln!("plugins: {plugin} could not refresh symbols: {error}");
++            }
++        }
++    });
++    futures_util::future::join_all(asks).await;
+ }
+ 
+ /// A plugin's search answer as rows: the symbols of its exchanges (of `only`, when the query names one), 50 at most.
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -134,6 +134,7 @@
+             plugins::plugin_set_enabled,
+             plugins::plugin_set_settings,
+             plugins::plugin_clear_secret,
++            plugins::plugin_refresh_symbols,
+             plugins::plugin_new_token,
+             plugins::plugin_remove,
+             plugins::plugin_folder_candidates,
+diff --git a/src/data/country-flags.ts b/src/data/country-flags.ts
+--- a/src/data/country-flags.ts
++++ b/src/data/country-flags.ts
+@@ -45,7 +45,16 @@
+   "IEX", "OTC", "BOATS",
+ ]);
+ 
++/** Indian exchanges, by the names and codes the rows carry. */
++const IN_EXCHANGES = new Set([
++  "NSE", "BSE", "NATIONAL STOCK EXCHANGE OF INDIA", "BOMBAY STOCK EXCHANGE",
++]);
++
+ /** Country of a listing by its exchange (undefined when not known). */
+ export function countryOfExchange(exchange: string | undefined): string | undefined {
+-  return exchange && US_EXCHANGES.has(exchange.toUpperCase()) ? "US" : undefined;
++  const code = exchange?.toUpperCase();
++  if (!code) return undefined;
++  if (US_EXCHANGES.has(code)) return "US";
++  if (IN_EXCHANGES.has(code)) return "IN";
++  return undefined;
+ }
+diff --git a/src/data/__tests__/country-flags.test.ts b/src/data/__tests__/country-flags.test.ts
+--- a/src/data/__tests__/country-flags.test.ts
++++ b/src/data/__tests__/country-flags.test.ts
+@@ -4,6 +4,10 @@
+ describe("countryOfExchange", () => {
+   it("US exchanges by name or code, any case", () => {
+     for (const ex of ["NASDAQ", "nyse", "NYSE ARCA", "AMEX", "CBOE BZX", "IEX", "OTC", "BOATS"]) expect(countryOfExchange(ex), ex).toBe("US");
++  });
++
++  it("Indian exchanges by name or code, any case", () => {
++    for (const ex of ["NSE", "nse", "BSE", "National Stock Exchange of India", "Bombay Stock Exchange"]) expect(countryOfExchange(ex), ex).toBe("IN");
+   });
+ 
+   it("unknown otherwise", () => {
+diff --git a/src/data/providers/__tests__/gateway.test.ts b/src/data/providers/__tests__/gateway.test.ts
+--- a/src/data/providers/__tests__/gateway.test.ts
++++ b/src/data/providers/__tests__/gateway.test.ts
+@@ -91,6 +91,12 @@
+     expect(r.venueLogoSrc).toBeTruthy();
+   });
+ 
++  it("an NSE listing carries its exchange mark", () => {
++    const r = searchResultToRow(res({ ticker: "RELIANCE", market: "stocks", type: "stock", exchange: "NSE", locale: "global" }));
++    expect(r.symbolName).toBe("NSE:RELIANCE");
++    expect(r.venueLogoSrc).toBeTruthy();
++  });
++
+   it("defaults: stocks market, empty description, unknown exchange as is", () => {
+     const r = searchResultToRow(res({ market: null, name: null, type: null, exchange: "XLON", locale: null }));
+     expect(r).toMatchObject({ symbolName: "XLON:AAPL", description: "", marketType: "stock", exchange: "XLON", category: "stocks", country: undefined });

@@ -25,10 +25,14 @@ vi.mock("../../bindings", () => ({
     }),
     piAbort: vi.fn(async () => ({ status: "ok", data: null })),
     piNewSession: vi.fn(async () => ({ status: "ok", data: null })),
+    piUpdate: vi.fn(async (_channel: { onmessage: (step: string) => void }) => ({
+      status: "ok",
+      data: { state: "stopped", streaming: false, ready: false, configured: false, hasKey: false, baseUrl: "", model: "", target: "linux-x64", runtimeRoot: "/rt", nodeVersion: "v22.23.4", piVersion: "1.5.2", contextFile: "", error: null },
+    })),
   },
 }));
 
-const { analyze } = await import("../analyst");
+const { analyze, updatePiRuntime } = await import("../analyst");
 const { commands } = await import("../../bindings");
 
 const plan = {
@@ -137,6 +141,19 @@ describe("analyze", () => {
     const run = await promise;
     expect(run.ended).toBe("exit");
     expect(run.error).toBe("The analysis runtime exited unexpectedly.");
+  });
+
+  it("streams each update step and returns the refreshed runtime status", async () => {
+    const steps: string[] = [];
+    vi.mocked(commands.piUpdate).mockImplementationOnce((async (channel: { onmessage: (step: string) => void }) => {
+      channel.onmessage("Preparing the update…");
+      channel.onmessage("Pi 1.5.2 is ready.");
+      return { status: "ok", data: { piVersion: "1.5.2" } } as never;
+    }) as never);
+    const result = await updatePiRuntime((step) => steps.push(step));
+    expect(steps).toEqual(["Preparing the update…", "Pi 1.5.2 is ready."]);
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") expect(result.data.piVersion).toBe("1.5.2");
   });
 
   it("rejects when the request never started", async () => {

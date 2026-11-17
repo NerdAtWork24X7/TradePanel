@@ -6,6 +6,7 @@ as a supervised, read-only process. This folder is its source:
 | File | What it is |
 |---|---|
 | `package.json` / `package-lock.json` | Pinned `@earendil-works/pi-coding-agent` 1.5.0 and `typebox` (the tools' schemas). |
+| npm from the pinned Node distribution | Staged as `npm/` by `scripts/build-ai-runtime.mjs` so the app can install updates without a system npm. |
 | `extensions/tradepanel-analysis.mjs` | The entire tool surface: `panel_market_context`, `panel_indicators`, `panel_portfolio`, `panel_order_ticket`, `panel_submit_trade_plan`. It reads one context snapshot file the host writes; it cannot write, run commands or open the network. |
 | `prompts/analysis.md` | The analysis system prompt: the 5-minute long/short trade card and the read-only rules. |
 
@@ -38,7 +39,18 @@ skills, and the five `panel_*` tools above.
 | `settings.rs` | The provider form → Pi `models.json` (`apiKey: $TRADEPANEL_API_KEY`), HTTPS or loopback HTTP only. |
 | `context.rs` | Validates the version-1 snapshot (allowed fields, no credential-shaped keys, 1.5 MB) and writes it atomically (0600); validates the images. |
 | `manager.rs` | One lazily started child: RPC framing, bounded frames, `get_state` readiness, event forwarding, abort, crash reporting. |
-| `commands.rs` | `pi_status`, `pi_set_settings`, `pi_clear_key`, `pi_analyze`, `pi_abort`, `pi_new_session`. |
+| `commands.rs` | `pi_status`, `pi_set_settings`, `pi_clear_key`, `pi_analyze`, `pi_abort`, `pi_new_session`, `pi_update`. |
+
+## Update it in the app
+
+**Update Pi** in the Analyze chart header installs a newer release into
+`<app-data>/ai/runtime/<target>`. `pi/update.rs` asks Pi's release service for
+the newest version, downloads that release's pinned `package.json` and
+`package-lock.json`, and runs the npm CLI staged next to Node with scripts and
+user configuration disabled. Stage, verify and swap are separate: a failed
+install leaves the current runtime in place, and the old overlay is restored if
+the final rename fails. Node, the analysis extension and the prompt are copied
+from the current runtime so the read-only bundle is never modified.
 
 The window side is `src/data/analyst.ts` (RPC records → text, tool steps, the
 plan) and `src/window/assistant/ChartAnalyst.tsx` (the panel and its card). The

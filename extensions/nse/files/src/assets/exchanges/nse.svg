@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- The NSE rosette: eight facets around a white diamond. Vector redraw of
+       the mark in NSE's official media asset; it is a trademark of NSE. -->
+  <path fill="#E56F27" d="M14 13 32 5l17 8-17 8Z"/>
+  <path fill="#392D7D" d="M49 13 32 21l11 11Z"/>
+  <path fill="#E56F27" d="M49 13 58 32 49 51 43 32Z"/>
+  <path fill="#EFB31D" d="M49 51 32 43l11-11Z"/>
+  <path fill="#E22028" d="M49 51 32 59 14 51l18-8Z"/>
+  <path fill="#EFB31D" d="M14 51 21 32l11 11Z"/>
+  <path fill="#E22028" d="M14 13 21 32 14 51 6 32Z"/>
+  <path fill="#EFB31D" d="M14 13 32 21 21 32Z"/>
+  <path fill="#fff" d="M32 21 43 32 32 43 21 32Z"/>
+</svg>

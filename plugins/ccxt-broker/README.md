@@ -22,31 +22,23 @@ installing and connecting that venue's plugin.
 
 ## Install
 
-```bash
-# from the repository root, with the app closed
-npm run ot:brokers                          # all eight venues, enabled
-node opentrader/scripts/install-broker-plugins.mjs --only=binance,bybit,okx
-node opentrader/scripts/install-broker-plugins.mjs --disabled   # installed, off
-```
-
-`npm start` runs the installer itself with `--if-needed --disabled`: every venue is then a
+`npm start` (with the app closed) installs all eight venues **off**: every venue is then a
 card in the Exchanges tab and in **Trade > Connect broker**, while no broker process runs
-until the user enables one — a click on its card does that and connects it. Without a flag
-the venues are installed enabled, which starts a process per venue.
+until the user enables one — a click on its card does that and connects it. Close OpenTrader
+first; it rewrites `plugins.json` when it exits.
 
-The installer copies each venue's package into the app's plugin folder, writes its
-generated manifest, enables it in `plugins.json` (or records it off), and points every
-plugin's `.venv` at **one shared venv** with ccxt — a junction on Windows — because the host
-runs a `.py` entry with the venv inside the plugin's own folder. An existing venv that
-already imports ccxt is reused (the crypto plugin's `.venv`, or
-`<data>/plugins/.ccxt-broker-venv` from an earlier run), so a second 40 MB install is not
-made; otherwise it creates the shared venv and installs `requirements.txt` into it.
-Removing one plugin removes its link, not the shared environment.
+Setup copies each venue's package into the app's plugin folder, writes its generated
+manifest, records it off in `plugins.json`, and points every plugin's `.venv` at **one
+shared venv** with ccxt — a junction on Windows — because the host runs a `.py` entry with
+the venv inside the plugin's own folder. An existing venv that already imports ccxt is
+reused (the crypto plugin's `.venv`, or `<data>/plugins/.ccxt-broker-venv` from an earlier
+run), so a second 40 MB install is not made; otherwise it creates the shared venv and
+installs `requirements.txt` into it. Removing one plugin removes its link, not the shared
+environment.
 
-`--no-deps` skips the venv: install `requirements.txt` into the Python the app will use.
-`--if-needed` leaves already installed venues alone; `--disabled` installs a venue without
-enabling it, and keeps the switch of one already installed. Close OpenTrader first; it
-rewrites `plugins.json` when it exits.
+To install or ship a single venue, build its zip (`python3 plugins/ccxt-broker/build.py
+--venue bybit`) and use **Settings > Plugins > Install from file**; it then needs Python
+3.10+ with `requirements.txt` (the app prefers a `.venv` inside the plugin's folder).
 
 ## Use
 

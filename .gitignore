@@ -65,7 +65,7 @@ dist/
 target/
 dist-standalone/
 
-# ── Generated OpenTrader checkout (scripts/update-opentrader.mjs) ────────────
+# ── Generated OpenTrader checkout (tradepanel.mjs) ───────────────────────────
 opentrader/
 
 # ── Plugin build artifacts (source is tracked) ───────────────────────────────

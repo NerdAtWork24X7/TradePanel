@@ -2,7 +2,7 @@
 /**
  * End-to-end check of the Analyze chart runtime (Pi coding agent, RPC mode).
  *
- *   npm run test:ai
+ *   node extensions/analyst/tests/analyst-rpc-smoke.mjs
  *
  * It starts a mock OpenAI-compatible provider, then runs the staged runtime
  * exactly as `src-tauri/src/pi/spawn.rs` and `manager.rs` do — cleared
@@ -19,7 +19,7 @@
  *   5. `agent_settled` closes the run.
  *
  * The staged runtime is a build artifact, so the check skips (exit 0) when it
- * has not been staged yet: `npm run ai:runtime`.
+ * has not been staged yet: run `npm start` (or `./update`) first.
  */
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -36,7 +36,7 @@ const TOOL_ALLOWLIST = "panel_market_context,panel_indicators,panel_portfolio,pa
 
 const manifestPath = join(RUNTIME_ROOT, TARGET, "manifest.json");
 if (!existsSync(manifestPath)) {
-  console.log(`[test:ai] no staged runtime for ${TARGET}; run \`npm run ai:runtime\` first — skipping.`);
+  console.log(`[test:ai] no staged runtime for ${TARGET}; run setup (npm start) first — skipping.`);
   process.exit(0);
 }
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));

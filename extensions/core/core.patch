@@ -8,12 +8,12 @@ index 272cd95..e31ff5a 100644
  plugins/*/dist/
 +plugins/dist/
 +
-+# Staged AI runtime (npm run ai:runtime): build artifact
++# Staged AI runtime (tradepanel.mjs setup): build artifact
 +src-tauri/ai-runtime/*
 +!src-tauri/ai-runtime/README.md
 +ai-runtime/node_modules/
 +
-+# Staged standalone build (npm run standalone): build artifact
++# Legacy standalone bundle output (no longer built)
 +src-tauri/standalone/
 diff --git a/src-tauri/capabilities/default.json b/src-tauri/capabilities/default.json
 index 1532dac..fc05dd6 100644

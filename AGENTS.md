@@ -12,10 +12,12 @@ opentrader.lock.json         resolved commit + extension hashes (tracked)
 extensions/<pack>/           TradePanel packs: extension.json, files/, core.patch
 plugins/                     OpenTrader Plugin API 2 programs (crypto datafeed, NSE datafeed, ccxt brokers)
 lightweight-charts-drawing/  drawing core (sibling checkout read by Vite)
-scripts/                     update, launch, build, install and test tooling
+tradepanel.mjs               the single entrypoint: setup + run, and --update / --ref / --latest
+tradepanel.test.mjs          its tests
+update, update.cmd           the update entrypoint (tradepanel.mjs --update --setup)
 ```
 
-**Never edit `opentrader/`.** It is reset by `scripts/update-opentrader.mjs`. Put new files in
+**Never edit `opentrader/`.** It is reset by `tradepanel.mjs`. Put new files in
 `extensions/<pack>/files/` (mirroring the checkout tree) and changes to upstream files in that
 pack's `core.patch`.
 
@@ -41,38 +43,36 @@ folder out of `extensions/`; rerun the updater. Runtime plugins do not need pack
 ## Update upstream
 
 ```bash
-npm run update:opentrader                     # pinned release (v0.4.25)
-npm run update:opentrader -- --latest         # newest release tag, when packs support it
-npm run update:opentrader -- --ref main       # upstream HEAD
-npm run update:opentrader:check               # assemble + tsc + vitest
-npm run update:opentrader:full                # ... + cargo test --lib
-npm run update:opentrader:dry                 # resolve/list only
-./update --check                              # the standalone launcher (update.cmd on Windows)
-node scripts/update-opentrader.mjs --locked   # reapply the pin in opentrader.lock.json
-node scripts/update-opentrader.mjs --without analyst --check   # prove a pack is independent
+npm start                       # set up if needed, then run the app
+npm start -- --setup            # set up only
+./update                        # re-assemble at the ref in opentrader.config.json
+./update --ref main             # another tag, branch or commit
+./update --latest               # newest vX.Y.Z release tag
 ```
 
-The updater preserves `node_modules/`, `src-tauri/target/`, `src-tauri/ai-runtime/` and
-`src-tauri/standalone/`. On a `core.patch` conflict it names the pack, resets the checkout,
-and exits non-zero. Rebase that pack's patch (or its `files/` tree) and run again.
+`tradepanel.mjs` owns `opentrader/`: it resets it to the ref, overlays the packs in dependency
+order, regenerates `src/bindings.ts` and the i18n catalog, stages the AI runtime and installs the
+plugins. It preserves `node_modules/`, `src-tauri/target/`, `src-tauri/ai-runtime/` and
+`src-tauri/standalone/`. On a `core.patch` conflict it names the pack, restores the previously
+locked checkout and exits non-zero. Rebase that pack's patch (or its `files/` tree) and run again.
 
 ## Verify
 
 ```bash
-npm run ot:typecheck
-npm run ot:test
-npm run test:plugins
-npm run test:standalone
-npm run test:ai
+npm test                                        # the tradepanel script's own tests
+
+npm --prefix opentrader exec -- tsc --noEmit -p opentrader/tsconfig.json
+npm --prefix opentrader test
+node extensions/analyst/tests/analyst-rpc-smoke.mjs   # the analyst RPC smoke test
 (cd opentrader/src-tauri && cargo test --lib)
 python3 -m unittest discover -s plugins/crypto/tests
 python3 -m unittest discover -s plugins/nse/tests
 python3 -m unittest discover -s plugins/ccxt-broker/tests
 ```
 
-`npm run setup` runs the updater with `--check`. A fresh clone needs the same toolchain as
-upstream (Node.js 22+, Rust stable, Tauri system libraries); the first setup also stages the
-AI runtime (Node + Pi) into `opentrader/src-tauri/ai-runtime` and generates
+`npm start` sets up and runs; `./update` re-assembles the checkout. A fresh clone needs the same
+toolchain as upstream (Node.js 22+, Rust stable, Tauri system libraries); the first setup also
+stages the AI runtime (Node + Pi) into `opentrader/src-tauri/ai-runtime` and generates
 `opentrader/src/bindings.ts`.
 
 ## Conventions

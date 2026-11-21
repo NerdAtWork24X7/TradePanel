@@ -1,70 +1,12 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# Update TradePanel's generated OpenTrader checkout and reapply the extension packs.
+# The work is done by tradepanel.mjs (this is `tradepanel.mjs --update --setup`).
 #
-# TradePanel launcher for Linux, macOS and Git Bash. The work is done by scripts/tradepanel.mjs.
-#
-#   ./tradepanel                     start the app (installs missing frontend dependencies)
-#   ./tradepanel --no-install        never install; report what is missing instead
-#   ./tradepanel -- --no-watch       arguments after -- go to `tauri dev`
-#
-set -euo pipefail
-
-root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-
-# The .desktop file starts us with Terminal=false, so a failed launch is otherwise invisible. Keep a small
-# rolling log; terminal launches still print to the terminal as before.
-if [ ! -t 1 ] && [ ! -t 2 ]; then
-  launch_log="$root/tmp/tradepanel-launch.log"
-  mkdir -p "$root/tmp"
-  if [ -f "$launch_log" ] && [ "$(wc -c < "$launch_log")" -gt 1048576 ]; then
-    mv -f "$launch_log" "$launch_log.old"
-  fi
-  exec > >(tee -a "$launch_log") 2>&1
-fi
-
-# Version managers (nvm, fnm, volta) wire node up in the interactive rc files only, so a launcher started from
-# a desktop icon — with the session's sparse PATH — finds no node at all. Fall back to their newest install.
-node_dirs() {
-  local home="${HOME:-${USERPROFILE:-}}" dir
-  for dir in \
-    "${NVM_DIR:-$home/.nvm}/versions/node"/*/bin \
-    "${FNM_DIR:-$home/.local/share/fnm}/node-versions"/*/installation/bin \
-    "${VOLTA_HOME:-$home/.volta}/bin"; do
-    if [ -x "$dir/node" ]; then printf '%s\n' "$dir"; fi
-  done
-  return 0
-}
-
-# Directory names cannot be compared across managers (volta's bin has no version), and `sort -V` is not
-# available on macOS, so ask each candidate for its version and keep the highest one.
-newest_node_dir() {
-  local dir version major minor patch best="" best_major=-1 best_minor=-1 best_patch=-1
-  while IFS= read -r dir; do
-    version="$("$dir/node" --version 2>/dev/null)" || continue
-    if [[ $version =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-      major="${BASH_REMATCH[1]}"
-      minor="${BASH_REMATCH[2]}"
-      patch="${BASH_REMATCH[3]}"
-      if (( major > best_major ||
-            (major == best_major && minor > best_minor) ||
-            (major == best_major && minor == best_minor && patch > best_patch) )); then
-        best=$dir best_major=$major best_minor=$minor best_patch=$patch
-      fi
-    fi
-  done < <(node_dirs)
-  printf '%s\n' "$best"
-}
-
+# Everything is passed to tradepanel.mjs; run `./tradepanel.mjs --help` for all flags.
+set -eu
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 if ! command -v node >/dev/null 2>&1; then
-  node_bin="$(newest_node_dir)"
-  if [ -n "$node_bin" ]; then
-    PATH="$node_bin:$PATH"
-    export PATH
-  fi
-fi
-
-if ! command -v node >/dev/null 2>&1; then
-  echo "tradepanel: Node.js 22+ is required: https://nodejs.org" >&2
+  echo "update: Node.js 22 or newer is required (https://nodejs.org)." >&2
   exit 1
 fi
-
-exec node "$root/scripts/tradepanel.mjs" "$@"
+exec node "$here/tradepanel.mjs"

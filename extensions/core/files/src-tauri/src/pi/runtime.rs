@@ -1,6 +1,6 @@
 //! Locating and validating the staged Pi runtime for this host.
 //!
-//! A runtime directory is produced by `npm run ai:runtime`:
+//! A runtime directory is produced by `tradepanel.mjs` setup:
 //!
 //! ```text
 //! <root>/<target>/manifest.json
@@ -19,7 +19,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
-/// The host's runtime target id, as `scripts/build-ai-runtime.mjs` names it.
+/// The host's runtime target id, as `tradepanel.mjs` names it.
 pub fn target_id() -> Option<&'static str> {
     Some(match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => "linux-x64",
@@ -118,7 +118,7 @@ pub fn validate_at(root: &Path, expected: &str) -> Result<PiRuntime, String> {
 pub fn bundled(app: &AppHandle) -> Result<PiRuntime, String> {
     let target = target_id().ok_or_else(|| {
         format!(
-            "This platform ({}-{}) has no bundled AI runtime. Build one with `npm run ai:runtime -- --target <id>`.",
+            "This platform ({}-{}) has no bundled AI runtime.",
             std::env::consts::OS,
             std::env::consts::ARCH
         )
@@ -138,7 +138,7 @@ pub fn bundled(app: &AppHandle) -> Result<PiRuntime, String> {
 pub fn resolve(app: &AppHandle) -> Result<PiRuntime, String> {
     let target = target_id().ok_or_else(|| {
         format!(
-            "This platform ({}-{}) has no bundled AI runtime. Build one with `npm run ai:runtime -- --target <id>`.",
+            "This platform ({}-{}) has no bundled AI runtime.",
             std::env::consts::OS,
             std::env::consts::ARCH
         )
@@ -163,7 +163,7 @@ fn resolve_in(roots: Vec<PathBuf>, target: &str) -> Result<PiRuntime, String> {
         }
     }
     Err(format!(
-        "The AI runtime for {target} is not staged. Run `npm run ai:runtime` in opentrader/ and restart the app."
+        "The AI runtime for {target} is not staged. Run `./update` in the repository root and restart the app."
     ))
 }
 

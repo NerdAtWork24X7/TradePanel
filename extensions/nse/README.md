@@ -12,5 +12,4 @@ Keeps the NSE additions independent of the generated `opentrader/` checkout:
 
 The button rebuilds each plugin's symbol cache, then re-runs the current search, so newly
 listed stocks across all exchanges appear immediately. The pack depends on `core` and
-`venues` and is included in `opentrader.lock.json`; `npm run update:opentrader` reapplies
-it unchanged.
+`venues` and is included in `opentrader.lock.json`; `./update` reapplies it unchanged.

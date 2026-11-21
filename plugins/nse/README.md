@@ -15,10 +15,8 @@ no upstream edit, no account, no API key and no third-party Python package.
 
 ## Install
 
-Run `npm run ot:nse` with the app closed, then start TradePanel. The plugin is installed
-and enabled by default by `npm start` and is included in standalone builds. It can also be
-packaged with `python plugins/nse/build.py` and installed from **Settings > Plugins >
-Install from file**.
+The plugin is installed and enabled by `npm start`. It can also be packaged with
+`python plugins/nse/build.py` and installed from **Settings > Plugins > Install from file**.
 
 For development, run `python plugins/nse/plugin.py --connection-file PATH` while the plugin
 is enabled; the app writes that connection file while it is running.

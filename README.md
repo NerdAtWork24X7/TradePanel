@@ -48,8 +48,6 @@ adds:
 - Rust stable (`rustup`)
 - Tauri system dependencies for your OS:
   <https://v2.tauri.app/start/prerequisites/>
-- [uv](https://docs.astral.sh/uv/) — only for the standalone build, which brings the Python
-  the trading plugins run under
 
 Ubuntu/Debian:
 
@@ -66,51 +64,40 @@ On Ubuntu 20.04 use `libwebkit2gtk-4.0-dev`.
 The drawing core is a sibling checkout, already present in this workspace as
 `lightweight-charts-drawing/`.
 
-## Setup and update
+## Setup
 
 `opentrader/` is generated. Do not edit it; edit a pack in `extensions/` or a plugin in
-`plugins/`.
+`plugins/`. One command does everything — setup and run:
 
 ```bash
-npm run setup                 # clone the locked commit, apply the packs, install deps, typecheck and test
+npm start                  # set up if needed, then start the desktop app
+npm start -- --setup       # set up only: clone, apply the packs, install, do not start
+
+./update                   # move the pin and install: same as `tradepanel.mjs --update --setup`
+./update --ref main        # another tag, branch or commit
+./update --latest          # the newest vX.Y.Z release tag
 ```
 
-`setup` is reproducible: it checks out the commit in `opentrader.lock.json`. Use the update
-commands below to move that pin.
+`tradepanel.mjs` (the one implementation, run by `npm start`) clones the pinned commit in
+`opentrader.config.json`, overlays the packs in dependency order, installs the frontend
+dependencies, regenerates `src/bindings.ts` and the i18n catalog, stages the AI runtime and
+installs the plugins. Setup is reproducible from `opentrader.lock.json`, and it runs
+automatically only when needed — a missing checkout, or a change to a pack or the lock;
+`update` (or `tradepanel.mjs --update`) re-assembles on demand. A pack whose `core.patch` no
+longer applies is named in the error; the checkout is restored to the previously locked,
+working state instead of being left as bare upstream. Rebase that pack's patch before moving the
+pin. Build caches (`node_modules/`, `src-tauri/target/`, the staged AI runtime) are preserved.
 
-Update OpenTrader and reapply every pack. The default is the ref pinned in `opentrader.config.json`,
-currently v0.4.25: later tags change the plugin API and need a pack rebase before they can ship.
-
-```bash
-npm run update:opentrader                     # pinned ref (v0.4.25)
-npm run update:opentrader -- --latest         # newest vX.Y.Z tag, when the packs support it
-npm run update:opentrader -- --ref main       # upstream HEAD
-npm run update:opentrader -- --ref v0.4.26    # another pinned release
-npm run update:opentrader:check               # assemble, typecheck, vitest
-npm run update:opentrader:full                # ...plus cargo test --lib
-npm run update:opentrader:dry                 # resolve the ref and list packs only
-npm run update:opentrader -- --without analyst  # assemble without one pack
-npm run update:opentrader -- --only core,paper  # or only selected packs (dependencies explicit)
-```
-
-The same command without npm: `./update` (Linux, macOS, Git Bash) or `update.cmd` (Windows).
-Flags such as `--ref`, `--check`, `--without` and `--locked` pass straight through.
-
-The updater fetches tags, resets `opentrader/` to the resolved commit, overlays the packs in
-dependency order, regenerates `src/bindings.ts` and the i18n catalog, and writes
-`opentrader.lock.json`. A pack whose `core.patch` no longer applies is named in the error; the
-checkout is restored to the previously locked, working state instead of being left as bare upstream.
-Rebase that pack's patch before trying the newer ref again. Build caches (`node_modules/`,
-`src-tauri/target/`, the staged AI runtime) are preserved.
+To pick a different pinned release permanently, edit `opentrader.config.json` and run `./update`.
 
 ## Run
 
 ```bash
-npm start              # desktop app: checks the toolchain, installs missing deps and plugins, starts `tauri dev`
-npm run ot:crypto      # the Python crypto plugin alone (app closed)
-npm run ot:nse         # the Python NSE data plugin alone (app closed)
-npm run ot:brokers     # the Binance...Kraken broker plugins alone, enabled (app closed)
-npm run dev            # the same as npm start, without the checks
+npm start                          # set up if needed, then start the desktop app (`tauri dev`)
+node tradepanel.mjs --setup        # set up only, do not start
+node tradepanel.mjs --update       # re-assemble the checkout, then start
+node tradepanel.mjs -- --no-watch  # start without the file watcher
+node tradepanel.mjs --help
 ```
 
 `npm start` starts the **OpenTrader** window with hot reload. It needs Node.js 22+, Rust
@@ -118,13 +105,7 @@ stable and the Tauri system dependencies above; it installs `opentrader/node_mod
 (skip that with `--no-install`, or `TRADEPANEL_NO_INSTALL=1`). It installs both plugin sets
 too: the crypto and NSE plugins on, and the eight ccxt brokers **off** (no Python process until you
 enable one), so every venue is a card in **Exchanges → Brokers** and in **Trade → Connect
-broker**. Outside npm, run `./tradepanel` (Linux, macOS, Git Bash) or `tradepanel.cmd`
-(Windows); arguments go to the launcher, and everything after `--` goes to `tauri dev`.
-
-```bash
-./tradepanel -- --no-watch      # start without the file watcher
-./tradepanel --help
-```
+broker**. Everything after `--` goes to `tauri dev`.
 
 On a Linux machine that has only the WebKitGTK runtime libraries,
 `TRADEPANEL_ENV=<snippet>` sources a shell script that sets `PKG_CONFIG_PATH` and the linker
@@ -144,52 +125,24 @@ NSE symbols come from their own plugin as well.
 ## Build
 
 ```bash
-npm run build
+npm --prefix opentrader run tauri build
 ```
 
 Installers are written under `opentrader/src-tauri/target/release/bundle/`; the release
-binary is `opentrader/src-tauri/target/release/opentrader`. `npm run ot:frontend:build`
-builds only the Vite bundle.
-
-### Standalone build
-
-```bash
-npm run standalone
-```
-
-One folder that holds the app **and everything it runs**, so it starts on a computer with
-nothing installed — no Node, no Rust, no Python:
-
-```
-dist-standalone/TradePanel-<version>-<os>-<arch>/
-  TradePanel                          the launcher (TradePanel.cmd on Windows)
-  bin/opentrader                      the app; the frontend is inside the binary
-  lib/OpenTrader/ai-runtime           the Node and Pi the AI analyst runs
-  lib/OpenTrader/plugins              the plugin packages, the Python they run under
-                                      and their dependencies (ccxt, the Hyperliquid SDK...)
-```
-
-The first start copies the plugins and the Python runtime into the app's data folder
-(`opentrader/src-tauri/src/plugins/bundled.rs`), so the folder itself stays read-only and can
-be copied to any computer of the same platform. The crypto and NSE plugins start; the eight broker
-plugins are listed in **Exchanges → Brokers** and start when they are switched on.
-
-Flags: `--no-ai`, `--no-plugins`, `--out DIR`, `--bundle`, `--skip-build`.
+binary is `opentrader/src-tauri/target/release/opentrader`.
 
 ## Test
 
 ```bash
-npm run ot:typecheck
-npm run ot:test
+npm test                                        # the tradepanel script's own tests
 
-cd opentrader/src-tauri && cargo test --lib
+npm --prefix opentrader exec -- tsc --noEmit -p opentrader/tsconfig.json
+npm --prefix opentrader test
+(cd opentrader/src-tauri && cargo test --lib)
 
 python -m unittest discover -s plugins/crypto/tests
 python -m unittest discover -s plugins/nse/tests
 python -m unittest discover -s plugins/ccxt-broker/tests
-
-npm run test:plugins      # the installer scripts' own tests
-npm run test:standalone   # the standalone layout's tests
 ```
 
 The Python plugin tests need their requirements:
@@ -201,8 +154,7 @@ python -m pip install -r plugins/ccxt-broker/requirements.txt
 
 The NSE plugin uses only the Python standard library.
 
-`opentrader/src/bindings.ts` is generated by the update command (and by the Rust build) and
-git-ignored.
+`opentrader/src/bindings.ts` is generated during setup and git-ignored.
 
 ## Layout
 
@@ -223,7 +175,9 @@ plugins/                     OpenTrader runtime plugins (Plugin API 2)
   crypto/                    crypto datafeed + Hyperliquid broker
   ccxt-broker/               one ccxt broker plugin per exchange
 lightweight-charts-drawing/  chart drawing core (sibling dependency)
-scripts/                     update, launch, build, install and test tooling
+tradepanel.mjs               the single entrypoint: sets the workspace up and runs the app
+update, update.cmd           updates the checkout and reapplies the packs (tradepanel.mjs --update --setup)
+tradepanel.test.mjs          its tests
 ```
 
 Each pack has an `extension.json`, an optional `files/` overlay and an optional `core.patch`.

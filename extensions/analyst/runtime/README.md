@@ -6,21 +6,16 @@ as a supervised, read-only process. This folder is its source:
 | File | What it is |
 |---|---|
 | `package.json` / `package-lock.json` | Pinned `@earendil-works/pi-coding-agent` 1.5.0 and `typebox` (the tools' schemas). |
-| npm from the pinned Node distribution | Staged as `npm/` by `scripts/build-ai-runtime.mjs` so the app can install updates without a system npm. |
+| npm from the pinned Node distribution | Staged as `npm/` by `tradepanel.mjs` so the app can install updates without a system npm. |
 | `extensions/tradepanel-analysis.mjs` | The entire tool surface: `panel_market_context`, `panel_indicators`, `panel_portfolio`, `panel_order_ticket`, `panel_submit_trade_plan`. It reads one context snapshot file the host writes; it cannot write, run commands or open the network. |
 | `prompts/analysis.md` | The analysis system prompt: the 5-minute long/short trade card and the read-only rules. |
 
 ## Stage it
 
-```bash
-npm run ai:runtime       # pinned Node 22 + Pi, for the host target
-npm run ai:runtime:dev   # the Node running the script (development)
-```
-
-The script writes `src-tauri/ai-runtime/<target>/` (git-ignored): the Node
-executable, the installed Pi tree, the extension, the prompt and a
-`manifest.json` the Rust host validates. Release builds bundle that folder as a
-Tauri resource.
+`npm start` (or `./update`) stages it for the host target while setting the workspace up. It
+writes `src-tauri/ai-runtime/<target>/` (git-ignored): the Node executable, the installed Pi
+tree, the extension, the prompt and a `manifest.json` the Rust host validates. Release builds
+bundle that folder as a Tauri resource.
 
 Pi's own provider credentials are **not** used: OpenTrader collects an API key
 for the selected provider and stores it in the OS credential store. The child
@@ -62,7 +57,7 @@ endpoint is trimmed to its base on the next run.
 ## Check it
 
 ```bash
-npm run test:ai    # mock OpenAI-compatible provider + the staged runtime
+node extensions/analyst/tests/analyst-rpc-smoke.mjs   # mock OpenAI-compatible provider + the staged runtime
 ```
 
 The smoke test replays the host's exact launch and asserts the tools, the

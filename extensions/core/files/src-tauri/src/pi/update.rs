@@ -105,7 +105,7 @@ pub async fn run(app: &AppHandle, manager: &PiManager, on_event: Channel<String>
     let _ = on_event.send(message);
 
     let npm_cli = source.npm_cli.clone().ok_or_else(|| {
-        "This Pi runtime was built without npm support. Rebuild it with `npm run ai:runtime` and try again.".to_string()
+        "This Pi runtime was built without npm support. Rebuild it with `./update` and try again.".to_string()
     })?;
     let release = fetch_release(&latest).await?;
     let paths = PiPaths::for_app(app)?;

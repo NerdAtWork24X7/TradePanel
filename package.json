@@ -7,27 +7,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "setup": "node scripts/update-opentrader.mjs --check --locked",
-    "update:opentrader": "node scripts/update-opentrader.mjs",
-    "update:opentrader:check": "node scripts/update-opentrader.mjs --check",
-    "update:opentrader:full": "node scripts/update-opentrader.mjs --full",
-    "update:opentrader:dry": "node scripts/update-opentrader.mjs --dry-run",
-    "start": "node scripts/tradepanel.mjs",
-    "dev": "npm --prefix opentrader run tauri dev",
-    "build": "npm --prefix opentrader run tauri build",
-    "standalone": "node scripts/build-standalone.mjs",
-    "test:standalone": "node --test scripts/__tests__/standalone-build.test.mjs",
-    "tauri": "npm --prefix opentrader run tauri",
-    "ot:install": "npm --prefix opentrader ci",
-    "ot:test": "npm --prefix opentrader test",
-    "ot:typecheck": "npm --prefix opentrader exec -- tsc --noEmit -p opentrader/tsconfig.json",
-    "ot:crypto": "node scripts/install-crypto-plugin.mjs",
-    "ot:nse": "node scripts/install-nse-plugin.mjs",
-    "ot:brokers": "node scripts/install-broker-plugins.mjs",
-    "ot:frontend:build": "npm --prefix opentrader run build",
-    "ai:runtime": "node scripts/build-ai-runtime.mjs",
-    "test:ai": "node extensions/analyst/tests/analyst-rpc-smoke.mjs",
-    "test:plugins": "node --test scripts/__tests__/plugin-install.test.mjs scripts/__tests__/broker-install.test.mjs",
-    "test:updater": "node --test scripts/__tests__/updater-env.test.mjs"
+    "start": "node tradepanel.mjs",
+    "update": "node tradepanel.mjs --update --setup",
+    "test": "node --test tradepanel.test.mjs"
   }
 }

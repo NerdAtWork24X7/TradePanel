@@ -11,15 +11,10 @@ as a supervised, read-only process. This folder is its source:
 
 ## Stage it
 
-```bash
-npm run ai:runtime       # pinned Node 22 + Pi, for the host target
-npm run ai:runtime:dev   # the Node running the script (development)
-```
-
-The script writes `src-tauri/ai-runtime/<target>/` (git-ignored): the Node
-executable, the installed Pi tree, the extension, the prompt and a
-`manifest.json` the Rust host validates. Release builds bundle that folder as a
-Tauri resource.
+`npm start` (or `./update`) stages it for the host target while setting the workspace up. It
+writes `src-tauri/ai-runtime/<target>/` (git-ignored): the Node executable, the installed Pi
+tree, the extension, the prompt and a `manifest.json` the Rust host validates. Release builds
+bundle that folder as a Tauri resource.
 
 Pi's own provider credentials are **not** used: OpenTrader collects an API key
 for the selected provider and stores it in the OS credential store. The child

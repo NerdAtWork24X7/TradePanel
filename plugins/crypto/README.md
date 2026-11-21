@@ -15,17 +15,13 @@ TradePanel's crypto side, as an OpenTrader data + broker plugin (Plugin API 2):
 
 ## Install
 
-```bash
-# from the repository root
-node scripts/install-crypto-plugin.mjs          # copies the plugin, builds its .venv, enables it
-```
-
-Close OpenTrader first: it rewrites `plugins.json` on exit. Start the app; the plugin's
-exchanges and the Hyperliquid broker appear in the **Exchanges** tab under the chart (its
-settings too), and its exchanges in the symbol search. To install it by hand instead,
-package it (`python3 plugins/crypto/build.py`) and use **Settings > Plugins > Install from
-file**; the plugin then needs Python 3.10+ with the packages in `requirements.txt` (the app
-prefers a `.venv` inside the plugin's folder).
+`npm start` installs it with the rest of the workspace: it copies the plugin into the app's
+plugin folder, builds its `.venv` and enables it. Close OpenTrader first: it rewrites
+`plugins.json` on exit. Start the app; the plugin's exchanges and the Hyperliquid broker
+appear in the **Exchanges** tab under the chart (its settings too), and its exchanges in the
+symbol search. To install it by hand instead, package it (`python3 plugins/crypto/build.py`)
+and use **Settings > Plugins > Install from file**; the plugin then needs Python 3.10+ with
+the packages in `requirements.txt` (the app prefers a `.venv` inside the plugin's folder).
 
 ## Settings
 

@@ -454,5 +454,3 @@ export const paperBroker = createRoot(() => {
   };
   return api;
 });
-
-export type PaperBroker = typeof paperBroker;

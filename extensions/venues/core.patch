@@ -104,6 +104,37 @@ index 4516882..e78a335 100644
      // Security type wins over the market bucket so ETFs/ETNs/funds land in Funds
      // (they are listed under the "stocks" market) rather than the Stocks tab.
      category: (r.type && TYPE_CATEGORY[r.type]) || MARKET_CATEGORY[market] || "stocks",
+diff --git a/src/data/right-rail-layout.ts b/src/data/right-rail-layout.ts
+index 9120765..41511c8 100644
+--- a/src/data/right-rail-layout.ts
++++ b/src/data/right-rail-layout.ts
+@@ -14,7 +14,7 @@ export type RailGroup = "top" | "bottom";
+ const KEY = "ot:right-rail:layout";
+ 
+ /** Buttons that start in the bottom group. */
+-const BOTTOM_DEFAULT = new Set(["assistant-button", "pine-dialog-button"]);
++const BOTTOM_DEFAULT = new Set(["assistant-button", "pine-dialog-button", "exchanges-button"]);
+ 
+ /** Default layout of `ids` (toolbar order). */
+ export function defaultLayout(ids: string[]): RailLayout {
+diff --git a/src/data/right-rail-tabs.ts b/src/data/right-rail-tabs.ts
+index bc38553..f679985 100644
+--- a/src/data/right-rail-tabs.ts
++++ b/src/data/right-rail-tabs.ts
+@@ -60,6 +60,13 @@ export const TOP_TABS: Tab[] = [
+     "id": "pine-dialog-button",
+     "label": "OakScript Editor",
+     "iconName": "rr-pine-dialog-button"
++  },
++  {
++    // Exchanges page of the bottom panel (venues pack): shows or hides it,
++    // like the script editor's drawer (App.tsx intercepts this id too).
++    "id": "exchanges-button",
++    "label": "Exchanges",
++    "iconName": "rr-exchanges"
+   }
+ ];
+ 
 diff --git a/src/data/symbol-search.ts b/src/data/symbol-search.ts
 index b3dc400..29943c0 100644
 --- a/src/data/symbol-search.ts
@@ -152,27 +183,32 @@ index b3dc400..29943c0 100644
   * Filter the catalogue by an active tab + query string.  Highlight ranges
   * are returned alongside so the renderer can wrap `<em>` around matched
 diff --git a/src/data/trading/trading-ui.ts b/src/data/trading/trading-ui.ts
-index 9b4e15a..83c998a 100644
+index 9b4e15a..fe96b41 100644
 --- a/src/data/trading/trading-ui.ts
 +++ b/src/data/trading/trading-ui.ts
-@@ -170,7 +170,9 @@ export const tradingUi = createRoot(() => {
+@@ -170,7 +170,11 @@ export const tradingUi = createRoot(() => {
    const [settingsOpen, setSettingsOpen] = createSignal(false);
    /** Bumped to bring the Replay Trading tab forward (open, selected). */
    const [reportRequest, setReportRequest] = createSignal(0);
 -  /** Bumped to bring the broker's account manager tab forward (Trade menu). */
 +  /** Bumped to bring the Exchanges tab forward (Settings > Plugins, to configure a venue plugin). */
 +  const [exchangesRequest, setExchangesRequest] = createSignal(0);
++  /** Bumped to show or hide the Exchanges tab (its right-rail button). */
++  const [exchangesToggle, setExchangesToggle] = createSignal(0);
 +  /** Bumped to bring the Exchanges tab forward on the broker's account manager (Trade menu). */
    const [accountRequest, setAccountRequest] = createSignal(0);
    /** The broker picker ("Connect broker…"). */
    const [brokerPicker, setBrokerPicker] = createSignal(false);
-@@ -395,6 +397,9 @@ export const tradingUi = createRoot(() => {
+@@ -395,6 +399,12 @@ export const tradingUi = createRoot(() => {
      },
      reportView,
      setReportView,
 +    exchangesRequest,
 +    /** Open the Exchanges tab under the chart. */
 +    showExchanges: () => setExchangesRequest((n) => n + 1),
++    exchangesToggle,
++    /** Show the Exchanges tab under the chart, or hide it while it shows (its right-rail button). */
++    toggleExchanges: () => setExchangesToggle((n) => n + 1),
      accountRequest,
      showAccountManager: () => setAccountRequest((n) => n + 1),
      brokerPicker,
@@ -219,10 +255,36 @@ index 71248ad..5e48262 100644
 +  margin-inline-start: auto;
 +}
 diff --git a/src/styles/strategy-tester.css b/src/styles/strategy-tester.css
-index 4837f04..c687202 100644
+index 4837f04..a7f1586 100644
 --- a/src/styles/strategy-tester.css
 +++ b/src/styles/strategy-tester.css
-@@ -160,6 +160,13 @@
+@@ -26,6 +26,12 @@
+ .st-panel.is-maximized {
+   flex: 1 1 auto;
+ }
++/* Nothing to draw: nothing to list (no tab for the strategies / Replay Trading / journal
++   around and the Exchanges page hidden through the right rail), or closed with the bar's
++   × button. The bar is not drawn at all, so the chart keeps the room. */
++.st-panel.is-hidden {
++  display: none;
++}
+ 
+ /* Resize handle: 7 px over the top gutter, ns-resize. */
+ .st-resize-handle {
+@@ -37,10 +43,10 @@
+   z-index: 2;
+ }
+ 
+-/* ─── Footer bar (38 px): tabs | 78 px buttons ─── */
++/* ─── Footer bar (38 px): tabs | 116 px buttons ─── */
+ .st-footer {
+   display: grid;
+-  grid-template-columns: calc(100% - 78px) 78px;
++  grid-template-columns: calc(100% - 116px) 116px;
+   height: 38px;
+   flex-shrink: 0;
+   background: var(--color-bg-primary-hover);
+@@ -160,6 +166,13 @@
  .st-footer-btn:hover {
    color: var(--ot-text-max);
  }
@@ -504,11 +566,76 @@ index 9caf18f..bcc56bc 100644
        const base = filterSymbols(cat, q);
        return q.length < 1 && cat === "all" ? [...historyRows(), ...base] : [...local, ...base];
      }
+diff --git a/src/window/shell/app-dialogs.ts b/src/window/shell/app-dialogs.ts
+index 748da75..a560c25 100644
+--- a/src/window/shell/app-dialogs.ts
++++ b/src/window/shell/app-dialogs.ts
+@@ -2,9 +2,10 @@
+  * Which dialogs, menus and panels of the window are open: the header
+  * dropdown, the symbol search (plain, seeded by a typed key, compare mode),
+  * the Change interval / Indicators / Chart settings / App settings / alert
+- * dialogs, the indicator template name dialog, the right rail's page and the
+- * OakScript drawer. Module-level signals (one App per window), so the shell,
+- * its keyboard shortcuts and its window-event handlers open them the same way.
++ * dialogs, the indicator template name dialog, the right rail's page, the
++ * OakScript drawer and the Exchanges tab under the chart. Module-level signals
++ * (one App per window), so the shell, its keyboard shortcuts and its
++ * window-event handlers open them the same way.
+  */
+ import type { ChildStudyParent } from "../../data/app-events";
+ import { createSignal } from "solid-js";
+@@ -13,6 +14,7 @@ import type { OpenAlertDialogDetail } from "../../data/app-events";
+ import { assistantPanel } from "../../data/assistant/panel";
+ import { screenerPanel } from "../../data/screener-store";
+ import { tradeJournal } from "../../data/trade-journal";
++import { tradingUi } from "../../data/trading/trading-ui";
+ import type { AppSettingsTabId } from "../header/AppSettingsDialog";
+ import type { TabPanels } from "./tabs";
+ 
+@@ -122,12 +124,18 @@ export const setOakPanelOpen = (open: boolean): void => {
+   kv.setItem("ot:oakscript:panelOpen", open ? "1" : "0");
+ };
+ /** A right-rail button: a page of the rail, or a toggle of the OakScript
+- *  drawer / the screener split view / the trade journal tab / the AI assistant. */
++ *  drawer / the screener split view / the trade journal tab / the AI assistant /
++ *  the Exchanges tab under the chart. */
+ export const onRailTabSelect = (id: string | null): void => {
+   if (id === "pine-dialog-button") {
+     setOakPanelOpen(!oakPanelOpen());
+     return;
+   }
++  // Exchanges: shows the bottom panel's Exchanges tab, or hides it while it shows.
++  if (id === "exchanges-button") {
++    tradingUi.toggleExchanges();
++    return;
++  }
+   if (id === "trade-journal-button") {
+     tradeJournal.setOpen(!tradeJournal.open());
+     return;
 diff --git a/src/window/strategy-tester/StrategyTesterPanel.tsx b/src/window/strategy-tester/StrategyTesterPanel.tsx
-index 6a66c62..a184b72 100644
+index 6a66c62..0169a93 100644
 --- a/src/window/strategy-tester/StrategyTesterPanel.tsx
 +++ b/src/window/strategy-tester/StrategyTesterPanel.tsx
-@@ -29,8 +29,7 @@ import { ImportTradesHost } from "../trade-journal/ImportTradesDialog";
+@@ -3,11 +3,13 @@
+  * (.tmp/backtester/design/doc/STRATEGY-TESTER-DESIGN-3.4.1.md).
+  *
+  * Shown under the chart while the active chart holds a strategy, Bar Replay
+- * is on, the trade journal is open or a broker plugin is connected (its account
+- * manager, #315): a 38 px
+- * footer bar with one tab per strategy (icon + short title + caret menu) and
+- * Collapse / Maximize buttons, then the report (toolbar + Metrics or Trades
+- * view). Clicking the active tab closes (collapses) the report.
++ * is on, the trade journal is open or the Exchanges page is up (venues pack: its
++ * right-rail button shows or hides it): a 38 px footer bar with one tab per
++ * strategy (icon + short title + caret menu) and Collapse / Maximize / Close
++ * buttons, then the report (toolbar + Metrics or Trades view). Clicking the
++ * active tab closes (collapses) the report; the broker's account manager is a
++ * page of the Exchanges tab (#315). The panel is not drawn at all while it has
++ * nothing to list or the user closed it with the Close button.
+  *
+  * The report is the one computed for the active chart (strategy-tester-store,
+  * written by the strategy registry entries when the backtest worker answers).
+@@ -29,8 +31,7 @@ import { ImportTradesHost } from "../trade-journal/ImportTradesDialog";
  import { tradeJournal } from "../../data/trade-journal";
  import { replayStarted } from "../../data/replay";
  import { tradingUi } from "../../data/trading/trading-ui";
@@ -518,7 +645,7 @@ index 6a66c62..a184b72 100644
  import { replayBroker } from "../../data/trading/replay-broker";
  import { cachedSymbolSessions, symbolSessions } from "../../data/session";
  import { DEFAULT_SYMBOL, type BacktestReport } from "../../backtester/types";
-@@ -41,10 +40,10 @@ import { buildXlsx } from "./xlsx-writer";
+@@ -41,10 +42,10 @@ import { buildXlsx } from "./xlsx-writer";
  const REPLAY_TAB = "replay-trading";
  /** Tab id of the trade journal tab. */
  const JOURNAL_TAB = "trade-journal";
@@ -532,7 +659,7 @@ index 6a66c62..a184b72 100644
  
  /** Report content height when the panel opens (MEASURED: 275 px under the 38 px bar). */
  const DEFAULT_HEIGHT = 275;
-@@ -83,34 +82,42 @@ type Props = {
+@@ -83,35 +84,70 @@ type Props = {
  
  export function StrategyTesterPanel(props: Props) {
    let rootRef: HTMLElement | undefined;
@@ -542,8 +669,20 @@ index 6a66c62..a184b72 100644
    const [menuFor, setMenuFor] = createSignal<{ id: string; anchor: HTMLElement } | null>(null);
 +  /** The Exchanges tab's page: its list, or the connected broker's account (Trade > Account manager). */
 +  const [exchangesView, setExchangesView] = createSignal<"list" | "account">("list");
-+  /** A tab is selected: the panel has something to show (a collapsed footer alone otherwise). */
-+  const shown = () => selected() !== null;
++  /** The Exchanges page shows. Its tab is listed only while it does, so hiding it
++   *  (the right-rail button) leaves no Exchanges behind in the footer bar. */
++  const exchangesShown = () => selected() === EXCHANGES_TAB && !strategyTester.collapsed();
++  /** A tab with a page to draw is selected: a collapsed Exchanges page lists no tab, so it counts as none. */
++  const shown = () => selected() !== null && (selected() !== EXCHANGES_TAB || exchangesShown());
++  /** The panel holds something: a selected page, or the tabs of the strategies / Replay Trading / journal
++   *  waiting in the bar. A panel with nothing in it is not drawn at all. */
++  const hasContent = () => shown() || props.strategyIds.length > 0 || !!props.replayTab || tradeJournal.open();
++  /** Closed with the bar's × button: the panel is not drawn until a page is asked for (the Exchanges
++   *  button of the right rail, Trade > Account manager, Settings > Plugins) or the journal / Replay
++   *  Trading opens, so the chart keeps the room. */
++  const [closed, setClosed] = createSignal(false);
++  /** The bar is not drawn. */
++  const barHidden = () => closed() || !hasContent();
  
    // Keep a valid selection: the last strategy added when the current one left
    // (the Replay Trading tab while it exists and no strategy is left).
@@ -570,6 +709,7 @@ index 6a66c62..a184b72 100644
 +        setExchangesView("account");
 +        setSelected(EXCHANGES_TAB);
 +        strategyTester.setCollapsed(false);
++        setClosed(false);
 +      },
 +      { defer: true },
 +    ),
@@ -584,9 +724,40 @@ index 6a66c62..a184b72 100644
 +        setExchangesView("list");
 +        setSelected(EXCHANGES_TAB);
          strategyTester.setCollapsed(false);
++        setClosed(false);
++      },
++      { defer: true },
++    ),
++  );
++  // The Exchanges button of the right rail (venues pack): one button that shows
++  // the tab, or hides (collapses) the panel while it already shows it — the
++  // script editor's drawer behaves the same way.
++  createEffect(
++    on(
++      tradingUi.exchangesToggle,
++      () => {
++        setClosed(false);
++        onTabClick(EXCHANGES_TAB);
        },
        { defer: true },
-@@ -212,8 +219,8 @@ export function StrategyTesterPanel(props: Props) {
+     ),
+@@ -122,6 +158,7 @@ export function StrategyTesterPanel(props: Props) {
+       if (shown && !was) {
+         setSelected(JOURNAL_TAB);
+         strategyTester.setCollapsed(false);
++        setClosed(false);
+       }
+     }),
+   );
+@@ -130,6 +167,7 @@ export function StrategyTesterPanel(props: Props) {
+   const showReplayTab = () => {
+     setSelected(REPLAY_TAB);
+     strategyTester.setCollapsed(false);
++    setClosed(false);
+   };
+   createEffect(
+     on(
+@@ -212,12 +250,13 @@ export function StrategyTesterPanel(props: Props) {
    }
  
    const style = () => {
@@ -597,7 +768,12 @@ index 6a66c62..a184b72 100644
      return { height: `${FOOTER + contentHeight()}px` };
    };
  
-@@ -228,305 +235,304 @@ export function StrategyTesterPanel(props: Props) {
+   const onTabClick = (id: string) => {
++    setClosed(false);
+     if (id === selected() && !strategyTester.collapsed()) {
+       strategyTester.setCollapsed(true);
+       strategyTester.setMaximized(false);
+@@ -228,305 +267,325 @@ export function StrategyTesterPanel(props: Props) {
    };
  
    return (
@@ -616,7 +792,11 @@ index 6a66c62..a184b72 100644
 +    <section
 +      ref={rootRef}
 +      class="st-panel"
-+      classList={{ "is-collapsed": strategyTester.collapsed() || !shown(), "is-maximized": strategyTester.maximized() }}
++      classList={{
++        "is-collapsed": strategyTester.collapsed() || !shown(),
++        "is-maximized": strategyTester.maximized(),
++        "is-hidden": barHidden(),
++      }}
 +      style={style()}
 +      data-name="strategy-tester"
 +      aria-label="Bottom panel"
@@ -768,27 +948,47 @@ index 6a66c62..a184b72 100644
 -                  strategyTester.setMaximized(m);
 -                  if (m) strategyTester.setCollapsed(false);
 -                }}
--              >
--                <Icon name={strategyTester.maximized() ? "st-footer-maximized-maximize" : "st-footer-normal-maximize"} size={28} />
 +      {/* Footer bar: strategy tabs | Collapse / Maximize */}
 +      <div class="st-footer" id="footer-chart-panel">
 +        <div class="st-tabbar">
 +          <div class="st-tabs" role="tablist">
-+            <div
-+              class="st-tab"
-+              classList={{ "is-active": selected() === EXCHANGES_TAB && !strategyTester.collapsed() }}
-+              role="tab"
-+              aria-selected={selected() === EXCHANGES_TAB}
-+              data-name="exchanges-tab"
-+            >
-+              <button type="button" class="st-tab-btn" onClick={() => onTabClick(EXCHANGES_TAB)}>
-+                <span class="st-tab-icon">
-+                  <Icon name="exchange-venues" size={24} />
-+                </span>
-+                <span class="st-tab-title">Exchanges</span>
-               </button>
++            <Show when={exchangesShown()}>
++              <div
++                class="st-tab"
++                classList={{ "is-active": true }}
++                role="tab"
++                aria-selected={true}
++                data-name="exchanges-tab"
+               >
+-                <Icon name={strategyTester.maximized() ? "st-footer-maximized-maximize" : "st-footer-normal-maximize"} size={28} />
+-              </button>
 -            </Tooltip>
-+            </div>
+-          </div>
+-        </div>
+-
+-        <Show when={!strategyTester.collapsed()}>
+-          <div class="st-report">
+-            <Show when={selected() === REPLAY_TAB}>
+-              <ReplayTradingReport
+-                intraday={props.intraday}
+-                intervalSec={props.intervalSec}
+-                interval={props.interval}
+-                symbol={props.symbol}
+-                height={strategyTester.maximized() ? Infinity : contentHeight()}
+-                onShowOnChart={props.onShowOnChart}
+-              />
++                <Tooltip text="Hide Exchanges" side="top">
++                  <button type="button" class="st-tab-btn" onClick={() => onTabClick(EXCHANGES_TAB)}>
++                    <span class="st-tab-icon">
++                      <Icon name="exchange-venues" size={24} />
++                    </span>
++                    <span class="st-tab-title">Exchanges</span>
++                  </button>
++                </Tooltip>
++              </div>
+             </Show>
+-            <Show when={selected() === JOURNAL_TAB && tradeJournal.open()}>
+-              <TradeJournalView timeZone={props.timeZone.iana} />
 +            <Show when={props.replayTab}>
 +              {(() => {
 +                const active = () => selected() === REPLAY_TAB && !strategyTester.collapsed();
@@ -821,7 +1021,9 @@ index 6a66c62..a184b72 100644
 +                  </div>
 +                );
 +              })()}
-+            </Show>
+             </Show>
+-            <Show when={selected() === ACCOUNT_TAB && accountShown()}>
+-              <AccountManager onSymbol={props.onSymbol} height={strategyTester.maximized() ? Infinity : contentHeight()} />
 +            <Show when={tradeJournal.open()}>
 +              {(() => {
 +                const active = () => selected() === JOURNAL_TAB && !strategyTester.collapsed();
@@ -851,7 +1053,10 @@ index 6a66c62..a184b72 100644
 +                  </div>
 +                );
 +              })()}
-+            </Show>
+             </Show>
+-            <Show when={!OWN_TABS.includes(selected() ?? "") && selected()}>
+-              {(id) => (
+-                <>
 +            <For each={props.strategyIds}>
 +              {(id) => {
 +                const active = () => id === selected() && !strategyTester.collapsed();
@@ -882,8 +1087,8 @@ index 6a66c62..a184b72 100644
 +                );
 +              }}
 +            </For>
-           </div>
-         </div>
++          </div>
++        </div>
 +        <div class="st-footer-buttons">
 +          <Tooltip text={strategyTester.collapsed() ? "Open panel" : "Collapse panel"} side="top">
 +            <button
@@ -914,30 +1119,22 @@ index 6a66c62..a184b72 100644
 +              <Icon name={strategyTester.maximized() ? "st-footer-maximized-maximize" : "st-footer-normal-maximize"} size={28} />
 +            </button>
 +          </Tooltip>
++          <Tooltip text="Close panel" side="top">
++            <button
++              type="button"
++              class="st-footer-btn"
++              aria-label="Close panel"
++              onClick={() => {
++                setClosed(true);
++                strategyTester.setMaximized(false);
++              }}
++            >
++              <Icon name="scr-panel-close" size={28} />
++            </button>
++          </Tooltip>
 +        </div>
 +      </div>
- 
--        <Show when={!strategyTester.collapsed()}>
--          <div class="st-report">
--            <Show when={selected() === REPLAY_TAB}>
--              <ReplayTradingReport
--                intraday={props.intraday}
--                intervalSec={props.intervalSec}
--                interval={props.interval}
--                symbol={props.symbol}
--                height={strategyTester.maximized() ? Infinity : contentHeight()}
--                onShowOnChart={props.onShowOnChart}
--              />
--            </Show>
--            <Show when={selected() === JOURNAL_TAB && tradeJournal.open()}>
--              <TradeJournalView timeZone={props.timeZone.iana} />
--            </Show>
--            <Show when={selected() === ACCOUNT_TAB && accountShown()}>
--              <AccountManager onSymbol={props.onSymbol} height={strategyTester.maximized() ? Infinity : contentHeight()} />
--            </Show>
--            <Show when={!OWN_TABS.includes(selected() ?? "") && selected()}>
--              {(id) => (
--                <>
++
 +      <Show when={shown() && !strategyTester.collapsed()}>
 +        <div class="st-report">
 +          <Show when={selected() === REPLAY_TAB}>

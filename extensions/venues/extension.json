@@ -1,8 +1,8 @@
 {
   "id": "venues",
   "name": "Crypto venues and Exchanges tab",
-  "version": "1.0.0",
-  "description": "Venue logos, symbol search prefixes, the Exchanges tab and plugin settings surface.",
+  "version": "1.1.0",
+  "description": "Venue logos, symbol search prefixes, the Exchanges tab (its right-rail button shows or hides it, the bar's Close button closes the bottom panel) and plugin settings surface.",
   "order": 40,
   "dependsOn": [
     "core",

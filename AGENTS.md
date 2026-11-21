@@ -30,7 +30,8 @@ pack's `core.patch`.
   credential store, Pi supervisor, capture-window plumbing. Rust additions live here.
 - `chart` — Bar Replay slicing, legend/live/navigation, pane geometry, stop-limit lines.
 - `paper` — built-in simulated broker and account view.
-- `venues` — venue logos, symbol-search prefixes, Exchanges tab, plugin settings surface.
+- `venues` — venue logos, symbol-search prefixes, the Exchanges tab (its right-rail button shows
+  or hides it; the bar's Close button closes the bottom panel), plugin settings surface.
 - `nse` — NSE exchange mark in symbol search, refresh button and the narrow Tauri command that
   rebuilds the runtime plugin's symbol cache. Depends on `core` and `venues`.
 - `plan` — entry/stop/target risk, reward and balance projections in the ticket.

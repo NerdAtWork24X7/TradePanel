@@ -11,10 +11,11 @@
 // Runs on Node: the rest of the toolchain (Rust, the Tauri system libraries) is checked, never installed.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureOpenSslDev, hasOpenSslDev } from "./lib/openssl-dev.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const APP = join(ROOT, "opentrader");
@@ -51,13 +52,108 @@ Flags:
   --no-install              do not run "npm ci" when opentrader/node_modules is missing or stale
   -- <args>                 pass the rest to "tauri dev", e.g. -- --no-watch
 
+Launching again from the desktop icon stops the running instance first. Without a terminal, output is
+appended to tmp/tradepanel-launch.log.
+
 Environment:
   TRADEPANEL_NO_INSTALL=1   same as --no-install
   TRADEPANEL_ENV=<file>     shell snippet sourced before the build (PKG_CONFIG_PATH and linker paths);
                             defaults to tmp/linux-env.sh when the WebKitGTK headers are missing
+  OPENSSL_DIR=<dir>         OpenSSL headers and libs; Debian/Ubuntu stage libssl-dev into the user's data
+                            directory automatically when the system headers are absent
 
 Requirements: Node.js ${RECOMMENDED_NODE}+, Rust stable, and the Tauri system dependencies
 (https://v2.tauri.app/start/prerequisites/). The crypto plugin is optional: npm run ot:crypto.`);
+}
+
+// ── Single instance ──────────────────────────────────────────────────────────
+// The desktop icon is often clicked twice: the first launch takes a while to build, and Terminal=false hides
+// the error. Killing by port used to take down the app's WebKit network process (it is a *client* of the Vite
+// port too), which is what made the window appear to crash and restart. A pid file gives us the real owner.
+const PID_FILE = join(ROOT, "tmp", "tradepanel.pid");
+
+function readPidFile() {
+  try {
+    const pid = Number.parseInt(readFileSync(PID_FILE, "utf8").trim(), 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+function commandOf(pid) {
+  if (WIN) {
+    const result = spawnSync(
+      "powershell",
+      ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
+      { encoding: "utf8" },
+    );
+    return result.status === 0 ? result.stdout.trim() : "";
+  }
+  const result = spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function cwdOf(pid) {
+  if (WIN) return "";
+  if (process.platform === "linux") {
+    try {
+      return realpathSync(`/proc/${pid}/cwd`);
+    } catch {
+      return "";
+    }
+  }
+  const result = spawnSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], { encoding: "utf8" });
+  return result.stdout.match(/^n(.+)$/m)?.[1] ?? "";
+}
+
+function isOurLauncher(pid) {
+  const command = commandOf(pid);
+  // `npm start` uses a relative script path, so check the working directory as well.
+  const ours = command.includes("scripts/tradepanel.mjs") || command.includes("scripts\\tradepanel.mjs");
+  return ours && (command.includes(ROOT) || cwdOf(pid) === ROOT);
+}
+
+function sleep(ms) {
+  return new Promise((done) => setTimeout(done, ms));
+}
+
+async function waitUntil(condition, timeout) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (await condition()) return true;
+    await sleep(200);
+  }
+  return false;
+}
+
+function portInUse() {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port: PORT });
+    const done = (value) => {
+      socket.destroy();
+      resolve(value);
+    };
+    socket.setTimeout(400, () => done(false));
+    socket.once("connect", () => done(true));
+    socket.once("error", () => done(false));
+  });
+}
+
+function portOwners() {
+  const lsof = spawnSync("lsof", ["-nP", "-t", `-iTCP:${PORT}`, "-sTCP:LISTEN"], { encoding: "utf8" });
+  if (lsof.status === 0) return [...new Set(lsof.stdout.split(/\s+/).filter(Boolean))];
+  const ss = spawnSync("ss", ["-H", "-ltnp", `( sport = :${PORT} )`], { encoding: "utf8" });
+  return [...new Set([...ss.stdout.matchAll(/pid=(\d+)/g)].map((match) => match[1]))];
 }
 
 const passthrough = [];
@@ -160,6 +256,21 @@ if (webkitHeaders()) {
   warn("the Xcode command line tools are missing; run: xcode-select --install");
 }
 
+// Native TLS needs the OpenSSL headers at build time. Without this check cargo fails much later, inside
+// openssl-sys, with a pkg-config error that gives no hint about the launcher.
+const opensslEnv = ensureOpenSslDev({ say, fail });
+if (opensslEnv) Object.assign(process.env, opensslEnv);
+else if (!hasOpenSslDev()) {
+  fail(
+    "the OpenSSL development headers were not found, and the Rust build cannot link native TLS without them.",
+    [
+      "Debian/Ubuntu: sudo apt install libssl-dev",
+      "macOS: brew install openssl@3",
+      "Other systems: install the OpenSSL development package, or set OPENSSL_DIR to an OpenSSL installation.",
+    ].join("\ntradepanel: "),
+  );
+}
+
 // ── Frontend dependencies ────────────────────────────────────────────────────
 const modules = join(APP, "node_modules");
 const tauriCli = join(modules, "@tauri-apps", "cli", "tauri.js");
@@ -251,51 +362,105 @@ if (!noInstall) {
 
 // ── Port ─────────────────────────────────────────────────────────────────────
 const PORT = 1420; // vite.config.ts pins it with strictPort, so a busy port is a hard failure later on.
-const inUse = await new Promise((resolve) => {
-  const socket = createConnection({ host: "127.0.0.1", port: PORT });
-  const done = (value) => {
-    socket.destroy();
-    resolve(value);
-  };
-  socket.setTimeout(400, () => done(false));
-  socket.once("connect", () => done(true));
-  socket.once("error", () => done(false));
-});
-if (inUse) {
-  say(`port ${PORT} is in use; attempting to stop the previous TradePanel/dev server`);
-  if (WIN) {
-    const netstat = spawnSync("cmd", ["/c", `for /f "tokens=5" %a in ('netstat -ano ^| findstr :${PORT}') do taskkill /PID %a /F`], { stdio: "ignore", shell: true });
-    void netstat;
+const previous = readPidFile();
+let stoppedPrevious = false;
+if (previous && previous !== process.pid && processAlive(previous)) {
+  if (isOurLauncher(previous)) {
+    say(`stopping the previous TradePanel (pid ${previous})`);
+    if (WIN) {
+      spawnSync("taskkill", ["/PID", String(previous), "/T", "/F"], { stdio: "ignore", shell: true });
+    } else {
+      try {
+        process.kill(previous, "SIGTERM");
+      } catch (error) {
+        warn(`could not signal pid ${previous}: ${error.message}`);
+      }
+    }
+    if (!(await waitUntil(() => !processAlive(previous), 8000))) {
+      try {
+        process.kill(previous, "SIGKILL");
+      } catch {
+        // It exited between the checks; nothing left to do.
+      }
+      await waitUntil(() => !processAlive(previous), 2000);
+    }
+    if (processAlive(previous)) {
+      fail(
+        `the previous TradePanel (pid ${previous}) did not stop.`,
+        `Check that process manually, then run this again.`,
+      );
+    }
+    stoppedPrevious = true;
   } else {
-    spawnSync("sh", ["-c", `lsof -ti:${PORT} | xargs -r kill -9`], { stdio: "ignore" });
-    // Fallback when lsof is unavailable.
-    spawnSync("sh", ["-c", `fuser -k ${PORT}/tcp`], { stdio: "ignore" });
+    warn(`ignoring ${PID_FILE}: pid ${previous} is not this TradePanel launcher.`);
   }
-  // Re-check.
-  const stillInUse = await new Promise((resolve) => {
-    const socket = createConnection({ host: "127.0.0.1", port: PORT });
-    const done = (value) => { socket.destroy(); resolve(value); };
-    socket.setTimeout(400, () => done(false));
-    socket.once("connect", () => done(true));
-    socket.once("error", () => done(false));
-  });
-  if (stillInUse) {
-    fail(
-      `port ${PORT} is still in use, and the Vite dev server needs it.`,
-      "Stop the other TradePanel (or dev server) manually and run this again.",
-    );
-  }
+}
+
+// The launcher exits only after its child process group is gone, but give the socket a moment to close.
+if (stoppedPrevious && (await portInUse())) await waitUntil(async () => !(await portInUse()), 5000);
+
+if (await portInUse()) {
+  const owners = portOwners();
+  const owner = owners.length ? ` (pid ${owners.join(", ")})` : "";
+  fail(
+    `port ${PORT} is still in use${owner}, and the Vite dev server needs it.`,
+    "Stop that process manually and run this again. The launcher never kills unknown processes on this port.",
+  );
 }
 
 // ── Start ────────────────────────────────────────────────────────────────────
 say("starting TradePanel (tauri dev; the first Rust build takes several minutes)");
+// A separate process group lets SIGTERM take down tauri dev, Vite and the WebView together. `tauri dev` owns
+// grandchildren that would otherwise survive us and keep port 1420 busy on the next launch.
 const child = spawn(process.execPath, [tauriCli, "dev", ...passthrough], {
   cwd: APP,
   stdio: "inherit",
   env: process.env,
+  detached: !WIN,
 });
+
+function removePidFile() {
+  try {
+    // A newer launcher may already own the file when we exit; never delete its pid.
+    if (readPidFile() === process.pid) unlinkSync(PID_FILE);
+  } catch {
+    // The file is best-effort; a stale entry is recognized and ignored on the next launch.
+  }
+}
+try {
+  mkdirSync(dirname(PID_FILE), { recursive: true });
+  writeFileSync(PID_FILE, String(process.pid));
+} catch (error) {
+  warn(`could not write ${PID_FILE}: ${error.message}; a second launch cannot stop this one cleanly.`);
+}
+process.on("exit", removePidFile);
+
+let stopping = false;
+function stopChild(signal) {
+  if (stopping || !child.pid) return;
+  stopping = true;
+  if (WIN) {
+    spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", shell: true });
+  } else {
+    try {
+      process.kill(-child.pid, signal);
+    } catch {
+      try {
+        child.kill(signal);
+      } catch {
+        // It exited between the checks.
+      }
+    }
+  }
+  const force = setTimeout(() => process.exit(signal === "SIGINT" ? 130 : 143), 5000);
+  force.unref();
+}
+process.on("SIGTERM", () => stopChild("SIGTERM"));
+process.on("SIGINT", () => stopChild("SIGINT"));
+
 child.on("error", (error) => fail(`could not start the app: ${error.message}`));
 child.on("exit", (code, signal) => {
+  removePidFile();
   if (signal) {
     say(`the app was stopped by ${signal}`);
     process.exit(1);

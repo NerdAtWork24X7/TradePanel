@@ -2,7 +2,7 @@
   "upstream": "https://github.com/deepentropy/opentrader.git",
   "ref": "v0.4.25",
   "commit": "680735daf98f461cdbaf1c0bdba8254fbe23fd1c",
-  "updatedAt": "2026-11-21T13:16:08.614Z",
+  "updatedAt": "2026-11-21T13:39:26.216Z",
   "extensions": [
     {
       "id": "branding",

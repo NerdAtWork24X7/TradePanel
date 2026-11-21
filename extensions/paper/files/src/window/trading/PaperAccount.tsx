@@ -7,6 +7,7 @@
  */
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { showConfirm } from "../../components/Dialogs";
+import { Icon } from "../../components/Icon";
 import { emitAppEvent } from "../../data/app-events";
 import { cachedSymbolSessions } from "../../data/session";
 import { Tooltip } from "../../components/Tooltip";
@@ -18,6 +19,7 @@ import { AccountTable, tableCsv, type Column, type RowMenuItem } from "./Account
 import { DownloadTradingDataDialog } from "./DownloadTradingDataDialog";
 import { fmtMoney, fmtPct, fmtPnl, fmtPrice, fmtQty, fmtTime, pnlClass } from "./format";
 import { CloseIcon, PencilIcon } from "./icons";
+import { PaperAccountSettings } from "./PaperAccountSettings";
 import { confirmPaperReset } from "./ResetPaperAccount";
 
 type Page = "positions" | "orders" | "history" | "summary";
@@ -168,6 +170,7 @@ const FILL_COLUMNS: Column<PaperFill>[] = [
   { id: "price", num: true, title: () => translate("Fill price"), cell: (f) => <Num text={price(f.symbol, f.price)} />, value: (f) => f.price },
   { id: "time", title: () => translate("Time"), cell: (f) => <Num text={fmtTime(f.timeMs)} />, value: (f) => f.timeMs },
   { id: "rpl", num: true, title: () => translate("Realized PnL"), cell: (f) => <Num text={fmtPnl(f.realizedPnl)} cls={pnlClass(f.realizedPnl)} />, value: (f) => f.realizedPnl },
+  { id: "fee", num: true, title: () => translate("Commission"), cell: (f) => <Num text={fmtMoney(f.fee)} />, value: (f) => f.fee },
   { id: "order", num: true, hidden: true, title: () => translate("Order ID"), cell: (f) => <span data-no-translate>{f.orderId ?? ""}</span>, value: (f) => f.orderId ?? "" },
 ];
 
@@ -189,6 +192,7 @@ const summaryRows = (): SummaryRow[] => {
     { label: translate("Equity"), value: fmtMoney(a.equity), own: true },
     { label: translate("Unrealized PnL"), value: fmtPnl(a.unrealizedPnl), own: true },
     { label: translate("Realized PnL"), value: fmtPnl(a.realizedPnl), own: true },
+    { label: translate("Commission"), value: fmtMoney(a.commissions), own: true },
     { label: translate("Margin"), value: fmtMoney(a.marginUsed), own: true },
     { label: translate("Free margin"), value: fmtMoney(a.marginFree), own: true },
   ];
@@ -217,8 +221,8 @@ function ResetButton() {
   );
 }
 
-/** The account bar: the paper account (name, cash, PAPER) and the values it is made of. */
-function AccountBar() {
+/** The account bar: the paper account (its name, cash, PAPER), its settings gear, and the values it is made of. */
+function AccountBar(props: { onSettings: () => void }) {
   const a = () => paperBroker.account();
   const fields = (): { title: string; value: string; cls?: string; hint?: string }[] => [
     { title: translate("Unrealized PnL"), value: fmtPnl(a().unrealizedPnl), cls: pnlClass(a().unrealizedPnl) },
@@ -229,14 +233,27 @@ function AccountBar() {
   ];
   return (
     <div class="trd-am-header is-expanded" data-name="paper-account-bar">
-      <button type="button" class="trd-account-btn is-static">
-        <span class="trd-account-name">{translate("Paper trading")}</span>
-        <span class="trd-account-balance ot-value">{fmtMoney(a().balance)}</span>
-        <span class="trd-account-ccy" data-no-translate>
-          {a().currency}
-        </span>
-        <span class="trd-account-kind">PAPER</span>
-      </button>
+      <div class="trd-account-group">
+        <button type="button" class="trd-account-btn is-static">
+          <span class="trd-account-name">{a().name || translate("Paper trading")}</span>
+          <span class="trd-account-balance ot-value">{fmtMoney(a().balance)}</span>
+          <span class="trd-account-ccy" data-no-translate>
+            {a().currency}
+          </span>
+          <span class="trd-account-kind">PAPER</span>
+        </button>
+        <Tooltip text="Account settings" side="top">
+          <button
+            type="button"
+            class="trd-row-btn trd-account-gear"
+            aria-label={translate("Account settings")}
+            data-name="paper-account-settings"
+            onClick={() => props.onSettings()}
+          >
+            <Icon name="header-settings" size={18} />
+          </button>
+        </Tooltip>
+      </div>
       <div class="trd-am-summary">
         <div class="trd-am-fields">
           <For each={fields()}>
@@ -270,6 +287,7 @@ export function PaperAccount(props: { onSymbol: (symbol: string) => void; height
   const [page, setPage] = createSignal<Page>("positions");
   const [filter, setFilter] = createSignal<Filter>("all");
   const [exporting, setExporting] = createSignal(false);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
   const show = (symbol: string) => props.onSymbol(symbol);
   const counts = createMemo(() => ({
     positions: paperBroker.positions().length,
@@ -295,7 +313,10 @@ export function PaperAccount(props: { onSymbol: (symbol: string) => void; height
       style={props.fill ? undefined : { height: Number.isFinite(props.height) ? `${props.height}px` : "100%" }}
       data-name="paper-account"
     >
-      <AccountBar />
+      <AccountBar onSettings={() => setSettingsOpen(true)} />
+      <Show when={settingsOpen()}>
+        <PaperAccountSettings onClose={() => setSettingsOpen(false)} />
+      </Show>
       <div class="trd-am-tabs" role="tablist">
         <For each={pages}>
           {([id, title]) => {

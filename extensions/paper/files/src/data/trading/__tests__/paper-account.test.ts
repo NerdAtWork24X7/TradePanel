@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PaperAccount, type PaperSnapshot } from "../paper-account";
+import { DEFAULT_LEVERAGE, DEFAULT_PAPER_SETTINGS, PaperAccount, assetClassOf, type PaperSnapshot } from "../paper-account";
 import type { OrderRequest } from "../types";
 
 const SYMBOL = "BINANCE:BTC/USDT";
@@ -310,16 +310,153 @@ describe("PaperAccount: persistence", () => {
   it("counts a restored account's realized profit into its balance", () => {
     const snap: PaperSnapshot = {
       version: 1,
-      settings: { startingBalance: 5_000, currency: "USD" },
+      settings: { ...DEFAULT_PAPER_SETTINGS, startingBalance: 5_000, currency: "USD" },
       orders: [],
       positions: [],
       fills: [],
       last: {},
       realizedPnl: 250,
+      fees: 0,
       seq: 0,
       openedMs: 1,
     };
     const a = PaperAccount.fromJSON(snap);
     expect(a.balance).toBe(5_250);
+  });
+});
+
+describe("PaperAccount: asset classes", () => {
+  it("reads the class from the exchange code and the symbol's shape", () => {
+    expect(assetClassOf("NASDAQ:AAPL")).toBe("stocks");
+    expect(assetClassOf("nse:reliance")).toBe("stocks");
+    expect(assetClassOf("BINANCE:BTC/USDT")).toBe("crypto");
+    expect(assetClassOf("FX:EURUSD")).toBe("forex");
+    expect(assetClassOf("EURUSD")).toBe("forex");
+    expect(assetClassOf("CME:ES1!")).toBe("futures");
+    expect(assetClassOf("OPRA:AAPL240119C00150000")).toBe("futures");
+    expect(assetClassOf("SP:SPX")).toBe("others");
+  });
+});
+
+describe("PaperAccount: leverage and margin control", () => {
+  it("trades 1:1 with margin control off", () => {
+    const a = atPrice(100, 1_000);
+    expect(a.place(req({ qty: 5 }), 2_000)).toBe("1");
+    expect(a.marginUsed()).toBe(500);
+    expect(a.marginFree()).toBe(500);
+  });
+
+  it("holds the notional divided by the class's leverage with margin control on", () => {
+    const a = account(1_000);
+    a.setSettings({ marginControl: true, leverage: { ...DEFAULT_LEVERAGE, crypto: 10 } });
+    a.tick(SYMBOL, 100, 1_000);
+    a.takeEvents();
+    expect(a.place(req({ qty: 50 }), 2_000)).toBe("1");
+    expect(a.marginUsed()).toBe(500);
+    expect(a.marginFree()).toBe(500);
+  });
+
+  it("refuses an order whose margin exceeds the free funds, and takes one that fits", () => {
+    const a = account(1_000);
+    a.setSettings({ marginControl: true, leverage: { ...DEFAULT_LEVERAGE, crypto: 10 } });
+    a.tick(SYMBOL, 100, 1_000);
+    a.takeEvents();
+    expect(a.place(req({ qty: 101 }), 2_000)).toBeNull();
+    expect(a.takeEvents()).toEqual([expect.objectContaining({ kind: "rejected", message: "Not enough free balance for this order." })]);
+    expect(a.place(req({ qty: 100 }), 2_500)).not.toBeNull();
+    expect(a.marginFree()).toBe(0);
+  });
+});
+
+describe("PaperAccount: commissions", () => {
+  it("charges a percent of the trade's value on every fill", () => {
+    const a = atPrice(100);
+    a.setSettings({ commission: { others: { enabled: true, value: 0.1, type: "percent" } } });
+    a.place(req({ qty: 2 }), 2_000);
+    a.tick(SYMBOL, 110, 3_000);
+    a.closePosition(SYMBOL, null, 4_000);
+    expect(a.commissions).toBeCloseTo(0.42);
+    expect(a.balance).toBeCloseTo(10_019.58);
+    const fees = a.fills().map((f) => f.fee);
+    expect(fees).toHaveLength(2);
+    expect(fees[0]).toBeCloseTo(0.22);
+    expect(fees[1]).toBeCloseTo(0.2);
+  });
+
+  it("charges a flat amount per fill for others", () => {
+    const a = atPrice(100);
+    a.setSettings({ commission: { others: { enabled: true, value: 1.5, type: "absolute" } } });
+    a.place(req({ qty: 2 }), 2_000);
+    expect(a.commissions).toBe(1.5);
+    expect(a.balance).toBe(9_998.5);
+  });
+
+  it("charges a per-contract commission for futures and options", () => {
+    const a = account(10_000);
+    a.setSettings({ marginControl: true, commission: { futuresOptions: { enabled: true, perContract: 1.25 } } });
+    a.tick("CME:ES1!", 4_000, 1_000);
+    a.takeEvents();
+    expect(a.place(req({ symbol: "CME:ES1!", qty: 3 }), 2_000)).not.toBeNull();
+    expect(a.commissions).toBe(3.75);
+    expect(a.balance).toBe(9_996.25);
+  });
+
+  it("leaves the balance untouched with no commission enabled", () => {
+    const a = atPrice(100);
+    a.place(req({ qty: 2 }), 2_000);
+    expect(a.commissions).toBe(0);
+    expect(a.balance).toBe(10_000);
+    expect(a.fills()[0].fee).toBe(0);
+  });
+
+  it("keeps commissions across a restore and clears them on reset", () => {
+    const a = atPrice(100);
+    a.setSettings({ commission: { others: { enabled: true, value: 0.5, type: "absolute" } } });
+    a.place(req({ qty: 2 }), 2_000);
+    const b = PaperAccount.fromJSON(a.toJSON());
+    expect(b.commissions).toBe(0.5);
+    expect(b.balance).toBe(9_999.5);
+    b.reset(undefined, 5_000);
+    expect(b.commissions).toBe(0);
+    expect(b.balance).toBe(10_000);
+  });
+});
+
+describe("PaperAccount: account settings", () => {
+  it("stores the name, the margin control and the commissions, and restores them", () => {
+    const a = account();
+    a.setSettings({
+      name: "  My account  ",
+      marginControl: true,
+      leverage: { ...DEFAULT_LEVERAGE, crypto: 25 },
+      commission: { others: { enabled: true, value: 0.05, type: "absolute" } },
+    });
+    const s = a.settings;
+    expect(s.name).toBe("My account");
+    expect(s.marginControl).toBe(true);
+    expect(s.leverage.crypto).toBe(25);
+    expect(s.commission.others).toEqual({ enabled: true, value: 0.05, type: "absolute" });
+    expect(PaperAccount.fromJSON(a.toJSON()).settings).toEqual(s);
+  });
+
+  it("falls back on senseless values, keeping the rest", () => {
+    const a = account();
+    a.setSettings({ leverage: { stocks: 0, futures: Number.NaN }, commission: { others: { value: -5 } } });
+    expect(a.settings.leverage.stocks).toBe(DEFAULT_LEVERAGE.stocks);
+    expect(a.settings.leverage.futures).toBe(DEFAULT_LEVERAGE.futures);
+    expect(a.settings.commission.others.value).toBe(DEFAULT_PAPER_SETTINGS.commission.others.value);
+    expect(a.settings.name).toBe("");
+  });
+
+  it("reads an old snapshot's settings as defaults, name and all", () => {
+    const a = PaperAccount.fromJSON({ version: 1, settings: { startingBalance: 3_000, currency: "USD" } } as PaperSnapshot);
+    expect(a.settings).toMatchObject({
+      name: "",
+      startingBalance: 3_000,
+      currency: "USD",
+      marginControl: false,
+      leverage: DEFAULT_LEVERAGE,
+      commission: DEFAULT_PAPER_SETTINGS.commission,
+    });
   });
 });

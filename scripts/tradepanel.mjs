@@ -3,11 +3,11 @@
  * TradePanel — the single entrypoint. One command sets the workspace up and runs the app.
  *
  *   npm start                    set up (clone upstream, apply the packs, install) if needed, then run
- *   ./tradepanel.mjs             the same from a terminal
- *   ./tradepanel.mjs --setup     set up only, do not start the app
- *   ./tradepanel.mjs --update    force a re-assemble of the checkout from opentrader.config.json, then run
- *   ./tradepanel.mjs --no-install   never install dependencies or plugins; report what is missing instead
- *   ./tradepanel.mjs -- --no-watch  everything after -- goes to `tauri dev`
+ *   ./tradepanel                 the same from a terminal (the shim runs this file)
+ *   ./tradepanel --setup         set up only, do not start the app
+ *   ./tradepanel --update        force a re-assemble of the checkout from opentrader.config.json, then run
+ *   ./tradepanel --no-install    never install dependencies or plugins; report what is missing instead
+ *   ./tradepanel -- --no-watch   everything after -- goes to `tauri dev`
  *
  * `opentrader/` is a generated checkout of upstream OpenTrader, owned by this script: it is reset to the
  * pinned ref, then the independent packs in extensions/ are overlaid on top. Nothing in it is edited by hand.
@@ -44,7 +44,8 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // ── Paths and constants ──────────────────────────────────────────────────────
-export const ROOT = dirname(fileURLToPath(import.meta.url));
+// This file lives in scripts/; ROOT is the repository the shims and the packs live in.
+export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = join(ROOT, "opentrader");
 const SRC_TAURI = join(APP, "src-tauri");
 const EXTENSIONS_DIR = join(ROOT, "extensions");
@@ -1298,7 +1299,7 @@ function runApp(passthrough) {
 function usage() {
   console.log(`TradePanel — set up the workspace and run the app.
 
-  tradepanel.mjs [flags] [-- <tauri dev args>]
+  scripts/tradepanel.mjs [flags] [-- <tauri dev args>]
 
 Flags:
   -h, --help     this help

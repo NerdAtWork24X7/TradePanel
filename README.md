@@ -73,17 +73,17 @@ The drawing core is a sibling checkout, already present in this workspace as
 npm start                  # set up if needed, then start the desktop app
 npm start -- --setup       # set up only: clone, apply the packs, install, do not start
 
-./update                   # move the pin and install: same as `tradepanel.mjs --update --setup`
+./update                   # move the pin and install: same as `scripts/tradepanel.mjs --update --setup`
 ./update --ref main        # another tag, branch or commit
 ./update --latest          # the newest vX.Y.Z release tag
 ```
 
-`tradepanel.mjs` (the one implementation, run by `npm start`) clones the pinned commit in
+`scripts/tradepanel.mjs` (the one implementation, run by `npm start`) clones the pinned commit in
 `opentrader.config.json`, overlays the packs in dependency order, installs the frontend
 dependencies, regenerates `src/bindings.ts` and the i18n catalog, stages the AI runtime and
 installs the plugins. Setup is reproducible from `opentrader.lock.json`, and it runs
 automatically only when needed — a missing checkout, or a change to a pack or the lock;
-`update` (or `tradepanel.mjs --update`) re-assembles on demand. A pack whose `core.patch` no
+`update` (or `scripts/tradepanel.mjs --update`) re-assembles on demand. A pack whose `core.patch` no
 longer applies is named in the error; the checkout is restored to the previously locked,
 working state instead of being left as bare upstream. Rebase that pack's patch before moving the
 pin. Build caches (`node_modules/`, `src-tauri/target/`, the staged AI runtime) are preserved.
@@ -176,10 +176,10 @@ plugins/                     OpenTrader runtime plugins (Plugin API 2)
   crypto/                    crypto datafeed + Hyperliquid broker
   ccxt-broker/               one ccxt broker plugin per exchange
 lightweight-charts-drawing/  chart drawing core (sibling dependency)
-tradepanel.mjs               the single entrypoint: sets the workspace up and runs the app
-tradepanel, tradepanel.cmd   run it (Linux/macOS, Windows) — thin shims over tradepanel.mjs
-update, update.cmd           update the checkout and reapply the packs (tradepanel.mjs --update --setup)
-tradepanel.test.mjs          its tests
+scripts/tradepanel.mjs       the single entrypoint: sets the workspace up and runs the app
+scripts/tradepanel.test.mjs  its tests
+tradepanel, tradepanel.cmd   run it (Linux/macOS, Windows) — thin shims over scripts/tradepanel.mjs
+update, update.cmd           update the checkout and reapply the packs (scripts/tradepanel.mjs --update --setup)
 ```
 
 Each pack has an `extension.json`, an optional `files/` overlay and an optional `core.patch`.

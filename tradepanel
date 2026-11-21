@@ -1,11 +1,11 @@
 #!/bin/sh
-# TradePanel: set the workspace up and run the app. The work is done by tradepanel.mjs.
+# TradePanel: set the workspace up and run the app. The work is done by scripts/tradepanel.mjs.
 #
 #   ./tradepanel                set up if needed, then start the desktop app
 #   ./tradepanel --setup        set up only, do not start
 #   ./tradepanel -- --no-watch  arguments after -- go to "tauri dev"
 #
-# Everything is passed to tradepanel.mjs; run `./tradepanel.mjs --help` for all flags.
+# Everything is passed to scripts/tradepanel.mjs; run `./tradepanel --help` for all flags.
 set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # A desktop launcher runs this without the login shell, so a version manager's node and npm are off
@@ -19,4 +19,4 @@ if ! command -v node >/dev/null 2>&1; then
   echo "tradepanel: Node.js 22 or newer is required (https://nodejs.org)." >&2
   exit 1
 fi
-exec node "$here/tradepanel.mjs" "$@"
+exec node "$here/scripts/tradepanel.mjs" "$@"

@@ -1,0 +1,32 @@
+/*
+ * Paper account: the account bar's settings gear and the "Account settings" dialog. The dialog uses the chart
+ * Settings shell (see chart-properties.css) at a narrower width, so it matches the indicator settings dialog.
+ */
+
+/* The account name and the settings gear sit together on the left of the bar. */
+.trd-account-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.trd-account-gear {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+}
+.trd-account-gear:hover {
+  color: var(--color-text-primary);
+}
+
+/* Settings dialog: narrower than the chart one (the account has few fields). */
+.settings-dialog.trd-acct-dlg {
+  width: 460px;
+}
+/* Account name: the settings kit's 34 px boxed field, wider than a number. */
+.trd-acct-name {
+  width: 220px;
+}
+.trd-acct-dlg .cp3-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

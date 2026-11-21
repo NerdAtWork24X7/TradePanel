@@ -7,8 +7,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "node tradepanel.mjs",
-    "update": "node tradepanel.mjs --update --setup",
-    "test": "node --test tradepanel.test.mjs"
+    "start": "node scripts/tradepanel.mjs",
+    "update": "node scripts/tradepanel.mjs --update --setup",
+    "test": "node --test scripts/tradepanel.test.mjs"
   }
 }

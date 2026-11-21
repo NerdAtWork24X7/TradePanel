@@ -12,13 +12,13 @@ opentrader.lock.json         resolved commit + extension hashes (tracked)
 extensions/<pack>/           TradePanel packs: extension.json, files/, core.patch
 plugins/                     OpenTrader Plugin API 2 programs (crypto datafeed, NSE datafeed, ccxt brokers)
 lightweight-charts-drawing/  drawing core (sibling checkout read by Vite)
-tradepanel.mjs               the single entrypoint: setup + run, and --update / --ref / --latest
-tradepanel, tradepanel.cmd   run it (thin shims over tradepanel.mjs)
-update, update.cmd           update the checkout (tradepanel.mjs --update --setup)
-tradepanel.test.mjs          its tests
+scripts/tradepanel.mjs       the single entrypoint: setup + run, and --update / --ref / --latest
+scripts/tradepanel.test.mjs  its tests
+tradepanel, tradepanel.cmd   run it (thin shims over scripts/tradepanel.mjs)
+update, update.cmd           update the checkout (scripts/tradepanel.mjs --update --setup)
 ```
 
-**Never edit `opentrader/`.** It is reset by `tradepanel.mjs`. Put new files in
+**Never edit `opentrader/`.** It is reset by `scripts/tradepanel.mjs`. Put new files in
 `extensions/<pack>/files/` (mirroring the checkout tree) and changes to upstream files in that
 pack's `core.patch`.
 
@@ -51,7 +51,7 @@ npm start -- --setup            # set up only
 ./update --latest               # newest vX.Y.Z release tag
 ```
 
-`tradepanel.mjs` owns `opentrader/`: it resets it to the ref, overlays the packs in dependency
+`scripts/tradepanel.mjs` owns `opentrader/`: it resets it to the ref, overlays the packs in dependency
 order, regenerates `src/bindings.ts` and the i18n catalog, stages the AI runtime and installs the
 plugins. It preserves `node_modules/`, `src-tauri/target/`, `src-tauri/ai-runtime/` and
 `src-tauri/standalone/`. On a `core.patch` conflict it names the pack, restores the previously

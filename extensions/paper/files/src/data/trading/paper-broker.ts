@@ -20,7 +20,7 @@ import { strategyTester } from "../strategy-tester-store";
 import { clearSubscription, setSubscription } from "../subscriptions";
 import { translate } from "../../i18n/translator";
 import { ALL_CAPABILITIES, type TradingCapabilities } from "./capabilities";
-import { PaperAccount, type PaperFill, type PaperOrder, type PaperPositionRow, type PaperSettings } from "./paper-account";
+import { PaperAccount, type PaperFill, type PaperOrder, type PaperPositionRow, type PaperSettings, type PaperSettingsPatch } from "./paper-account";
 import { pluginBroker } from "./plugin-broker";
 import type { Tradability } from "./replay-broker";
 import type { OrderRequest, TradingEvent, TradingExecution, TradingOrder, TradingPosition, TradingQuote } from "./types";
@@ -35,12 +35,14 @@ const key = (symbol: string) => symbol.trim().toUpperCase();
 
 /** The account view's account line: what the paper account is worth now. */
 export type PaperAccountState = {
+  name: string;
   currency: string;
   startingBalance: number;
   balance: number;
   equity: number;
   unrealizedPnl: number;
   realizedPnl: number;
+  commissions: number;
   marginUsed: number;
   marginFree: number;
 };
@@ -199,12 +201,14 @@ export const paperBroker = createRoot(() => {
   const state = (): PaperAccountState => {
     version();
     return {
+      name: account.settings.name,
       currency: account.settings.currency,
       startingBalance: account.settings.startingBalance,
       balance: account.balance,
       equity: account.equity,
       unrealizedPnl: account.unrealizedPnl(),
       realizedPnl: account.realizedPnl,
+      commissions: account.commissions,
       marginUsed: account.marginUsed(),
       marginFree: account.marginFree(),
     };
@@ -272,6 +276,11 @@ export const paperBroker = createRoot(() => {
 
     // ── The account (Exchanges tab, account view) ───────────────────────
     account: state,
+    /** The account's settings, as the account settings dialog edits them. */
+    settings: (): PaperSettings => {
+      version();
+      return account.settings;
+    },
     positions: (): PaperPositionRow[] => {
       version();
       return account.positions();
@@ -285,13 +294,13 @@ export const paperBroker = createRoot(() => {
       return account.fills();
     },
     /** Starts a new account; a reset from the UI can choose the new starting equity. */
-    resetAccount(settings?: Partial<PaperSettings>) {
+    resetAccount(settings?: PaperSettingsPatch) {
       account.reset(settings, Date.now());
       noPrice.clear();
       fetching.clear();
       done();
     },
-    setSettings(next: Partial<PaperSettings>) {
+    setSettings(next: PaperSettingsPatch) {
       account.setSettings(next);
       save();
       bump();

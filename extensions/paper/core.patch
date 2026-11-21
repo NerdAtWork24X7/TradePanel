@@ -215,3 +215,15 @@ index 3fb87d2..1b86390 100644
              </Show>
            </Show>
          </Popover>
+
+diff --git a/src/styles.css b/src/styles.css
+index e49c9b0..e49c9b0 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -69,5 +69,6 @@
+ @import "./styles/trading-lines.css";
+ @import "./styles/community.css";
+ @import "./styles/rtl.css";
++@import "./styles/paper-account.css";
+ 
+ :root {

@@ -26,6 +26,7 @@ import { isTauri } from "../shell/window-bridge";
 import { fmtMoney, fmtPnl, parsePositive, pnlClass } from "./format";
 import { AccountManager } from "./AccountManager";
 import { PaperAccount } from "./PaperAccount";
+import { PaperAccountSettings } from "./PaperAccountSettings";
 import { confirmPaperReset } from "./ResetPaperAccount";
 
 type Tone = "on" | "warn" | "off";
@@ -427,9 +428,10 @@ function VenueDetail(props: { row: VenueRow; state: () => State; busy: () => str
   );
 }
 
-/** The built-in paper account: what it is, what it is worth, its starting balance, Connect / Disconnect and Reset. */
+/** The built-in paper account: what it is, what it is worth, its starting balance, its settings, Connect / Disconnect and Reset. */
 function PaperDetail() {
   const account = () => paperBroker.account();
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
   const figures = (): { title: string; value: string; cls?: string }[] => [
     { title: translate("Balance"), value: fmtMoney(account().balance) },
     { title: translate("Equity"), value: fmtMoney(account().equity) },
@@ -504,11 +506,17 @@ function PaperDetail() {
         />
       </label>
       <div class="ex-links">
+        <button type="button" class="app-settings-btn" onClick={() => setSettingsOpen(true)}>
+          {translate("Account settings...")}
+        </button>
         <button type="button" class="app-settings-btn" onClick={confirmPaperReset}>
           {translate("Reset account")}
         </button>
       </div>
       <p class="ex-detail-text">One broker at a time: a broker plugin that connects takes the paper account's place.</p>
+      <Show when={settingsOpen()}>
+        <PaperAccountSettings onClose={() => setSettingsOpen(false)} />
+      </Show>
     </div>
   );
 }

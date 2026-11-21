@@ -93,11 +93,12 @@ To pick a different pinned release permanently, edit `opentrader.config.json` an
 ## Run
 
 ```bash
-npm start                          # set up if needed, then start the desktop app (`tauri dev`)
-node tradepanel.mjs --setup        # set up only, do not start
-node tradepanel.mjs --update       # re-assemble the checkout, then start
-node tradepanel.mjs -- --no-watch  # start without the file watcher
-node tradepanel.mjs --help
+npm start                   # set up if needed, then start the desktop app (`tauri dev`)
+./tradepanel                # the same from a terminal (tradepanel.cmd on Windows)
+./tradepanel --setup        # set up only, do not start
+./update                    # re-assemble the checkout at the pinned ref
+./tradepanel -- --no-watch  # start without the file watcher
+./tradepanel --help
 ```
 
 `npm start` starts the **OpenTrader** window with hot reload. It needs Node.js 22+, Rust
@@ -176,7 +177,8 @@ plugins/                     OpenTrader runtime plugins (Plugin API 2)
   ccxt-broker/               one ccxt broker plugin per exchange
 lightweight-charts-drawing/  chart drawing core (sibling dependency)
 tradepanel.mjs               the single entrypoint: sets the workspace up and runs the app
-update, update.cmd           updates the checkout and reapplies the packs (tradepanel.mjs --update --setup)
+tradepanel, tradepanel.cmd   run it (Linux/macOS, Windows) — thin shims over tradepanel.mjs
+update, update.cmd           update the checkout and reapply the packs (tradepanel.mjs --update --setup)
 tradepanel.test.mjs          its tests
 ```
 

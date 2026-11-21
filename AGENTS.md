@@ -13,8 +13,9 @@ extensions/<pack>/           TradePanel packs: extension.json, files/, core.patc
 plugins/                     OpenTrader Plugin API 2 programs (crypto datafeed, NSE datafeed, ccxt brokers)
 lightweight-charts-drawing/  drawing core (sibling checkout read by Vite)
 tradepanel.mjs               the single entrypoint: setup + run, and --update / --ref / --latest
+tradepanel, tradepanel.cmd   run it (thin shims over tradepanel.mjs)
+update, update.cmd           update the checkout (tradepanel.mjs --update --setup)
 tradepanel.test.mjs          its tests
-update, update.cmd           the update entrypoint (tradepanel.mjs --update --setup)
 ```
 
 **Never edit `opentrader/`.** It is reset by `tradepanel.mjs`. Put new files in

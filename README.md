@@ -78,12 +78,14 @@ npm run setup                 # clone the locked commit, apply the packs, instal
 `setup` is reproducible: it checks out the commit in `opentrader.lock.json`. Use the update
 commands below to move that pin.
 
-Update OpenTrader to the latest release tag (or a chosen ref) and reapply every pack:
+Update OpenTrader and reapply every pack. The default is the ref pinned in `opentrader.config.json`,
+currently v0.4.25: later tags change the plugin API and need a pack rebase before they can ship.
 
 ```bash
-npm run update:opentrader                     # newest vX.Y.Z tag
+npm run update:opentrader                     # pinned ref (v0.4.25)
+npm run update:opentrader -- --latest         # newest vX.Y.Z tag, when the packs support it
 npm run update:opentrader -- --ref main       # upstream HEAD
-npm run update:opentrader -- --ref v0.4.24    # a pinned release
+npm run update:opentrader -- --ref v0.4.26    # another pinned release
 npm run update:opentrader:check               # assemble, typecheck, vitest
 npm run update:opentrader:full                # ...plus cargo test --lib
 npm run update:opentrader:dry                 # resolve the ref and list packs only
@@ -96,8 +98,9 @@ Flags such as `--ref`, `--check`, `--without` and `--locked` pass straight throu
 
 The updater fetches tags, resets `opentrader/` to the resolved commit, overlays the packs in
 dependency order, regenerates `src/bindings.ts` and the i18n catalog, and writes
-`opentrader.lock.json`. A pack whose `core.patch` no longer applies is named in the error and
-the checkout is reset; rebase that pack's patch and run again. Build caches (`node_modules/`,
+`opentrader.lock.json`. A pack whose `core.patch` no longer applies is named in the error; the
+checkout is restored to the previously locked, working state instead of being left as bare upstream.
+Rebase that pack's patch before trying the newer ref again. Build caches (`node_modules/`,
 `src-tauri/target/`, the staged AI runtime) are preserved.
 
 ## Run

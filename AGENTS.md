@@ -41,7 +41,8 @@ folder out of `extensions/`; rerun the updater. Runtime plugins do not need pack
 ## Update upstream
 
 ```bash
-npm run update:opentrader                     # latest release tag
+npm run update:opentrader                     # pinned release (v0.4.25)
+npm run update:opentrader -- --latest         # newest release tag, when packs support it
 npm run update:opentrader -- --ref main       # upstream HEAD
 npm run update:opentrader:check               # assemble + tsc + vitest
 npm run update:opentrader:full                # ... + cargo test --lib

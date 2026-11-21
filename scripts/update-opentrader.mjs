@@ -4,7 +4,8 @@
  * packs on top of it. This is the only command that writes `opentrader/`; it is generated,
  * never edited by hand.
  *
- *   npm run update:opentrader                 latest release tag
+ *   npm run update:opentrader                 ref pinned in opentrader.config.json (v0.4.25)
+ *   npm run update:opentrader -- --latest     newest release tag, when the packs support it
  *   npm run update:opentrader -- --ref main   upstream HEAD
  *   npm run update:opentrader -- --ref v0.4.24
  *   npm run update:opentrader -- --check      also typecheck and run the test suite
@@ -49,6 +50,7 @@ import {
   resolveRef,
   rollback,
   run,
+  warn,
   writeLock,
 } from "./lib/opentrader.mjs";
 import { ensureOpenSslDev } from "./lib/openssl-dev.mjs";
@@ -62,6 +64,7 @@ const value = (flag) => {
 
 if (has("--help") || has("-h")) {
   console.log(`Usage: node scripts/update-opentrader.mjs [--ref <ref>|--latest|--main] [--check] [--full] [--dry-run] [--locked] [--only a,b] [--without a,b] [--no-install] [--no-bindings] [--no-ai]`);
+  console.log(`Default: the ref in opentrader.config.json (the last release whose packs all apply). --latest opts into newer upstream.`);
   process.exit(0);
 }
 
@@ -90,14 +93,16 @@ const requested = lockedCommit ?? resolveRef(options.ref ?? config.ref);
 const commit = git(["rev-parse", "--verify", `${requested}^{commit}`]);
 const lockRef = lockedCommit ? (lock.ref ?? requested) : requested;
 const all = readExtensions();
+/** The pack set recorded in the lock, used by --locked and to restore a failed update. */
+function lockedPackSet() {
+  if (!lock?.extensions?.length) return null;
+  const ids = new Set(lock.extensions.map((extension) => extension.id));
+  return selectExtensions(all.filter((extension) => ids.has(extension.id)), {});
+}
 let extensions = selectExtensions(all, { only: options.only, without: options.without });
 // A locked setup reproduces the pack set that was assembled, not necessarily every folder now present.
-if (options.locked && !options.only.length && !options.without.length && lock?.extensions?.length) {
-  const ids = new Set(lock.extensions.map((extension) => extension.id));
-  extensions = selectExtensions(
-    all.filter((extension) => ids.has(extension.id)),
-    {},
-  );
+if (options.locked && !options.only.length && !options.without.length) {
+  extensions = lockedPackSet() ?? extensions;
 }
 const stale = isStale(config, extensions);
 
@@ -116,8 +121,27 @@ try {
   log("assembling extension packs:");
   for (const extension of extensions) applyExtension(extension);
 } catch (error) {
-  rollback();
-  fail(error.message, "The checkout was reset. Rebase the failing extension's core.patch on the new upstream.");
+  // A failed assembly must not leave a bare upstream checkout: that silently removes the TradePanel
+  // UI (and with it the plugin cards). Put the previously locked state back before reporting.
+  let restored = false;
+  try {
+    const previous = lockedPackSet();
+    if (lock?.commit && previous) {
+      log(`restoring the previous checkout (${lock.ref ?? lock.commit.slice(0, 12)})`);
+      resetCheckout(lock.commit);
+      for (const extension of previous) applyExtension(extension);
+      restored = true;
+    }
+  } catch (restoreError) {
+    warn(`could not restore the previous checkout: ${restoreError.message}`);
+  }
+  if (!restored) rollback();
+  fail(
+    error.message,
+    restored
+      ? "The previous checkout was restored. Rebase the failing extension's core.patch before updating."
+      : "The checkout was reset. Rebase the failing extension's core.patch and run `npm run setup` to restore.",
+  );
 }
 
 function npmDeps() {

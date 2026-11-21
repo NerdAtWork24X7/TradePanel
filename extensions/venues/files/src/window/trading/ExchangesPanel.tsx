@@ -26,6 +26,7 @@ import { isTauri } from "../shell/window-bridge";
 import { fmtMoney, fmtPnl, parsePositive, pnlClass } from "./format";
 import { AccountManager } from "./AccountManager";
 import { PaperAccount } from "./PaperAccount";
+import { confirmPaperReset } from "./ResetPaperAccount";
 
 type Tone = "on" | "warn" | "off";
 type State = { text: string; tone: Tone };
@@ -503,11 +504,9 @@ function PaperDetail() {
         />
       </label>
       <div class="ex-links">
-        <ConfirmButton
-          label={translate("Reset account")}
-          confirmLabel={translate("Reset the account")}
-          onConfirm={() => paperBroker.resetAccount()}
-        />
+        <button type="button" class="app-settings-btn" onClick={confirmPaperReset}>
+          {translate("Reset account")}
+        </button>
       </div>
       <p class="ex-detail-text">One broker at a time: a broker plugin that connects takes the paper account's place.</p>
     </div>

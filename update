@@ -1,7 +1,7 @@
 #!/bin/sh
 # Update TradePanel's generated OpenTrader checkout and reapply the extension packs.
 #
-#   ./update                       newest upstream release tag
+#   ./update                       ref pinned in opentrader.config.json (v0.4.25)
 #   ./update --ref main            upstream HEAD
 #   ./update --check               assemble, typecheck and run the tests
 #   ./update --without analyst     assemble without one pack

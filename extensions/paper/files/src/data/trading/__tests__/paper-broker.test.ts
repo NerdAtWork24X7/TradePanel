@@ -176,6 +176,19 @@ describe("paperBroker", () => {
     expect(paper.fills()).toEqual([]);
   });
 
+  it("starts a reset account at the chosen equity", async () => {
+    const paper = await freshBroker();
+    paper.registerChart(7, () => SYMBOL);
+    paper.connect();
+    lastTick()({ symbol: SYMBOL, price: 100 });
+    paper.place(order());
+    paper.resetAccount({ startingBalance: 25_000 });
+    expect(paper.account()).toMatchObject({ startingBalance: 25_000, balance: 25_000, equity: 25_000 });
+    expect(paper.positions()).toEqual([]);
+    expect(paper.orderRows()).toEqual([]);
+    expect(paper.fills()).toEqual([]);
+  });
+
   it("closes and reverses from the account view and the chart", async () => {
     const paper = await freshBroker();
     paper.registerChart(7, () => SYMBOL);

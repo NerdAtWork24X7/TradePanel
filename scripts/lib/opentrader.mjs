@@ -96,7 +96,7 @@ export function readConfig() {
   return config;
 }
 
-/** The newest upstream release tag (`v0.4.25`), falling back to origin/HEAD. */
+/** The newest upstream release tag, falling back to origin/HEAD. */
 export function latestRef() {
   const tags = git(["tag", "--list", "v*", "--sort=-v:refname"])
     .split(/\r?\n/)

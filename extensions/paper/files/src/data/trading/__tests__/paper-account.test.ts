@@ -291,6 +291,22 @@ describe("PaperAccount: persistence", () => {
     expect(a.openedAt).toBe(5_000);
   });
 
+  it("starts over at a chosen equity, ignoring invalid amounts", () => {
+    const a = atPrice(100);
+    a.place(req({ takeProfit: 110 }), 2_000);
+    a.tick(SYMBOL, 111, 3_000);
+    a.reset({ startingBalance: 25_000, currency: "eur" }, 6_000);
+    expect(a.settings).toMatchObject({ startingBalance: 25_000, currency: "EUR" });
+    expect(a.balance).toBe(25_000);
+    expect(a.equity).toBe(25_000);
+    expect(a.position(SYMBOL)).toBeNull();
+    expect(a.orderRows()).toEqual([]);
+    expect(a.fills()).toEqual([]);
+    a.reset({ startingBalance: Number.NaN }, 7_000);
+    expect(a.settings.startingBalance).toBe(25_000);
+    expect(a.balance).toBe(25_000);
+  });
+
   it("counts a restored account's realized profit into its balance", () => {
     const snap: PaperSnapshot = {
       version: 1,

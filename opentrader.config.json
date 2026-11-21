@@ -1,5 +1,5 @@
 {
   "repository": "https://github.com/deepentropy/opentrader.git",
   "directory": "opentrader",
-  "ref": "latest"
+  "ref": "v0.4.25"
 }

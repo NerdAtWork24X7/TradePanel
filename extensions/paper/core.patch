@@ -21,14 +21,16 @@ index b2c7c14..1873cdc 100644
      }),
    );
  
-@@ -976,7 +1028,7 @@ function App() {
+@@ -976,7 +1028,6 @@ function App() {
              for them — without this the WatchlistDetail panel gets no symbol and
              stays blank. WatchlistDetail/Watchlist both accept the bare form. */}
-         {/* Order ticket (paper trading in Bar Replay, or a connected broker plugin), docked left of the right rail. */}
+-        {/* Order ticket (paper trading in Bar Replay, or a connected broker plugin), docked left of the right rail. */}
 -        <Show when={replayEnabled() || !!pluginBroker.status()?.active}>
-+        <Show when={replayEnabled() || !!pluginBroker.status()?.active || paperBroker.active()}>
-           <OrderTicket />
-         </Show>
+-          <OrderTicket />
+-        </Show>
++        {/* Order ticket, docked left of the right rail. Always mounted: it renders only while it is
++            open, and opening it with no broker connected is how its "Connect a broker" path is reached. */}
++        <OrderTicket />
          <RightRail
 diff --git a/src/data/trading/broker.ts b/src/data/trading/broker.ts
 index ec99ba9..30b50d0 100644

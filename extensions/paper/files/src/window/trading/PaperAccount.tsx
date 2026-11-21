@@ -3,9 +3,9 @@
  * the account bar (cash, equity, P&L, the margin the positions hold), the pages (Positions, Orders, Trade history,
  * Account summary) and its tables — the same components, classes and CSV export as the broker plugin's account
  * manager, so the two read the same. Its rows show the symbol on the chart, close a position, cancel or modify an
- * order; "Reset account" starts over with the same starting balance.
+ * order; "Reset account" starts over at an equity chosen in the confirmation dialog.
  */
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import { showConfirm } from "../../components/Dialogs";
 import { emitAppEvent } from "../../data/app-events";
 import { cachedSymbolSessions } from "../../data/session";
@@ -18,6 +18,7 @@ import { AccountTable, tableCsv, type Column, type RowMenuItem } from "./Account
 import { DownloadTradingDataDialog } from "./DownloadTradingDataDialog";
 import { fmtMoney, fmtPct, fmtPnl, fmtPrice, fmtQty, fmtTime, pnlClass } from "./format";
 import { CloseIcon, PencilIcon } from "./icons";
+import { confirmPaperReset } from "./ResetPaperAccount";
 
 type Page = "positions" | "orders" | "history" | "summary";
 type Filter = "all" | "working" | "filled" | "cancelled" | "rejected";
@@ -207,30 +208,11 @@ export function paperCsv(page: Page): string {
   }
 }
 
-/** "Reset account" with its confirmation: the account starts over with the same starting balance. */
+/** "Reset account": the shared dialog asks for the equity the new account starts with. */
 function ResetButton() {
-  const [armed, setArmed] = createSignal(false);
-  let timer: number | undefined;
-  onCleanup(() => window.clearTimeout(timer));
   return (
-    <button
-      type="button"
-      class="trd-pill"
-      classList={{ "is-selected": armed() }}
-      data-name="paper-reset"
-      onClick={() => {
-        if (!armed()) {
-          setArmed(true);
-          timer = window.setTimeout(() => setArmed(false), 4000);
-          return;
-        }
-        window.clearTimeout(timer);
-        setArmed(false);
-        paperBroker.resetAccount();
-      }}
-      onBlur={() => setArmed(false)}
-    >
-      {armed() ? translate("Reset the account") : translate("Reset account")}
+    <button type="button" class="trd-pill" data-name="paper-reset" onClick={confirmPaperReset}>
+      {translate("Reset account")}
     </button>
   );
 }

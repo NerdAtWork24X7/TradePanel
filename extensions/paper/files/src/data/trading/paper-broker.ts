@@ -284,8 +284,9 @@ export const paperBroker = createRoot(() => {
       version();
       return account.fills();
     },
-    resetAccount() {
-      account.reset(undefined, Date.now());
+    /** Starts a new account; a reset from the UI can choose the new starting equity. */
+    resetAccount(settings?: Partial<PaperSettings>) {
+      account.reset(settings, Date.now());
       noPrice.clear();
       fetching.clear();
       done();

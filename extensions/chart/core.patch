@@ -147,6 +147,104 @@ index eb6c096..b714b36 100644
      if (
        onChart &&
        next &&
+diff --git a/src/window/chart/view/menus.tsx b/src/window/chart/view/menus.tsx
+--- a/src/window/chart/view/menus.tsx
++++ b/src/window/chart/view/menus.tsx
+@@ -33,8 +33,8 @@ import { COMMUNITY_ENABLED } from "../../../data/community/api";
+ import { requestShare } from "../../../data/community/share";
+ import { type ChartCx } from "./context";
+ import { emitAppEvent } from "../../../data/app-events";
+-import { replayEnabled } from "../../../data/replay";
+ import { tradingUi } from "../../../data/trading/trading-ui";
++import { plusTradeRows } from "./plus-trade-rows";
+ import { sourceCodeMenuRows } from "./source-code-rows";
+ import type { ScaleTarget } from "./scales";
+ import { formatted, translatePlural, translateWith } from "../../../i18n/translator";
+@@ -193,7 +193,26 @@ export function createMenus(cx: ChartCx): MenusApi {
+       emitAppEvent("chart-patch-scale-settings", { patch: p });
+     // Ratio: bar spacing × price range ÷ pane height.
+     const ratio = cx.liveScaleRatio() ?? null;
++    // The axis is a price pick as well as a scale menu. Quote the clicked
++    // pane's scale, so a study axis never quotes the main series' price.
++    const studyPane = paneIdx !== mainIdx ? cx.drawingPanes().find((p) => p.key && yRel >= p.top && yRel < p.top + p.height) : undefined;
++    const mainTop = cx.paneBoxes().find((b) => b.index === mainIdx)?.top ?? 0;
++    const rawPrice = (studyPane ? studyPane.coords.yToPrice(yRel - studyPane.top) : coords()?.yToPrice(yRel - mainTop)) ?? null;
++    const openAxisTicket = (side: "buy" | "sell") => {
++      if (rawPrice == null) return;
++      const bars = cx.raw;
++      const last = bars.length ? bars[bars.length - 1].close : null;
++      tradingUi.openOrderTicket({ side, price: rawPrice, last });
++    };
++    const priceText = rawPrice == null ? "" : localNumber(menuPrice(rawPrice));
++    const ticker = splitSymbol(props.symbol ?? "").ticker;
++    const tradeRows: CtxNode[] = onSeriesScale && rawPrice != null ? [
++      { kind: "item", id: "axis-buy", label: translateWith("Buy 1 {0} @ {1} limit", ticker, priceText), icon: CtxIcons.buy, onSelect: () => openAxisTicket("buy") },
++      { kind: "item", id: "axis-sell", label: translateWith("Sell 1 {0} @ {1} stop", ticker, priceText), icon: CtxIcons.sell, onSelect: () => openAxisTicket("sell") },
++      { kind: "separator" },
++    ] : [];
+     const nodes: CtxNode[] = [
++      ...tradeRows,
+       { kind: "item", id: "auto", label: "Auto (fits data to screen)", checked: cur.autoScale,
+         onSelect: () => ps.applyOptions({ autoScale: !cur.autoScale }) },
+       // Locking stores the current ratio in the Scales row (the lock keeps
+@@ -714,7 +733,6 @@ export function createMenus(cx: ChartCx): MenusApi {
+     const studyId = studyPane?.key ?? null;
+     const studyTitle = studyId ? cx.controller?.getLegend().find((r) => r.id === studyId)?.title ?? null : null;
+     const openTicket = (side: "buy" | "sell" | undefined) => {
+-      if (!replayEnabled()) return;
+       const bars = cx.raw;
+       const last = bars.length ? bars[bars.length - 1].close : null;
+       tradingUi.openOrderTicket({ side, price: rawPrice ?? undefined, last });
+@@ -746,8 +764,8 @@ export function createMenus(cx: ChartCx): MenusApi {
+         paste: pasteClipboard,
+         addAlert: () =>
+           emitAppEvent("chart-open-alert-dialog", { symbol: props.symbol ?? "", price: rawPrice ?? undefined, indicatorId: studyId ?? undefined }),
+-        // Buy / Sell / Add order: the order ticket at this price while Bar
+-        // Replay is on (paper trading); no broker otherwise.
++        // Buy / Sell / Add order: the order ticket at this price. Without a broker the ticket
++        // names what to connect (Bar Replay, the paper account, a broker plugin): it is the way in.
+         buy: () => openTicket("buy"),
+         sell: () => openTicket("sell"),
+         addOrder: () => openTicket(undefined),
+@@ -775,10 +793,12 @@ export function createMenus(cx: ChartCx): MenusApi {
+     setCtxMenu({ x: e.clientX, y: e.clientY, nodes });
+   }
+ 
+-  /** Plus button → crosshair menu of the pane under it: an "Add alert on
+-   *  SOURCE at PRICE" row per source on that scale (plusAlertRows), then (no
+-   *  trading items: no broker) "Draw horizontal line at PRICE" on the pane's
+-   *  main source (the series, else the pane's first study). */
++  /** Plus button → crosshair menu of the pane under it: Buy / Sell at that
++   *  price first (the ticket opens at it; when the chart does not trade yet the
++   *  ticket says what to connect, so the row stays), then an "Add alert on
++   *  SOURCE at PRICE" row per source on that scale (plusAlertRows), then "Draw
++   *  horizontal line at PRICE" on the pane's main source (the series, else the
++   *  pane's first study). */
+   function openPlusMenu(r: DOMRect, yAbs: number) {
+     const paneIdx = cx.plusPane();
+     const box = cx.paneBoxes().find((b) => b.index === paneIdx);
+@@ -792,7 +812,21 @@ export function createMenus(cx: ChartCx): MenusApi {
+     const p = price as number;
+     const priceStr = main.priceFormatter().format(p);
+     const alerts = plusAlertRows(paneIdx, y);
++    // The plus button is on the price axis: the price it picks is an order price too.
++    const ticker = splitSymbol(props.symbol ?? "").ticker;
++    const tradeRows: CtxNode[] = inPricePane
++      ? plusTradeRows({
++          ticker,
++          price: p,
++          priceStr,
++          last: cx.latestBar()?.close ?? null,
++          icons: { buy: CtxIcons.buy, sell: CtxIcons.sell },
++          open: (side, price, last) => tradingUi.openOrderTicket({ side, price, last }),
++        })
++      : [];
+     const nodes: CtxNode[] = [
++      ...tradeRows,
++      ...(tradeRows.length ? [{ kind: "separator" } as CtxNode] : []),
+       ...alerts,
+       ...(alerts.length ? [{ kind: "separator" } as CtxNode] : []),
+       { kind: "item", id: "plus-hline", label: translateWith("Draw horizontal line at {0}", priceStr), shortcut: "Alt + H", icon: <Icon name="draw-horizontal-line" size={18} />,
 diff --git a/src/window/chart/view/navigation.ts b/src/window/chart/view/navigation.ts
 index f78302e..ab640cc 100644
 --- a/src/window/chart/view/navigation.ts

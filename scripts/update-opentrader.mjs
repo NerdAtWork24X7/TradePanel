@@ -51,6 +51,7 @@ import {
   run,
   writeLock,
 } from "./lib/opentrader.mjs";
+import { ensureOpenSslDev } from "./lib/openssl-dev.mjs";
 
 const argv = process.argv.slice(2);
 const has = (flag) => argv.includes(flag);
@@ -145,15 +146,21 @@ npmDeps();
 function applyLinuxEnv() {
   if (process.platform !== "linux") return;
   const envFile = join(ROOT, "tmp", "linux-env.sh");
-  if (!existsSync(envFile)) return;
   const probe = spawnSync("pkg-config", ["--exists", "javascriptcoregtk-4.1"], { stdio: "ignore" });
-  if (probe.status === 0) return;
-  const sourced = spawnSync("bash", ["-c", 'set -a; . "$1" >&2; env -0', "update-opentrader", envFile], { encoding: "buffer" });
-  if (sourced.status !== 0) return;
-  for (const pair of sourced.stdout.toString().split("\0")) {
-    const at = pair.indexOf("=");
-    if (at > 0) process.env[pair.slice(0, at)] = pair.slice(at + 1);
+  if (existsSync(envFile) && probe.status !== 0) {
+    const sourced = spawnSync("bash", ["-c", 'set -a; . "$1" >&2; env -0', "update-opentrader", envFile], { encoding: "buffer" });
+    if (sourced.status === 0) {
+      for (const pair of sourced.stdout.toString().split("\0")) {
+        const at = pair.indexOf("=");
+        if (at > 0) process.env[pair.slice(0, at)] = pair.slice(at + 1);
+      }
+    }
   }
+
+  // Native-tls needs OpenSSL headers for every cargo invocation, including binding export. The launcher
+  // already stages them; use the same helper here so `npm run setup` works without a system libssl-dev.
+  const opensslEnv = ensureOpenSslDev({ say: log, fail });
+  if (opensslEnv) Object.assign(process.env, opensslEnv);
 }
 
 /** The Tauri build reads `src-tauri/ai-runtime` as a resource, even for `cargo test`: stage it

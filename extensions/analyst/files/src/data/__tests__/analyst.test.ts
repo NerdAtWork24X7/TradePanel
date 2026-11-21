@@ -25,6 +25,10 @@ vi.mock("../../bindings", () => ({
     }),
     piAbort: vi.fn(async () => ({ status: "ok", data: null })),
     piNewSession: vi.fn(async () => ({ status: "ok", data: null })),
+    piSetSettings: vi.fn(async (_base: string, _model: string, _key: string | null, _prompt: string | null) => ({
+      status: "ok",
+      data: { state: "stopped", streaming: false, ready: false, configured: true, hasKey: true, baseUrl: _base, model: _model, systemPrompt: _prompt ?? "built-in", hasCustomPrompt: _prompt != null, target: null, runtimeRoot: null, nodeVersion: null, piVersion: null, contextFile: "", error: null },
+    })),
     piUpdate: vi.fn(async (_channel: { onmessage: (step: string) => void }) => ({
       status: "ok",
       data: { state: "stopped", streaming: false, ready: false, configured: false, hasKey: false, baseUrl: "", model: "", target: "linux-x64", runtimeRoot: "/rt", nodeVersion: "v22.23.4", piVersion: "1.5.2", contextFile: "", error: null },
@@ -32,7 +36,7 @@ vi.mock("../../bindings", () => ({
   },
 }));
 
-const { analyze, updatePiRuntime } = await import("../analyst");
+const { analyze, saveAnalystSettings, updatePiRuntime } = await import("../analyst");
 const { commands } = await import("../../bindings");
 
 const plan = {
@@ -159,5 +163,14 @@ describe("analyze", () => {
   it("rejects when the request never started", async () => {
     vi.mocked(commands.piAnalyze).mockResolvedValueOnce({ status: "error", error: "Set the analyst's API key in its settings." } as never);
     await expect(analyze({ version: 1 }, [], "Analyze BTC")).rejects.toThrow("Set the analyst's API key");
+  });
+
+  it("forwards a custom prompt, or null to restore the built-in one", async () => {
+    const custom = await saveAnalystSettings("https://api.example.com/v1", "m", "sk-1", "Trade only the 5m trigger.");
+    expect(custom.status).toBe("ok");
+    expect(commands.piSetSettings).toHaveBeenLastCalledWith("https://api.example.com/v1", "m", "sk-1", "Trade only the 5m trigger.");
+
+    await saveAnalystSettings("https://api.example.com/v1", "m", null, null);
+    expect(commands.piSetSettings).toHaveBeenLastCalledWith("https://api.example.com/v1", "m", null, null);
   });
 });

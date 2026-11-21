@@ -27,6 +27,7 @@
     "ot:frontend:build": "npm --prefix opentrader run build",
     "ai:runtime": "node scripts/build-ai-runtime.mjs",
     "test:ai": "node extensions/analyst/tests/analyst-rpc-smoke.mjs",
-    "test:plugins": "node --test scripts/__tests__/plugin-install.test.mjs scripts/__tests__/broker-install.test.mjs"
+    "test:plugins": "node --test scripts/__tests__/plugin-install.test.mjs scripts/__tests__/broker-install.test.mjs",
+    "test:updater": "node --test scripts/__tests__/updater-env.test.mjs"
   }
 }

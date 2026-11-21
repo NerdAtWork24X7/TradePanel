@@ -11,18 +11,25 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 pub const FILE: &str = "analyst.json";
 pub const KEYRING_ACCOUNT: &str = "analyst-api-key";
 pub const KEY_ENV: &str = "TRADEPANEL_API_KEY";
+/// Host-owned copy of a user-written system prompt, outside the staged runtime
+/// (an in-app Pi update replaces the runtime's own prompt).
+pub const PROMPT_FILE: &str = "system-prompt.md";
+const MAX_PROMPT_BYTES: usize = 32 * 1024;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Saved {
     pub base_url: String,
     pub model: String,
+    /// `None` uses the prompt shipped with the runtime.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
 }
 
 fn settings_file(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -103,6 +110,37 @@ pub fn validate_model(model: &str) -> Result<String, String> {
         return Err("The analyst's model id holds no spaces or control characters.".into());
     }
     Ok(model.to_string())
+}
+
+/// A user-written system prompt: trimmed, bounded, and free of control
+/// characters other than line breaks. The text becomes a file the host writes,
+/// so it is never interpreted as a path or passed through a shell.
+pub fn validate_prompt(text: &str) -> Result<String, String> {
+    let prompt = text.trim();
+    if prompt.is_empty() {
+        return Err("Enter a system prompt, or choose the built-in prompt.".into());
+    }
+    if prompt.len() > MAX_PROMPT_BYTES {
+        return Err(format!("The system prompt must be at most {} KB.", MAX_PROMPT_BYTES / 1024));
+    }
+    if prompt.chars().any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t') {
+        return Err("The system prompt contains unsupported control characters.".into());
+    }
+    Ok(prompt.to_string())
+}
+
+/// Materialise a custom prompt where Pi can read it. The agent directory is
+/// host-owned and survives a runtime update; the shipped prompt stays the
+/// fallback when no custom text is saved.
+pub fn write_prompt(agent_dir: &Path, text: &str) -> Result<PathBuf, String> {
+    let path = agent_dir.join(PROMPT_FILE);
+    opentrader_core::files::write_atomic(&path, text.as_bytes()).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(path)
 }
 
 /// Write Pi's provider catalogue for the saved endpoint. `has_key` selects the
@@ -218,6 +256,38 @@ mod tests {
         write_models(&dir, "http://127.0.0.1:11434/v1", "m", false).unwrap();
         let text = std::fs::read_to_string(dir.join("models.json")).unwrap();
         assert!(text.contains("\"apiKey\": \"local\""));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_system_prompt_is_bounded_and_keeps_its_line_breaks() {
+        assert_eq!(validate_prompt("  analyse the chart\n\ncarefully  ").unwrap(), "analyse the chart\n\ncarefully");
+        assert!(validate_prompt("  \n ").is_err());
+        assert!(validate_prompt(&"x".repeat(MAX_PROMPT_BYTES + 1)).is_err());
+        assert!(validate_prompt("read\0this").is_err());
+        assert!(validate_prompt("keep\tthis").is_ok());
+    }
+
+    #[test]
+    fn an_old_settings_file_has_no_custom_prompt() {
+        let saved: Saved = serde_json::from_str(r#"{"baseUrl":"https://api.example.com/v1","model":"m"}"#).unwrap();
+        assert!(saved.system_prompt.is_none());
+        let text = serde_json::to_string(&Saved {
+            base_url: "https://api.example.com/v1".into(),
+            model: "m".into(),
+            system_prompt: None,
+        })
+        .unwrap();
+        assert!(!text.contains("systemPrompt"), "{text}");
+    }
+
+    #[test]
+    fn a_custom_prompt_is_written_to_the_host_agent_directory() {
+        let dir = std::env::temp_dir().join(format!("opentrader-prompt-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = write_prompt(&dir, "Custom analysis instructions\n").unwrap();
+        assert_eq!(path, dir.join(PROMPT_FILE));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "Custom analysis instructions\n");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

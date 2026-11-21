@@ -25,17 +25,9 @@ import { showAnalystTradeOnChart } from "../../data/analyst-trade-drawing";
 import { chartBars } from "../../data/chart-state-registry";
 import { pluginBroker } from "../../data/trading/plugin-broker";
 import { tradingUi } from "../../data/trading/trading-ui";
-import {
-  analyze,
-  clearAnalystKey,
-  loadRuntimeStatus,
-  newAnalystSession,
-  saveAnalystSettings,
-  stopAnalysis,
-  updatePiRuntime,
-  type AnalystPlan,
-  type ToolStep,
-} from "../../data/analyst";
+import { analyze, loadRuntimeStatus, newAnalystSession, stopAnalysis, type AnalystPlan, type ToolStep } from "../../data/analyst";
+import { analystPortfolioContext } from "../../data/analyst-settings";
+import { AnalystSettingsDialog } from "./AnalystSettingsDialog";
 import { ANALYSIS_TARGETS, captureAnalystCharts, type AnalystCaptureImage } from "../../data/analyst-capture";
 import {
   deleteAnalystLog,
@@ -103,6 +95,7 @@ function hostOf(url: string): string {
 
 /** The account context the agent may read (only when the user enabled it). */
 function portfolioOf(symbol: string): AnalystPortfolio | null {
+  if (!analystPortfolioContext()) return null;
   const state = pluginBroker.status()?.state;
   if (!state) return null;
   const base = symbol.split(":")[1]?.split("/")[0] ?? "";
@@ -178,9 +171,7 @@ export function ChartAnalyst(props: { ticker: string }) {
   const [loaded, setLoaded] = createSignal(false);
   const [base, setBase] = createSignal("");
   const [model, setModel] = createSignal("");
-  const [key, setKey] = createSignal("");
   const [hasKey, setHasKey] = createSignal(false);
-  const [saving, setSaving] = createSignal(false);
   const [setupOpen, setSetupOpen] = createSignal(false);
   const [shots, setShots] = createSignal<AnalystCaptureImage[]>([]);
   const [sheet, setSheet] = createSignal("");
@@ -197,8 +188,6 @@ export function ChartAnalyst(props: { ticker: string }) {
   const [logs, setLogs] = createSignal<AnalystLogEntry[]>([]);
   const [logsOpen, setLogsOpen] = createSignal(false);
   const [logBusy, setLogBusy] = createSignal(false);
-  const [updating, setUpdating] = createSignal(false);
-  const [updateStep, setUpdateStep] = createSignal("");
   const [currentLogId, setCurrentLogId] = createSignal<string | null>(null);
   const [loadedFromLog, setLoadedFromLog] = createSignal(false);
   /** One analysis at a time: a stopped or replaced run must not write state. */
@@ -220,38 +209,21 @@ export function ChartAnalyst(props: { ticker: string }) {
   /** The full symbol of the last picture ("BINANCE:BTC/USDT"), for ticker links. */
   const instrument = () => sheet().split(" · ")[0]?.split(", ")[0] || props.ticker;
 
-  const refresh = async () => {
-    const status = await loadRuntimeStatus();
+  /** Keep the panel's summary in step with the settings dialog's saved status. */
+  const applyStatus = (status: PiStatus | null) => {
     setRuntime(status);
     if (status) {
       setBase(status.baseUrl);
       setModel(status.model);
       setHasKey(status.hasKey);
     }
-    setLoaded(true);
-    return status;
   };
 
-  /** Install a newer Pi in place; the button stays disabled while npm runs. */
-  const updateRuntime = async () => {
-    if (updating() || busy()) return;
-    setUpdating(true);
-    setUpdateStep(translate("Checking for a Pi update…"));
-    setError("");
-    try {
-      const r = await updatePiRuntime(setUpdateStep);
-      if (r.status === "error") {
-        setUpdateStep("");
-        setError(r.error);
-        return;
-      }
-      setRuntime(r.data);
-      setBase(r.data.baseUrl);
-      setModel(r.data.model);
-      setHasKey(r.data.hasKey);
-    } finally {
-      setUpdating(false);
-    }
+  const refresh = async () => {
+    const status = await loadRuntimeStatus();
+    applyStatus(status);
+    setLoaded(true);
+    return status;
   };
 
   /** Put a stored analysis back on screen (pictures, card, answer). */
@@ -285,30 +257,6 @@ export function ChartAnalyst(props: { ticker: string }) {
     setLogs(entries);
     if (entries[0]) void loadLog(entries[0]);
   });
-
-  const save = async () => {
-    setSaving(true);
-    setError("");
-    const r = await saveAnalystSettings(base(), model(), key() || undefined);
-    setSaving(false);
-    if (r.status === "error") return setError(r.error);
-    setRuntime(r.data);
-    setBase(r.data.baseUrl);
-    setModel(r.data.model);
-    setHasKey(r.data.hasKey);
-    setKey("");
-    setSetupOpen(false);
-  };
-
-  const forgetKey = async () => {
-    const r = await clearAnalystKey();
-    if (r.status === "error") setError(r.error);
-    else {
-      setRuntime(r.data);
-      setHasKey(r.data.hasKey);
-      setSetupOpen(true);
-    }
-  };
 
   /**
    * `fresh` runs the standard analysis: the 1d / 4h / 5m pictures are attached
@@ -543,30 +491,14 @@ export function ChartAnalyst(props: { ticker: string }) {
           </div>
         </div>
         <div class="asst-analyst-actions">
-          <button
-            type="button"
-            class="asst-link"
-            disabled={updating() || busy()}
-            onClick={() => void updateRuntime()}
-            title={translate("Install the latest Pi coding agent")}
-          >
-            {updating() ? translate("Updating Pi…") : translate("Update Pi")}
-          </button>
           <button type="button" class="asst-link" onClick={() => setLogsOpen(!logsOpen())}>
             {logsOpen() ? translate("Hide log") : translateWith("Log ({0})", logs().length)}
           </button>
-          <button type="button" class="asst-link" onClick={() => setSetupOpen(!setupOpen())}>
-            {setupOpen() ? translate("Close") : translate("Settings")}
+          <button type="button" class="asst-link" onClick={() => setSetupOpen(true)}>
+            {translate("Settings")}
           </button>
         </div>
       </div>
-
-      <Show when={updateStep()}>
-        <div class="asst-update" role="status" aria-live="polite">
-          <span class="asst-runtime-dot" classList={{ "is-busy": updating() }} aria-hidden="true" />
-          <span data-no-translate>{updateStep()}</span>
-        </div>
-      </Show>
 
       <Show when={logsOpen()}>
         <section class="asst-log" aria-label={translate("Analysis log")}>
@@ -630,60 +562,8 @@ export function ChartAnalyst(props: { ticker: string }) {
         )}
       </Show>
 
-      <Show when={setupOpen()}>
-        <div class="asst-analyst-form">
-          <div class="asst-form-head">
-            <span>{translate("Provider")}</span>
-            <span class="asst-runtime-note">
-              {runtime()?.piVersion ? translateWith("Pi {0}", runtime()!.piVersion ?? "") : translate("AI runtime")}
-              <Show when={runtime()?.target}>
-                {(target) => <span data-no-translate> · {target()}</span>}
-              </Show>
-            </span>
-          </div>
-          <label class="asst-analyst-field">
-            <span>{translate("API base URL")}</span>
-            <input
-              class="asst-analyst-input"
-              classList={{ "is-invalid": !!base() && !/^(https:\/\/|http:\/\/(127\.0\.0\.1|localhost|\[::1\]))/.test(base().trim()) }}
-              placeholder="https://api.openai.com/v1"
-              value={base()}
-              spellcheck={false}
-              onInput={(e) => setBase(e.currentTarget.value)}
-            />
-          </label>
-          <label class="asst-analyst-field">
-            <span>{translate("Model")}</span>
-            <input class="asst-analyst-input" data-no-translate placeholder="gpt-4o-mini" value={model()} spellcheck={false} onInput={(e) => setModel(e.currentTarget.value)} />
-          </label>
-          <label class="asst-analyst-field">
-            <span>{translate("API key")}</span>
-            <input
-              class="asst-analyst-input"
-              type="password"
-              autocomplete="off"
-              placeholder={hasKey() ? translate("Stored — type to replace") : ""}
-              value={key()}
-              onInput={(e) => setKey(e.currentTarget.value)}
-            />
-          </label>
-          <p class="asst-analyst-note">
-            {translate("The Pi agent appends /chat/completions to this base URL. The key is kept in your operating system's credential store and never reaches the window. HTTPS is required, or HTTP on 127.0.0.1 for a local model.")}
-          </p>
-          <div class="asst-analyst-actions">
-            <button type="button" class="asst-primary" disabled={saving()} onClick={() => void save()}>
-              {saving() ? translate("Saving...") : translate("Save")}
-            </button>
-            <Show when={hasKey()}>
-              <button type="button" class="asst-link" onClick={() => void forgetKey()}>
-                {translate("Forget the key")}
-              </button>
-            </Show>
-            <button type="button" class="asst-link" onClick={() => setSetupOpen(false)}>
-              {translate("Close")}
-            </button>
-          </div>
-        </div>
+      <Show when={setupOpen() && loaded()}>
+        <AnalystSettingsDialog status={runtime()} onStatus={applyStatus} onClose={() => setSetupOpen(false)} />
       </Show>
 
       <Show when={loaded() && !configured() && !setupOpen()}>
@@ -728,7 +608,7 @@ export function ChartAnalyst(props: { ticker: string }) {
       </Show>
 
       <div class="asst-analyst-actions asst-analyst-start">
-        <button type="button" class="asst-primary" disabled={busy() || updating() || !configured() || !!runtimeError()} onClick={() => void run(true)}>
+        <button type="button" class="asst-primary" disabled={busy() || !configured() || !!runtimeError()} onClick={() => void run(true)}>
           {busy()
             ? translate("Analyzing...")
             : hasResult()
@@ -847,7 +727,7 @@ export function ChartAnalyst(props: { ticker: string }) {
             }}
           />
           <div class="asst-analyst-actions">
-            <button type="button" class="asst-primary" disabled={busy() || updating() || !question().trim() || !!runtimeError()} onClick={() => void run(false)}>
+            <button type="button" class="asst-primary" disabled={busy() || !question().trim() || !!runtimeError()} onClick={() => void run(false)}>
               {translate("Send")}
             </button>
             <Show when={busy()}>

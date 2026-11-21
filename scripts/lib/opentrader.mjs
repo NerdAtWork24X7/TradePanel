@@ -113,6 +113,22 @@ export function resolveRef(ref) {
   return ref;
 }
 
+/** A checkout cloned with --filter=blob:none keeps .promisor packs that document its
+ *  missing blobs. If the matching remote config is lost, git negotiates with objects it
+ *  cannot read and the next fetch dies with "pack has N unresolved delta". */
+export function ensurePartialCloneConfig(cwd = APP) {
+  const gitDir = git(["rev-parse", "--absolute-git-dir"], { cwd });
+  const packDir = join(gitDir, "objects", "pack");
+  if (!existsSync(packDir) || !readdirSync(packDir).some((name) => name.endsWith(".promisor"))) return;
+  const promisor = gitOr(["config", "--bool", "--get", "remote.origin.promisor"], "", { cwd });
+  if (promisor.toLowerCase() === "true") return;
+  log("restoring partial-clone config for the OpenTrader checkout");
+  gitRun(["config", "remote.origin.promisor", "true"], { cwd });
+  if (!gitOr(["config", "--get", "remote.origin.partialCloneFilter"], "", { cwd })) {
+    gitRun(["config", "remote.origin.partialCloneFilter", "blob:none"], { cwd });
+  }
+}
+
 export function ensureCheckout(config) {
   if (existsSync(join(APP, ".git"))) {
     const origin = gitOr(["remote", "get-url", "origin"]);
@@ -120,6 +136,7 @@ export function ensureCheckout(config) {
       log(`setting upstream origin to ${config.repository}`);
       gitRun(["remote", "set-url", "origin", config.repository]);
     }
+    ensurePartialCloneConfig();
     return;
   }
   if (existsSync(APP) && readdirSync(APP).length) {
@@ -131,6 +148,7 @@ export function ensureCheckout(config) {
   log(`cloning ${config.repository}`);
   mkdirSync(dirname(APP), { recursive: true });
   run(GIT, ["clone", config.repository, config.directory], { cwd: ROOT });
+  ensurePartialCloneConfig();
 }
 
 /** Every `extensions/<id>/extension.json`, ordered by `order` then id. */

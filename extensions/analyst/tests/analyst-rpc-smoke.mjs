@@ -78,6 +78,8 @@ const server = createServer((req, res) => {
     const tools = messages.filter((m) => m.role === "tool");
     PROMPT_LOGS.push({
       model: payload.model,
+      // The host's system prompt must reach the provider with every request.
+      system: JSON.stringify(messages.filter((m) => m.role === "system")),
       toolResults: tools.length,
       images: JSON.stringify(messages).includes("image_url") || JSON.stringify(messages).includes('"image"'),
       toolNames: messages.flatMap((m) => (m.tool_calls ?? []).map((c) => c.function?.name)).filter(Boolean),
@@ -137,6 +139,12 @@ const sessions = join(home, "sessions");
 const workspace = join(home, "workspace");
 const contextFile = join(home, "context.json");
 for (const dir of [agent, sessions, workspace]) mkdirSync(dir, { recursive: true });
+
+// The user's prompt is a host-owned file, not the staged runtime's prompt.
+// Keep the bundled instructions and add a marker the mock provider can see.
+const promptMarker = "CUSTOM_PROMPT_MARKER: keep the stop beyond structure.";
+const customPrompt = join(agent, "system-prompt.md");
+writeFileSync(customPrompt, `${readFileSync(files.prompt, "utf8")}\n\n${promptMarker}\n`);
 
 writeFileSync(
   join(agent, "models.json"),
@@ -203,7 +211,7 @@ const args = [
   "--no-approve",
   "--extension", files.extension,
   "--tools", TOOL_ALLOWLIST,
-  "--system-prompt", files.prompt,
+  "--system-prompt", customPrompt,
   "--no-session",
 ];
 const child = spawn(files.node, args, {
@@ -328,6 +336,7 @@ const market = toolResults.find((r) => r.name === "panel_market_context")?.text 
 expect(market.includes('"chartStudies"'), "panel_market_context did not report the chart's studies");
 expect(market.includes("RSI"), "the chart's study values did not reach the first tool output");
 expect(PROMPT_LOGS[0]?.images === true, "the chart images never reached the provider");
+expect(PROMPT_LOGS.every((log) => log.system.includes(promptMarker)), "the custom system prompt never reached the provider");
 expect(PROMPT_LOGS.every((log) => log.model === "mock-model"), "the provider model was not used");
 expect(text.includes("Long while the 5m structure holds"), `the final text did not stream: ${text}`);
 // Pi may warn on stderr; only its exit code and the documented records matter.

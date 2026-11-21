@@ -22,9 +22,10 @@ pub async fn pi_set_settings(
     base_url: String,
     model: String,
     api_key: Option<String>,
+    system_prompt: Option<String>,
 ) -> Result<PiStatus, String> {
     let manager = Arc::clone(manager.inner());
-    manager.set_settings(base_url, model, api_key).await
+    manager.set_settings(base_url, model, api_key, system_prompt).await
 }
 
 #[tauri::command]

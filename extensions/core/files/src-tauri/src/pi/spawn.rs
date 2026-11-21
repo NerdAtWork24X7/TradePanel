@@ -49,6 +49,8 @@ pub struct Launch<'a> {
     pub model: &'a str,
     /// The provider key from the OS keyring; empty for a keyless loopback server.
     pub provider_key: &'a str,
+    /// A user-written prompt in the host's agent directory; the staged default when absent.
+    pub system_prompt_override: Option<&'a Path>,
 }
 
 /// Build the argument vector. Kept pure so the isolation flags are unit-tested.
@@ -75,7 +77,11 @@ pub fn args(launch: &Launch<'_>) -> Vec<String> {
         "--tools".into(),
         TOOL_ALLOWLIST.into(),
         "--system-prompt".into(),
-        launch.runtime.system_prompt.to_string_lossy().into_owned(),
+        launch
+            .system_prompt_override
+            .unwrap_or(&launch.runtime.system_prompt)
+            .to_string_lossy()
+            .into_owned(),
         "--no-session".into(),
     ]);
     args
@@ -160,6 +166,7 @@ mod tests {
             provider: PROVIDER_ID,
             model: "gpt-4o-mini",
             provider_key: "sk-test",
+            system_prompt_override: None,
         });
         for flag in [
             "--no-context-files",
@@ -182,6 +189,24 @@ mod tests {
     }
 
     #[test]
+    fn a_user_prompt_replaces_the_staged_prompt_path() {
+        let rt = runtime();
+        let p = paths();
+        let custom = PathBuf::from("/data/ai/agent/system-prompt.md");
+        let args = args(&Launch {
+            runtime: &rt,
+            paths: &p,
+            provider: PROVIDER_ID,
+            model: "m",
+            provider_key: "",
+            system_prompt_override: Some(&custom),
+        });
+        let prompt = args[args.iter().position(|a| a == "--system-prompt").unwrap() + 1].as_str();
+        assert_eq!(prompt, custom.to_str().unwrap());
+        assert_eq!(args.iter().filter(|a| *a == "--system-prompt").count(), 1);
+    }
+
+    #[test]
     fn the_child_gets_only_the_provider_key_and_host_furniture() {
         let rt = runtime();
         let p = paths();
@@ -191,6 +216,7 @@ mod tests {
             provider: PROVIDER_ID,
             model: "m",
             provider_key: "sk-secret",
+            system_prompt_override: None,
         });
         let map: std::collections::HashMap<_, _> = env.into_iter().collect();
         assert_eq!(map.get("TRADEPANEL_API_KEY").map(String::as_str), Some("sk-secret"));
@@ -216,6 +242,7 @@ mod tests {
             provider: PROVIDER_ID,
             model: "m",
             provider_key: "",
+            system_prompt_override: None,
         });
         assert!(env.iter().all(|(name, _)| name != "TRADEPANEL_API_KEY"));
     }

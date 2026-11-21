@@ -79,10 +79,18 @@ export async function updatePiRuntime(onStep: (step: string) => void): Promise<A
   }
 }
 
-/** Save the base URL and model; `apiKey` (when given) replaces the stored key. */
-export async function saveAnalystSettings(baseUrl: string, model: string, apiKey?: string): Promise<AnalystResult> {
+/**
+ * Save the provider and the system prompt. `apiKey` (when given) replaces the
+ * stored key; a null `systemPrompt` restores the runtime's built-in prompt.
+ */
+export async function saveAnalystSettings(
+  baseUrl: string,
+  model: string,
+  apiKey: string | null,
+  systemPrompt: string | null,
+): Promise<AnalystResult> {
   try {
-    const r = await commands.piSetSettings(baseUrl, model, apiKey?.trim() ? apiKey : null);
+    const r = await commands.piSetSettings(baseUrl, model, apiKey?.trim() ? apiKey : null, systemPrompt);
     if (r.status === "error") return { status: "error", error: r.error };
     return { status: "ok", data: r.data };
   } catch (e) {

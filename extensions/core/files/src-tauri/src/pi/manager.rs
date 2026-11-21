@@ -6,6 +6,7 @@
 //! in progress, and the next Analyze chart starts a fresh child.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -48,6 +49,11 @@ pub struct PiStatus {
     pub has_key: bool,
     pub base_url: String,
     pub model: String,
+    /// The prompt Pi receives: the user's override, or the runtime's bundled one.
+    pub system_prompt: String,
+    /// The bundled prompt, so the editor can go back to it without a stale copy.
+    pub default_prompt: String,
+    pub has_custom_prompt: bool,
     pub target: Option<String>,
     pub runtime_root: Option<String>,
     pub node_version: Option<String>,
@@ -105,7 +111,13 @@ impl PiManager {
             let _ = settings::save(&self.app, &saved);
         }
         let has_key = settings::key(&self.app).is_some();
+        let custom_prompt = saved.system_prompt.clone();
         let runtime = runtime::resolve(&self.app);
+        let default_prompt = runtime
+            .as_ref()
+            .ok()
+            .and_then(|rt| std::fs::read_to_string(&rt.system_prompt).ok())
+            .unwrap_or_default();
         let (target, runtime_root, node_version, pi_version, runtime_error) = match &runtime {
             Ok(rt) => (
                 Some(rt.target.clone()),
@@ -134,6 +146,9 @@ impl PiManager {
             has_key,
             base_url: base,
             model: saved.model,
+            system_prompt: custom_prompt.clone().unwrap_or_else(|| default_prompt.clone()),
+            default_prompt,
+            has_custom_prompt: custom_prompt.is_some(),
             target,
             runtime_root,
             node_version,
@@ -145,20 +160,31 @@ impl PiManager {
         }
     }
 
-    /// Save the provider; a non-empty `api_key` replaces the stored key. The
-    /// running child is stopped so the next analysis starts with the new
-    /// `models.json`.
-    pub async fn set_settings(&self, base_url: String, model: String, api_key: Option<String>) -> Result<PiStatus, String> {
+    /// Save the provider and prompt; a non-empty `api_key` replaces the stored
+    /// key and `None` for `system_prompt` restores the runtime's built-in
+    /// prompt. The running child is stopped so the next analysis starts with
+    /// the new settings.
+    pub async fn set_settings(
+        &self,
+        base_url: String,
+        model: String,
+        api_key: Option<String>,
+        system_prompt: Option<String>,
+    ) -> Result<PiStatus, String> {
         let base = settings::endpoint(&base_url)?;
         let model = settings::validate_model(&model)?;
+        let system_prompt = system_prompt.map(|text| settings::validate_prompt(&text)).transpose()?;
         if let Some(key) = api_key.filter(|k| !k.trim().is_empty()) {
             settings::set_key(&self.app, key.trim())?;
         }
         let paths = PiPaths::for_app(&self.app)?;
         paths.create()?;
+        if let Some(text) = &system_prompt {
+            settings::write_prompt(&paths.agent, text)?;
+        }
         let has_key = settings::key(&self.app).is_some();
         settings::write_models(&paths.agent, &base, &model, has_key)?;
-        settings::save(&self.app, &settings::Saved { base_url: base, model })?;
+        settings::save(&self.app, &settings::Saved { base_url: base, model, system_prompt })?;
         self.stop_child().await;
         *self.last_error.locked() = None;
         Ok(self.status())
@@ -258,6 +284,16 @@ impl PiManager {
 
     // ── Process lifecycle ─────────────────────────────────────────────────
 
+    /// A saved custom prompt lives in the agent directory, not in the staged
+    /// runtime (which an in-app update replaces). Rewriting it on each spawn
+    /// also covers a settings file changed while the app was closed.
+    fn prompt_override(&self, paths: &PiPaths, saved: &settings::Saved) -> Result<Option<PathBuf>, String> {
+        match saved.system_prompt.as_deref() {
+            Some(text) => Ok(Some(settings::write_prompt(&paths.agent, &settings::validate_prompt(text)?)?)),
+            None => Ok(None),
+        }
+    }
+
     async fn ensure_child(self: &Arc<Self>) -> Result<(), String> {
         let _spawn = self.starting.lock().await;
         if self.ready.load(Ordering::SeqCst) && self.child.lock().await.is_some() {
@@ -272,12 +308,17 @@ impl PiManager {
         // `/chat/completions` endpoint: save the base back once, so the next
         // window shows what Pi actually uses.
         if saved.base_url != base || saved.model != model {
-            let _ = settings::save(&self.app, &settings::Saved { base_url: base.clone(), model: model.clone() });
+            let _ = settings::save(&self.app, &settings::Saved {
+                base_url: base.clone(),
+                model: model.clone(),
+                system_prompt: saved.system_prompt.clone(),
+            });
         }
         let key = settings::key(&self.app);
         let paths = PiPaths::for_app(&self.app)?;
         paths.create()?;
         settings::write_models(&paths.agent, &base, &model, key.is_some())?;
+        let system_prompt_override = self.prompt_override(&paths, &saved)?;
         let runtime = runtime::resolve(&self.app)?;
         let launch = Launch {
             runtime: &runtime,
@@ -285,6 +326,7 @@ impl PiManager {
             provider: spawn::PROVIDER_ID,
             model: &model,
             provider_key: key.as_deref().unwrap_or(""),
+            system_prompt_override: system_prompt_override.as_deref(),
         };
 
         let mut command = tokio::process::Command::new(&runtime.node);

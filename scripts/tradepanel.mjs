@@ -973,16 +973,23 @@ const token = () => createHash("sha256").update(String(Date.now()) + String(Math
 function installCryptoPlugin({ data, config }) {
   const source = join(ROOT, "plugins", "crypto");
   const target = join(data, "plugins", "crypto");
+  const venv = join(target, ".venv");
   const expected = manifestVersion(join(source, "opentrader-plugin.json"));
   const configFile = join(config, "plugins.json");
   const enabled = readJson(configFile)?.plugins?.crypto?.enabled === true;
-  if (existsSync(join(target, "plugin.py")) && enabled && existsSync(join(target, ".venv")) &&
-      expected && manifestVersion(join(target, "opentrader-plugin.json")) === expected) {
+  const current = existsSync(join(target, "plugin.py")) && !!expected &&
+    manifestVersion(join(target, "opentrader-plugin.json")) === expected;
+  // A `.venv` that exists is not necessarily a `.venv` that works: the symlinked interpreter follows the
+  // system Python, so a distribution upgrade (3.12 → 3.14 here) leaves the packages behind. Probe the
+  // packages, not the folder, and rebuild the environment when the probe fails.
+  if (current && enabled && venvUsable(venv)) {
     log("crypto plugin already installed; skipping");
     return;
   }
-  copyPluginDir(source, target);
-  makeVenv(target, ["ccxt", "Hyperliquid SDK"]);
+  if (!current) copyPluginDir(source, target);
+  if (!venvUsable(venv)) {
+    makeVenv(venv, join(target, "requirements.txt"), "ccxt and the Hyperliquid SDK");
+  }
   const file = writePluginsConfig(config, (current) => pluginConfig(current, "crypto", token()));
   log(`installed the crypto plugin into ${target}; enabled it in ${file}`);
 }
@@ -1046,40 +1053,83 @@ export function venvPython(venv, platform = process.platform) {
 }
 
 /** `venv` can import ccxt (the probe prints its version, so a stub that runs nothing does not pass). */
-export function canImportCcxt(venv, runProbe = spawnSync) {
-  const python = venvPython(venv);
+export function canImportCcxt(venv, runProbe = spawnSync, platform = process.platform) {
+  const python = venvPython(venv, platform);
   if (!existsSync(python)) return false;
-  const probe = runProbe(python, ["-c", "import ccxt; print(ccxt.__version__)"], { encoding: "utf8" });
+  // A stuck interpreter must not stall the launcher; a cold ccxt import is a second at most.
+  const probe = runProbe(python, ["-c", "import ccxt; print(ccxt.__version__)"], { encoding: "utf8", timeout: 60_000 });
   return probe.status === 0 && /\d+\.\d+/.test(probe.stdout ?? "");
 }
 
+/** One probe per environment: the broker plugins link to the same `.venv`, so nine targets mean one import. */
+const probedVenvs = new Map();
+function venvUsable(venv) {
+  const key = resolvedVenv(venv);
+  if (!probedVenvs.has(key)) probedVenvs.set(key, canImportCcxt(venv));
+  return probedVenvs.get(key);
+}
+
+function resolvedVenv(venv) {
+  try {
+    return realpathSync(venv);
+  } catch {
+    return venv;
+  }
+}
+
 const pythonCommand = () => (WIN ? "python" : "python3");
+
+/** Create a virtualenv and install `requirements` into it. An existing environment is removed first: a venv
+ *  whose interpreter changed under it (a system Python upgrade) cannot be repaired in place. */
+export function makeVenv(venv, requirements, label, run = spawnSync, python = pythonCommand(), platform = process.platform) {
+  log(`${existsSync(venv) ? "recreating" : "creating"} ${venv} (${python})`);
+  rmSync(venv, { recursive: true, force: true });
+  const created = run(python, ["-m", "venv", venv], { stdio: "inherit" });
+  if (created.status !== 0 || !existsSync(venvPython(venv, platform))) {
+    throw new Error(`${python} -m venv failed. Install Python 3.10+ and run again.`);
+  }
+  log(`installing ${label} into ${venv}`);
+  const pip = join(venv, platform === "win32" ? "Scripts" : "bin", platform === "win32" ? "pip.exe" : "pip");
+  const install = ["install", "--disable-pip-version-check", "-r", requirements];
+  // A venv built with --without-pip (some distributions) has no pip script; `python -m pip` still installs.
+  const installed = existsSync(pip)
+    ? run(pip, install, { stdio: "inherit" })
+    : run(venvPython(venv, platform), ["-m", "pip", ...install], { stdio: "inherit" });
+  if (installed.status !== 0) throw new Error(`pip install failed in ${venv}`);
+  probedVenvs.set(resolvedVenv(venv), true);
+  return venv;
+}
 
 /** One ccxt install for every broker plugin; each folder links to it. Reuse the crypto plugin's venv when it
  *  already carries ccxt, so a laptop does not build a second environment. */
 function sharedVenv(pluginsDir) {
   for (const venv of [join(pluginsDir, ".ccxt-broker-venv"), join(pluginsDir, "crypto", ".venv")]) {
-    if (canImportCcxt(venv)) {
+    if (venvUsable(venv)) {
       log(`reusing ${venv} for the broker plugins`);
       return venv;
     }
   }
   const venv = join(pluginsDir, ".ccxt-broker-venv");
-  log(`creating the shared broker venv ${venv} (${pythonCommand()})`);
-  const created = spawnSync(pythonCommand(), ["-m", "venv", venv], { stdio: "inherit" });
-  if (created.status !== 0) throw new Error(`${pythonCommand()} -m venv failed. Install Python 3.10+ and run again.`);
-  const pip = WIN ? join(venv, "Scripts", "pip.exe") : join(venv, "bin", "pip");
-  log("installing ccxt for the broker plugins");
-  if (spawnSync(pip, ["install", "--disable-pip-version-check", "-r", join(BROKER_SOURCE, "requirements.txt")], { stdio: "inherit" }).status !== 0) {
-    throw new Error("pip install failed");
-  }
-  return venv;
+  return makeVenv(venv, join(BROKER_SOURCE, "requirements.txt"), "ccxt");
 }
 
-/** The plugin's own `.venv`: a link to the shared one, unless the user already put one there. */
+const isLink = (path) => {
+  try {
+    readlinkSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** The plugin's own `.venv`: a link to the shared one, unless the user already put a working one there. */
 function linkVenv(target, venv) {
   const link = join(target, ".venv");
-  if (existsSync(venvPython(link))) return;
+  if (venvUsable(link)) return;
+  if (existsSync(link) && !isLink(link)) {
+    warn(`${link} cannot import ccxt; leaving it alone. Remove it and run this again to link the shared venv.`);
+    return;
+  }
   try {
     rmSync(link, { recursive: true, force: true });
     symlinkSync(venv, link, WIN ? "junction" : "dir");
@@ -1095,15 +1145,20 @@ function installBrokerPlugins({ data, config }) {
   const ids = Object.keys(all);
   const pluginsDir = join(data, "plugins");
   const targets = ids.map((id) => join(pluginsDir, id));
-  if (targets.every((target) => existsSync(join(target, "plugin.py")) && existsSync(join(target, "opentrader-plugin.json")))) {
+  const missing = targets.filter((target) => !existsSync(join(target, "plugin.py")) || !existsSync(join(target, "opentrader-plugin.json")));
+  // The links share one environment, so `venvUsable` probes it once even for the nine targets.
+  const venvsBroken = targets.some((target) => !venvUsable(join(target, ".venv")));
+  if (missing.length === 0 && !venvsBroken) {
     log("broker plugins already installed; skipping");
     return;
   }
   const venv = sharedVenv(pluginsDir);
   for (const id of ids) {
     const target = join(pluginsDir, id);
-    copyPluginDir(BROKER_SOURCE, target, new Set([...PLUGIN_SKIP, "build.py", "manifests.py"]));
-    writeFileSync(join(target, "opentrader-plugin.json"), `${JSON.stringify(manifestFor(id, all), null, 2)}\n`);
+    if (missing.includes(target)) {
+      copyPluginDir(BROKER_SOURCE, target, new Set([...PLUGIN_SKIP, "build.py", "manifests.py"]));
+      writeFileSync(join(target, "opentrader-plugin.json"), `${JSON.stringify(manifestFor(id, all), null, 2)}\n`);
+    }
     linkVenv(target, venv);
   }
   const file = writePluginsConfig(config, (current) => mergeBrokerConfig(current, ids, {}, all, null));

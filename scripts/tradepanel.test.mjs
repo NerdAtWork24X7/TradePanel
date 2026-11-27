@@ -11,6 +11,7 @@ import {
   appDirs,
   canImportCcxt,
   ensurePartialCloneConfig,
+  makeVenv,
   manifestFor,
   manifests,
   mergeBrokerConfig,
@@ -132,6 +133,51 @@ test("a venv is only reused when it really can import ccxt", () => {
     assert.equal(canImportCcxt(join(dir, "absent"), () => ({ status: 0, stdout: "4.5.92\n" })), false);
     assert.match(venvPython(venv), /[\\/]bin[\\/]python$/);
     assert.match(venvPython(venv, "win32"), /Scripts[\\/]python\.exe$/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a broken venv is recreated and its requirements installed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tradepanel-venv-"));
+  try {
+    const venv = join(dir, "venv");
+    mkdirSync(join(venv, "bin"), { recursive: true });
+    writeFileSync(join(venv, "bin", "python"), "");
+    const calls = [];
+    const run = (command, args) => {
+      calls.push([command, args]);
+      if (args[0] === "-m" && args[1] === "venv") {
+        mkdirSync(join(venv, "bin"), { recursive: true });
+        writeFileSync(join(venv, "bin", "python"), "");
+        writeFileSync(join(venv, "bin", "pip"), "");
+      }
+      return { status: 0 };
+    };
+    makeVenv(venv, join(dir, "requirements.txt"), "ccxt", run, "python3", "linux");
+    assert.deepEqual(calls[0], ["python3", ["-m", "venv", venv]]);
+    assert.deepEqual(calls[1], [join(venv, "bin", "pip"), ["install", "--disable-pip-version-check", "-r", join(dir, "requirements.txt")]]);
+    assert.equal(existsSync(join(venv, "bin", "pip")), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a venv without a pip script installs through python -m pip", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tradepanel-venv-"));
+  try {
+    const venv = join(dir, "venv");
+    const calls = [];
+    const run = (command, args) => {
+      calls.push([command, args]);
+      if (args[0] === "-m" && args[1] === "venv") {
+        mkdirSync(join(venv, "bin"), { recursive: true });
+        writeFileSync(join(venv, "bin", "python"), "");
+      }
+      return { status: 0 };
+    };
+    makeVenv(venv, join(dir, "requirements.txt"), "ccxt", run, "python3", "linux");
+    assert.deepEqual(calls[1], [join(venv, "bin", "python"), ["-m", "pip", "install", "--disable-pip-version-check", "-r", join(dir, "requirements.txt")]]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -460,3 +460,110 @@ describe("PaperAccount: account settings", () => {
     });
   });
 });
+
+describe("PaperAccount: bars missed while the app was away", () => {
+  /** A bar at `timeMs` with the given open/high/low/close. */
+  const bar = (timeMs: number, open: number, high: number, low: number, close: number) => ({ timeMs, open, high, low, close });
+
+  it("closes at the take profit when a missed bar reached it", () => {
+    const a = atPrice(100);
+    a.place(req({ qty: 2, takeProfit: 110, stopLoss: 90 }), 2_000);
+    expect(a.reconcileChecks()).toEqual([{ symbol: SYMBOL, sinceMs: 2_000 }]);
+    expect(a.reconcileBars(SYMBOL, [bar(60_000, 100, 112, 98, 105)])).toBe(true);
+    expect(a.position(SYMBOL)).toBeNull();
+    expect(a.realizedPnl).toBe(20);
+    expect(a.balance).toBe(10_020);
+    // The fill is at the take profit, timed at the bar, not the tick's price.
+    expect(a.fills()[0]).toMatchObject({ side: "sell", qty: 2, price: 110, timeMs: 60_000, realizedPnl: 20 });
+    expect(a.price(SYMBOL)).toBe(105);
+  });
+
+  it("closes at the stop loss's price, not the bar's low", () => {
+    const a = atPrice(100);
+    a.place(req({ qty: 2, takeProfit: 110, stopLoss: 90 }), 2_000);
+    a.reconcileBars(SYMBOL, [bar(60_000, 100, 101, 85, 88)]);
+    expect(a.position(SYMBOL)).toBeNull();
+    expect(a.realizedPnl).toBe(-20);
+    expect(a.fills()[0]).toMatchObject({ side: "sell", qty: 2, price: 90, timeMs: 60_000 });
+  });
+
+  it("fills a bar that gapped through the stop at its open", () => {
+    const a = atPrice(100);
+    a.place(req({ qty: 2, takeProfit: 110, stopLoss: 90 }), 2_000);
+    a.reconcileBars(SYMBOL, [bar(60_000, 85, 90, 84, 88)]);
+    expect(a.realizedPnl).toBe(-30);
+    expect(a.fills()[0]).toMatchObject({ price: 85 });
+  });
+
+  it("takes the level the bar met first when both are inside it", () => {
+    // The open is nearer the low: the stop loss is reached first.
+    const down = atPrice(100);
+    down.place(req({ qty: 1, takeProfit: 110, stopLoss: 90 }), 2_000);
+    down.reconcileBars(SYMBOL, [bar(60_000, 95, 112, 88, 100)]);
+    expect(down.realizedPnl).toBe(-10);
+    expect(down.fills()[0]).toMatchObject({ price: 90 });
+
+    // The open is nearer the high: the take profit is reached first.
+    const up = atPrice(100);
+    up.place(req({ qty: 1, takeProfit: 110, stopLoss: 90 }), 2_000);
+    up.reconcileBars(SYMBOL, [bar(60_000, 105, 112, 88, 100)]);
+    expect(up.realizedPnl).toBe(10);
+    expect(up.fills()[0]).toMatchObject({ price: 110 });
+  });
+
+  it("checks a short's brackets the same way", () => {
+    const tp = atPrice(100);
+    tp.place(req({ side: "sell", qty: 1, takeProfit: 90, stopLoss: 110 }), 2_000);
+    tp.reconcileBars(SYMBOL, [bar(60_000, 100, 101, 88, 95)]);
+    expect(tp.realizedPnl).toBe(10);
+    expect(tp.fills()[0]).toMatchObject({ side: "buy", price: 90 });
+
+    const sl = atPrice(100);
+    sl.place(req({ side: "sell", qty: 1, takeProfit: 90, stopLoss: 110 }), 2_000);
+    sl.reconcileBars(SYMBOL, [bar(60_000, 100, 112, 99, 105)]);
+    expect(sl.realizedPnl).toBe(-10);
+    expect(sl.fills()[0]).toMatchObject({ side: "buy", price: 110 });
+  });
+
+  it("does not use bars from before the bracket was set", () => {
+    const a = atPrice(100);
+    a.place(req({ qty: 1 }), 2_000);
+    a.setPositionBrackets(SYMBOL, 110, 90, 10_000);
+    expect(a.reconcileChecks()).toEqual([{ symbol: SYMBOL, sinceMs: 10_000 }]);
+    // An earlier bar that would have reached both: the account had not set the levels then.
+    a.reconcileBars(SYMBOL, [bar(5_000, 100, 120, 80, 100)]);
+    expect(a.position(SYMBOL)).toMatchObject({ takeProfit: 110, stopLoss: 90 });
+    a.reconcileBars(SYMBOL, [bar(12_000, 100, 111, 99, 105)]);
+    expect(a.position(SYMBOL)).toBeNull();
+    expect(a.fills()[0]).toMatchObject({ price: 110 });
+  });
+
+  it("keeps the bracket times across a restore and reads an old snapshot from the position's open", () => {
+    const a = atPrice(100);
+    a.place(req({ qty: 1, takeProfit: 110, stopLoss: 90 }), 2_000);
+    expect(a.toJSON().positions[0]).toMatchObject({ tpSince: 2_000, slSince: 2_000 });
+    const b = PaperAccount.fromJSON(a.toJSON());
+    expect(b.reconcileChecks()).toEqual([{ symbol: SYMBOL, sinceMs: 2_000 }]);
+
+    // A snapshot from before the times: the position's open is the start of what it could have missed.
+    const snap = atPrice(100).toJSON();
+    snap.positions = [{ symbol: SYMBOL, qty: 1, avgPrice: 100, takeProfit: 110, stopLoss: 90, openedMs: 1_000 }];
+    const c = PaperAccount.fromJSON(snap);
+    expect(c.reconcileChecks()).toEqual([{ symbol: SYMBOL, sinceMs: 1_000 }]);
+    c.reconcileBars(SYMBOL, [bar(900, 100, 120, 80, 100)]);
+    expect(c.position(SYMBOL)).not.toBeNull();
+    c.reconcileBars(SYMBOL, [bar(1_500, 100, 111, 99, 105)]);
+    expect(c.position(SYMBOL)).toBeNull();
+  });
+
+  it("has nothing to check without a bracketed position", () => {
+    const a = atPrice(100);
+    a.place(req({ qty: 1 }), 2_000);
+    expect(a.reconcileChecks()).toEqual([]);
+    // Only the last price moves: nothing closes without a bracket.
+    expect(a.reconcileBars(SYMBOL, [bar(60_000, 100, 120, 80, 101)])).toBe(true);
+    expect(a.position(SYMBOL)).not.toBeNull();
+    expect(a.price(SYMBOL)).toBe(101);
+    expect(a.reconcileBars(SYMBOL, [bar(61_000, 101, 102, 100, 101)])).toBe(false);
+  });
+});

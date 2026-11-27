@@ -7,10 +7,12 @@
  * The engine (paper-account.ts) fills the orders; this module feeds it the datafeed's live prices, keeps the
  * account in kv across restarts, subscribes the positions' and working orders' symbols so their orders fill
  * off screen, and answers the order ticket, the chart's trading lines and the account view the way the broker
- * plugins do (the same reads and commands as plugin-broker.ts).
+ * plugins do (the same reads and commands as plugin-broker.ts). On start (and when the account is connected
+ * again) it reads the bars the app was away from: a position whose take profit or stop loss the market reached
+ * while the app was closed is closed at that level, as the account would have been if it had stayed open.
  */
 import { createEffect, createRoot, createSignal } from "solid-js";
-import { getTickerInfo, getTickerSnapshot, isEconomicSymbol } from "../datafeed";
+import { getBars, getTickerInfo, getTickerSnapshot, isEconomicSymbol } from "../datafeed";
 import { onTradeTick } from "../datafeed-live";
 import { isLocalSymbol } from "../local-series";
 import * as kv from "../kv";
@@ -20,7 +22,7 @@ import { strategyTester } from "../strategy-tester-store";
 import { clearSubscription, setSubscription } from "../subscriptions";
 import { translate } from "../../i18n/translator";
 import { ALL_CAPABILITIES, type TradingCapabilities } from "./capabilities";
-import { PaperAccount, type PaperFill, type PaperOrder, type PaperPositionRow, type PaperSettings, type PaperSettingsPatch } from "./paper-account";
+import { PaperAccount, type PaperBar, type PaperFill, type PaperOrder, type PaperPositionRow, type PaperSettings, type PaperSettingsPatch } from "./paper-account";
 import { pluginBroker } from "./plugin-broker";
 import type { Tradability } from "./replay-broker";
 import type { OrderRequest, TradingEvent, TradingExecution, TradingOrder, TradingPosition, TradingQuote } from "./types";
@@ -266,6 +268,74 @@ export const paperBroker = createRoot(() => {
     });
   }
 
+  // ── Bars missed while the app was away ────────────────────────────────
+  /** Bars of the finest resolution whose standard lookback reaches `ageMs` (the interval table in datafeed.ts), so a
+   *  position opened minutes or months ago is checked at the tightest granularity that reaches it. Daily bars beyond
+   *  a year cover the rest. */
+  const DAY_MS = 86_400_000;
+  const RESOLUTION_FOR_AGE: readonly (readonly [number, string])[] = [
+    [5, "1"], [10, "5"], [30, "15"], [60, "30"], [90, "60"], [180, "120"], [252, "240"],
+  ];
+
+  /** The bars a closed account missed for one position: at the resolution its age needs, or daily when that one is
+   *  empty (a plugin may serve only daily bars). Null when the datafeed could not give them; an empty list means it
+   *  has none, so there is nothing to check. */
+  const missedBars = async (symbol: string, sinceMs: number): Promise<PaperBar[] | null> => {
+    const ageDays = (Date.now() - sinceMs) / DAY_MS;
+    const first = RESOLUTION_FOR_AGE.find(([span]) => ageDays <= span)?.[1] ?? "1D";
+    let failed = false;
+    for (const resolution of first === "1D" ? ["1D"] : [first, "1D"]) {
+      try {
+        const { bars } = await getBars(symbol, resolution, "ETH", () => active());
+        const rows: PaperBar[] = bars.flatMap((b) =>
+          b.time !== null && b.open !== null && b.high !== null && b.low !== null && b.close !== null
+            ? [{ timeMs: b.time * 1000, open: b.open, high: b.high, low: b.low, close: b.close }]
+            : [],
+        );
+        if (rows.length) return rows;
+      } catch {
+        failed = true;
+        break;
+      }
+    }
+    return failed ? null : [];
+  };
+
+  /** Check each open position's take profit / stop loss against the bars the account missed (when the app starts,
+   *  and when the user connects it again): the app may have been closed while the market reached a level, and the
+   *  account only knows the prices it was running for. One request per position, at the resolution its absence
+   *  needs. A pass just finished for the same positions and bracket times is not repeated (the start and an
+   *  immediate connect), but a later connect reads again: the account may have been away since. */
+  let sweeping = false;
+  let swept: { signature: string; at: number } | null = null;
+  const reconcile = async () => {
+    if (!HAS_TAURI || !active() || sweeping) return;
+    const checks = account.reconcileChecks();
+    const signature = checks.map((c) => `${key(c.symbol)}@${c.sinceMs}`).join("|");
+    if (!checks.length || (swept?.signature === signature && Date.now() - swept.at < 60_000)) return;
+    sweeping = true;
+    try {
+      const results = await Promise.all(checks.map(async (check) => ({ symbol: check.symbol, bars: await missedBars(check.symbol, check.sinceMs) })));
+      // Disconnected mid-flight: this window is no longer the account's broker; its next connect sweeps again.
+      if (!active()) return;
+      let changed = false;
+      let complete = true;
+      for (const { symbol, bars } of results) {
+        if (bars === null) {
+          complete = false;
+          continue;
+        }
+        if (account.reconcileBars(symbol, bars)) changed = true;
+      }
+      if (complete) swept = { signature, at: Date.now() };
+      if (changed) save();
+      bump();
+      drain();
+    } finally {
+      sweeping = false;
+    }
+  };
+
   const api = {
     version,
     /** The paper account is the window's broker. */
@@ -314,6 +384,8 @@ export const paperBroker = createRoot(() => {
       setActiveFlag(true);
       noPrice.clear();
       bump();
+      // A position kept while the account was disconnected: the bars since then may have reached its brackets.
+      void reconcile();
     },
     disconnect() {
       setActiveFlag(false);
@@ -461,5 +533,7 @@ export const paperBroker = createRoot(() => {
       return position ? { position, paneId } : null;
     },
   };
+  // The app may have been closed with a protected position: check the bars it missed as soon as the account is live.
+  if (active()) void reconcile();
   return api;
 });

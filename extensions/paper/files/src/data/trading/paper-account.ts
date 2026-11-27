@@ -4,7 +4,9 @@
  * Orders fill at the price the market shows: a market order at once on the last price, a limit when the
  * price reaches it, a stop when the price crosses it, a stop-limit when its stop is reached and then its
  * limit. A position's take profit closes it at its price and its stop loss at the tick that reaches it;
- * the take profit / stop loss of an order wait for the order to fill and then protect its position.
+ * the take profit / stop loss of an order wait for the order to fill and then protect its position. Each bracket
+ * remembers when its level became active, so a restart checks the bars the account was away from (`reconcileBars`)
+ * and closes the position at the level the market reached while it was not running.
  *
  * The account is a cash account at 1:1 unless margin control is on: then each symbol's asset class has its
  * leverage (a position or order holds its value divided by it as margin), so less of the balance is held and an
@@ -210,12 +212,27 @@ export type PaperFill = {
   orderId: string | null;
 };
 
+/** One completed bar to check a position's brackets against: the chart's open/high/low/close and the time (ms) at its
+ *  start. */
+export type PaperBar = { timeMs: number; open: number; high: number; low: number; close: number };
+
 /** The whole account, as the store keeps it. */
 export type PaperSnapshot = {
   version: 1;
   settings: PaperSettings;
   orders: PaperOrder[];
-  positions: { symbol: string; qty: number; avgPrice: number; takeProfit: number | null; stopLoss: number | null; openedMs: number }[];
+  /** `tpSince` / `slSince`: when each bracket became active (a snapshot from before them reads them as the position's
+   *  open time), so a restart only checks the bars the account had not already seen it through. */
+  positions: {
+    symbol: string;
+    qty: number;
+    avgPrice: number;
+    takeProfit: number | null;
+    stopLoss: number | null;
+    openedMs: number;
+    tpSince?: number | null;
+    slSince?: number | null;
+  }[];
   fills: PaperFill[];
   /** The last price seen of each symbol, so a restart shows the account's P&L at once. */
   last: Record<string, number>;
@@ -226,7 +243,17 @@ export type PaperSnapshot = {
   openedMs: number;
 };
 
-type Position = { symbol: string; qty: number; avgPrice: number; takeProfit: number | null; stopLoss: number | null; openedMs: number };
+type Position = {
+  symbol: string;
+  qty: number;
+  avgPrice: number;
+  takeProfit: number | null;
+  stopLoss: number | null;
+  openedMs: number;
+  /** When the current take profit / stop loss level became active (ms): a bar before it cannot have reached it. */
+  tpSince: number | null;
+  slSince: number | null;
+};
 
 /** The chart's position id (its take profit / stop loss lines are "<id>:tp" / "<id>:sl"). */
 const POSITION_ID = "position";
@@ -421,10 +448,65 @@ export class PaperAccount {
     const hitTp = p.takeProfit !== null && (long ? price >= p.takeProfit : price <= p.takeProfit);
     const hitSl = p.stopLoss !== null && (long ? price <= p.stopLoss : price >= p.stopLoss);
     if (!hitTp && !hitSl) return false;
-    const at = hitTp ? p.takeProfit! : price;
-    const side = exitSide(long ? "buy" : "sell");
+    return this.closeBracket(p, hitTp ? "Take Profit" : "Stop Loss", hitTp ? p.takeProfit! : price, now);
+  }
+
+  /** The open positions a restart has to check: each one whose take profit or stop loss is set, with the earlier of
+   *  the two legs' times (ms) — the account was away from the bars from then on. */
+  reconcileChecks(): { symbol: string; sinceMs: number }[] {
+    const out: { symbol: string; sinceMs: number }[] = [];
+    for (const p of this.positionsValue.values()) {
+      const times = [p.takeProfit !== null ? p.tpSince : null, p.stopLoss !== null ? p.slSince : null].filter((t): t is number => t !== null);
+      if (times.length) out.push({ symbol: p.symbol, sinceMs: Math.min(...times) });
+    }
+    return out;
+  }
+
+  /** Check the bars an app restart missed against the open position's brackets and close it at the level reached
+   *  first. The newest close also becomes the account's last price, so the account view is current before its first
+   *  tick. Returns whether the account changed (a close, or a newer last price). */
+  reconcileBars(symbol: string, bars: readonly PaperBar[]): boolean {
+    const s = key(symbol);
+    let changed = false;
+    for (const bar of bars) {
+      const { open, high, low, close } = bar;
+      if (![open, high, low, close].every((v) => Number.isFinite(v) && v > 0)) continue;
+      if (this.lastValue.get(s) !== close) {
+        this.lastValue.set(s, close);
+        changed = true;
+      }
+      this.checkBrackets(s, bar);
+    }
+    return changed;
+  }
+
+  /** Walk a bar's price path through the position's brackets. The path is the open, the nearer extreme, the other
+   *  one and the close (the replay broker reads a bar the same way), so when a bar reaches both levels the one the
+   *  market met first closes the position. A bar that opens beyond a level fills it there (a gap); otherwise the
+   *  bracket fills at its own price. A bar before a leg's set time is not checked: the account already saw that
+   *  price through its ticks (or the level did not exist yet). */
+  private checkBrackets(symbol: string, bar: PaperBar): boolean {
+    const p = this.positionsValue.get(symbol);
+    if (!p) return false;
+    const long = p.qty > 0;
+    const tp = p.takeProfit !== null && p.tpSince !== null && bar.timeMs >= p.tpSince ? p.takeProfit : null;
+    const sl = p.stopLoss !== null && p.slSince !== null && bar.timeMs >= p.slSince ? p.stopLoss : null;
+    if (tp === null && sl === null) return false;
+    const upFirst = Math.abs(bar.high - bar.open) < Math.abs(bar.low - bar.open);
+    const path = [bar.open, upFirst ? bar.high : bar.low, upFirst ? bar.low : bar.high, bar.close];
+    for (let i = 0; i < path.length; i++) {
+      const price = path[i];
+      const at = i === 0 ? price : null;
+      if (tp !== null && (long ? price >= tp : price <= tp)) return this.closeBracket(p, "Take Profit", at ?? tp, bar.timeMs);
+      if (sl !== null && (long ? price <= sl : price >= sl)) return this.closeBracket(p, "Stop Loss", at ?? sl, bar.timeMs);
+    }
+    return false;
+  }
+
+  /** Close a position at a bracket, keeping the fill in the history and telling the account view. */
+  private closeBracket(p: Position, label: "Take Profit" | "Stop Loss", at: number, now: number): boolean {
+    const side = exitSide(p.qty > 0 ? "buy" : "sell");
     const qty = Math.abs(p.qty);
-    const label = hitTp ? "Take Profit" : "Stop Loss";
     const realized = this.applyFill(p.symbol, side, qty, at, now);
     this.record({ symbol: p.symbol, side, qty, price: at, timeMs: now, realizedPnl: realized, orderId: null });
     this.emit(p.symbol, { kind: "executed", label, side, qty, price: at });
@@ -641,8 +723,13 @@ export class PaperAccount {
         const p = this.positionsValue.get(key(symbol));
         if (!p) return;
         const price = leg === "tp" ? p.takeProfit : p.stopLoss;
-        if (leg === "tp") p.takeProfit = null;
-        else p.stopLoss = null;
+        if (leg === "tp") {
+          p.takeProfit = null;
+          p.tpSince = null;
+        } else {
+          p.stopLoss = null;
+          p.slSince = null;
+        }
         if (price !== null) this.emit(p.symbol, { kind: "cancelled", label: leg === "tp" ? "Take Profit" : "Stop Loss", side: exitSide(p.qty > 0 ? "buy" : "sell"), qty: Math.abs(p.qty), price });
         return;
       }
@@ -695,20 +782,25 @@ export class PaperAccount {
     this.emit(p.symbol, { kind: "executed", label: ORDER_LABEL.market, side, qty, price: null });
   }
 
-  /** Set (or remove, with null) the position's take profit / stop loss. */
-  setPositionBrackets(symbol: string, takeProfit: number | null, stopLoss: number | null): void {
+  /** Set (or remove, with null) the position's take profit / stop loss. A new level counts from now: the bars before
+   *  it could not have reached it. */
+  setPositionBrackets(symbol: string, takeProfit: number | null, stopLoss: number | null, now = Date.now()): void {
     const p = this.positionsValue.get(key(symbol));
     if (!p) return;
     const ref = this.price(symbol) ?? p.avgPrice;
     const side: Side = p.qty > 0 ? "buy" : "sell";
     const error = this.bracketError(side, ref, takeProfit, stopLoss);
     if (error) return void this.refuse(p.symbol, error.startsWith("The take profit") ? "Take Profit" : "Stop Loss", side, Math.abs(p.qty), null, error);
+    const beforeTp = p.takeProfit;
+    const beforeSl = p.stopLoss;
     const legs: ["tp" | "sl", number | null, number | null][] = [
-      ["tp", p.takeProfit, takeProfit],
-      ["sl", p.stopLoss, stopLoss],
+      ["tp", beforeTp, takeProfit],
+      ["sl", beforeSl, stopLoss],
     ];
     p.takeProfit = takeProfit;
     p.stopLoss = stopLoss;
+    if (takeProfit !== beforeTp) p.tpSince = takeProfit === null ? null : now;
+    if (stopLoss !== beforeSl) p.slSince = stopLoss === null ? null : now;
     for (const [leg, before, after] of legs) {
       const label = leg === "tp" ? "Take Profit" : "Stop Loss";
       if (before === null && after !== null) this.emit(p.symbol, { kind: "placed", label, side: exitSide(side), qty: Math.abs(p.qty), price: after });
@@ -732,6 +824,8 @@ export class PaperAccount {
     if (p && Math.sign(p.qty) === (o.side === "buy" ? 1 : -1) && (o.takeProfit !== null || o.stopLoss !== null)) {
       p.takeProfit = o.takeProfit;
       p.stopLoss = o.stopLoss;
+      p.tpSince = o.takeProfit === null ? null : now;
+      p.slSince = o.stopLoss === null ? null : now;
     }
   }
 
@@ -742,7 +836,7 @@ export class PaperAccount {
     const p = this.positionsValue.get(s);
     let realized = 0;
     if (!p) {
-      this.positionsValue.set(s, { symbol, qty: signed, avgPrice: price, takeProfit: null, stopLoss: null, openedMs: now });
+      this.positionsValue.set(s, { symbol, qty: signed, avgPrice: price, takeProfit: null, stopLoss: null, openedMs: now, tpSince: null, slSince: null });
     } else if (Math.sign(p.qty) === Math.sign(signed)) {
       const total = Math.abs(p.qty) + qty;
       p.avgPrice = (Math.abs(p.qty) * p.avgPrice + qty * price) / total;
@@ -756,7 +850,7 @@ export class PaperAccount {
         p.qty = Math.sign(p.qty) * left;
       } else if (flip > EPS) {
         // Through the position: the rest opens the other way, without the old brackets.
-        this.positionsValue.set(s, { symbol, qty: Math.sign(signed) * flip, avgPrice: price, takeProfit: null, stopLoss: null, openedMs: now });
+        this.positionsValue.set(s, { symbol, qty: Math.sign(signed) * flip, avgPrice: price, takeProfit: null, stopLoss: null, openedMs: now, tpSince: null, slSince: null });
       } else {
         this.positionsValue.delete(s);
       }
@@ -899,13 +993,20 @@ export class PaperAccount {
       const qty = Number(p.qty);
       const avg = positive(p.avgPrice);
       if (!Number.isFinite(qty) || qty === 0 || avg === null) continue;
+      const openedMs = Number(p.openedMs) || Date.now();
+      const takeProfit = positive(p.takeProfit);
+      const stopLoss = positive(p.stopLoss);
+      // A snapshot from before the bracket times: the account may have been away since the position opened.
+      const since = (time: unknown) => (Number.isFinite(Number(time)) && Number(time) > 0 ? Number(time) : openedMs);
       this.positionsValue.set(key(p.symbol), {
         symbol: p.symbol,
         qty,
         avgPrice: avg,
-        takeProfit: positive(p.takeProfit),
-        stopLoss: positive(p.stopLoss),
-        openedMs: Number(p.openedMs) || Date.now(),
+        takeProfit,
+        stopLoss,
+        openedMs,
+        tpSince: takeProfit === null ? null : since(p.tpSince),
+        slSince: stopLoss === null ? null : since(p.slSince),
       });
     }
     this.fillsValue = Array.isArray(snap.fills) ? snap.fills.filter((f) => f && typeof f.id === "string") : [];

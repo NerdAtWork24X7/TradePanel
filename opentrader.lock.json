@@ -2,7 +2,7 @@
   "upstream": "https://github.com/deepentropy/opentrader.git",
   "ref": "v0.4.25",
   "commit": "680735daf98f461cdbaf1c0bdba8254fbe23fd1c",
-  "updatedAt": "2026-11-21T18:01:33.791Z",
+  "updatedAt": "2026-11-27T16:13:49.273Z",
   "extensions": [
     {
       "id": "branding",
@@ -17,12 +17,12 @@
     {
       "id": "chart",
       "version": "1.0.0",
-      "sha256": "1711fbfacfc9f337f0495984702ee94a193e960d4a320239030cb25cec3b85af"
+      "sha256": "9a661ff52ec481a1371bdf27bdf8e0c630ec4b5a53e34fa1b5698c028b7ff03c"
     },
     {
       "id": "paper",
       "version": "1.0.0",
-      "sha256": "8bbd1c3fc82772ae32006e9c6d2377ccb4c53333e1f2cf399c7684950a1926e2"
+      "sha256": "3be34f2c5312c91283f1e45bf690a14d9bd1a43261363516f44bdb3ce008a895"
     },
     {
       "id": "venues",

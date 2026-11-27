@@ -733,3 +733,215 @@ index dbae0c1..db994f4 100644
                    {orderTypeText(pr().type)}
                  </button>
                </Tooltip>
+diff --git a/src/window/chart/__tests__/tree-order.test.ts b/src/window/chart/__tests__/tree-order.test.ts
+index c2a5cd77..01d254f8 100644
+--- a/src/window/chart/__tests__/tree-order.test.ts
++++ b/src/window/chart/__tests__/tree-order.test.ts
+@@ -1,42 +1,59 @@
+ import { describe, expect, it } from "vitest";
+-import { moveItem, paneItems, splitItems, type TreeItem } from "../tree-order";
++import { BEHIND_ALL, moveItem, paneItems, savedOver, splitItems, type TreeItem } from "../tree-order";
+ 
+ const ids = (items: TreeItem[]) => items.map((x) => `${x.kind[0]}:${x.id}`);
+ 
++/** The drawings of `splitItems` put back the way the store saves them. */
++const restore = (s: ReturnType<typeof splitItems>) =>
++  paneItems(s.sources, s.drawings.map((id) => ({ id, over: savedOver(s.over[id]) })));
++
+ describe("paneItems", () => {
+-  it("places each drawing right in front of its source, the rest behind all sources", () => {
++  it("places each drawing right in front of the source it names", () => {
++    const items = paneItems(["main", "rsi"], [
++      { id: "d1", over: "rsi" },
++      { id: "d3", over: "main" },
++    ]);
++    expect(ids(items)).toEqual(["d:d3", "s:main", "d:d1", "s:rsi"]);
++  });
++
++  it("keeps an unplaced or stale drawing in front of every source", () => {
+     const items = paneItems(["main", "rsi"], [
+       { id: "d1", over: "rsi" },
+       { id: "d2" },
+       { id: "d3", over: "main" },
+       { id: "d4", over: "gone" },
+     ]);
+-    expect(ids(items)).toEqual(["d:d3", "s:main", "d:d1", "s:rsi", "d:d2", "d:d4"]);
++    expect(ids(items)).toEqual(["d:d2", "d:d3", "d:d4", "s:main", "d:d1", "s:rsi"]);
++  });
++
++  it("puts a BEHIND_ALL drawing behind every source", () => {
++    expect(ids(paneItems(["main", "rsi"], [{ id: "back", over: BEHIND_ALL }, { id: "front" }])))
++      .toEqual(["d:front", "s:main", "s:rsi", "d:back"]);
+   });
+ 
+   it("keeps the drawing order among drawings over the same source", () => {
+-    const items = paneItems(["main"], [{ id: "a", over: "main" }, { id: "b", over: "main" }]);
+-    expect(ids(items)).toEqual(["d:a", "d:b", "s:main"]);
++    const items = paneItems(["main"], [{ id: "a", over: "main" }, { id: "b" }, { id: "c", over: "main" }]);
++    expect(ids(items)).toEqual(["d:a", "d:b", "d:c", "s:main"]);
+   });
+ 
+   it("empty pane / sources only / drawings only", () => {
+     expect(paneItems([], [])).toEqual([]);
+     expect(ids(paneItems(["main"], []))).toEqual(["s:main"]);
+-    expect(ids(paneItems([], [{ id: "a", over: "main" }]))).toEqual(["d:a"]);
++    expect(ids(paneItems([], [{ id: "a" }, { id: "b", over: "main" }]))).toEqual(["d:a", "d:b"]);
+   });
+ });
+ 
+ describe("moveItem", () => {
+-  const base = paneItems(["main", "rsi"], [{ id: "d1", over: "main" }, { id: "d2" }]);
+-  // d1, main, rsi, d2
++  // d1 d2 d3 main rsi
++  const base = paneItems(["main", "rsi"], [{ id: "d1", over: "main" }, { id: "d2" }, { id: "d3" }]);
+ 
+   it("moves above / below the target", () => {
+-    expect(ids(moveItem(base, "d2", "main", false)!)).toEqual(["d:d1", "d:d2", "s:main", "s:rsi"]);
+-    expect(ids(moveItem(base, "d1", "rsi", true)!)).toEqual(["s:main", "s:rsi", "d:d1", "d:d2"]);
++    expect(ids(moveItem(base, "d1", "rsi", true)!)).toEqual(["d:d2", "d:d3", "s:main", "s:rsi", "d:d1"]);
++    expect(ids(moveItem(base, "d2", "main", true)!)).toEqual(["d:d1", "d:d3", "s:main", "d:d2", "s:rsi"]);
+   });
+ 
+   it("returns null when nothing moves or an id is missing", () => {
+-    expect(moveItem(base, "d1", "main", false)).toBeNull(); // already right above
++    expect(moveItem(base, "d1", "d2", false)).toBeNull(); // already right above
+     expect(moveItem(base, "d1", "d1", true)).toBeNull();
+     expect(moveItem(base, "nope", "main", true)).toBeNull();
+     expect(moveItem(base, "d1", "nope", true)).toBeNull();
+@@ -44,7 +61,7 @@ describe("moveItem", () => {
+ 
+   it("does not mutate the input", () => {
+     const copy = base.slice();
+-    moveItem(base, "d2", "d1", false);
++    moveItem(base, "d3", "d1", false);
+     expect(base).toEqual(copy);
+   });
+ });
+@@ -68,8 +85,21 @@ describe("splitItems", () => {
+ 
+   it("round-trips with paneItems", () => {
+     const items = paneItems(["main", "vol"], [{ id: "x", over: "vol" }, { id: "y", over: "main" }, { id: "w" }]);
+-    const s = splitItems(items);
+-    const again = paneItems(s.sources, s.drawings.map((id) => ({ id, over: s.over[id] ?? undefined })));
+-    expect(again).toEqual(items);
++    expect(restore(splitItems(items))).toEqual(items);
++  });
++
++  it("round-trips a drawing behind all sources", () => {
++    const items = paneItems(["main"], [{ id: "front" }, { id: "back", over: BEHIND_ALL }]);
++    expect(ids(items)).toEqual(["d:front", "s:main", "d:back"]);
++    expect(splitItems(items).over).toEqual({ front: "main", back: null });
++    expect(restore(splitItems(items))).toEqual(items);
++  });
++});
++
++describe("savedOver", () => {
++  it("saves a tree place as the drawing's `over`", () => {
++    expect(savedOver("main")).toBe("main");
++    expect(savedOver(null)).toBe(BEHIND_ALL);
++    expect(savedOver(undefined)).toBeUndefined();
+   });
+ });
+diff --git a/src/window/chart/tree-order.ts b/src/window/chart/tree-order.ts
+index 38b7a3d6..e96231c2 100644
+--- a/src/window/chart/tree-order.ts
++++ b/src/window/chart/tree-order.ts
+@@ -5,27 +5,52 @@
+  *
+  * Saved as: the pane's source order (PaneChart.sourceOrder), the order of
+  * the drawings among themselves (their array), and per drawing the source it
+- * sits right in front of (`over`; absent = behind every source of its pane).
++ * sits right in front of (`over`; absent = in front of every source of its
++ * pane, BEHIND_ALL = behind them all).
++ *
++ * A drawing the user has not placed always stays in front of the pane's
++ * series: only a drawing the tree explicitly puts behind a source is hidden
++ * behind bars.
+  */
+ import type { Drawing } from "lightweight-charts-drawing/core/types";
+ 
+ export type TreeItem = { kind: "source" | "drawing"; id: string };
+ 
++/** `over` of a drawing put behind every source of its pane (an empty value:
++ *  no source id is ever empty). */
++export const BEHIND_ALL = "";
++
+ /** A drawing with its place among the sources (a persisted field the
+  *  drawing type does not declare). */
+ export type PlacedDrawing = Drawing & { over?: string };
+ export const overOf = (d: Drawing): string | undefined => (d as PlacedDrawing).over;
+ 
++/** The place to save for a drawing the tree puts at `at` (what `splitItems`
++ *  reported): a source id stays, null (behind them all) becomes BEHIND_ALL. */
++export const savedOver = (at: string | null | undefined): string | undefined =>
++  at === null ? BEHIND_ALL : at;
++
+ /** Items of one pane, front first. `sources`: the pane's source ids, front
+  *  first. `drawings`: the pane's drawings, front first, with the source each
+- *  one sits in front of (an unknown source = behind them all). */
++ *  one sits in front of (absent or unknown = in front of every source,
++ *  BEHIND_ALL = behind them all). */
+ export function paneItems(sources: string[], drawings: { id: string; over?: string }[]): TreeItem[] {
+   const out: TreeItem[] = [];
++  // Drawings grouped by the source they sit in front of, in their own order.
++  const byPlace = new Map<string, string[]>();
++  for (const d of drawings) {
++    const at = d.over === BEHIND_ALL || sources.length === 0
++      ? BEHIND_ALL
++      : sources.includes(d.over ?? "") ? d.over! : sources[0];
++    const ids = byPlace.get(at);
++    if (ids) ids.push(d.id);
++    else byPlace.set(at, [d.id]);
++  }
+   for (const s of sources) {
+-    for (const d of drawings) if (d.over === s) out.push({ kind: "drawing", id: d.id });
++    for (const id of byPlace.get(s) ?? []) out.push({ kind: "drawing", id });
+     out.push({ kind: "source", id: s });
+   }
+-  for (const d of drawings) if (!d.over || !sources.includes(d.over)) out.push({ kind: "drawing", id: d.id });
++  for (const id of byPlace.get(BEHIND_ALL) ?? []) out.push({ kind: "drawing", id });
+   return out;
+ }
+ 
+@@ -41,7 +66,7 @@ export function moveItem(items: TreeItem[], id: string, target: string, below: b
+ }
+ 
+ /** What `items` saves: the sources and the drawings in order, and for every
+- *  drawing the source right behind it (null = none). */
++ *  drawing the source right behind it (null = behind every source). */
+ export function splitItems(items: TreeItem[]): { sources: string[]; drawings: string[]; over: Record<string, string | null> } {
+   const sources: string[] = [];
+   const drawings: string[] = [];
+diff --git a/src/window/drawings/drawing-store.ts b/src/window/drawings/drawing-store.ts
+index 18008b8b..8f655dac 100644
+--- a/src/window/drawings/drawing-store.ts
++++ b/src/window/drawings/drawing-store.ts
+@@ -30,7 +30,7 @@ import { ruleDrawingIds } from "../../data/alert-condition";
+ import { showConfirm } from "../../components/Dialogs";
+ import { labelForKind } from "./labels";
+ import { loadDrawings, saveDrawings } from "./persistence";
+-import { overOf, type PlacedDrawing } from "../chart/tree-order";
++import { overOf, savedOver, type PlacedDrawing } from "../chart/tree-order";
+ import type { ObjectsMode, SyncMode } from "./DrawingToolbar";
+ import type { PaneChart } from "../shell/tabs";
+ import type { AppTabs } from "../shell/app-tabs";
+@@ -461,8 +461,8 @@ export function createDrawingStore(
+     const next = placedDrawings(key, ids, over);
+     if (next) setSlice(key, next, { label: translate("move objects") });
+   }
+-  /** The drawings of `key` with `ids` put in that order (front first) in front of the sources `over` names; null
+-   *  when nothing moves. */
++  /** The drawings of `key` with `ids` put in that order (front first) in front of the sources `over` names (null =
++   *  behind every source); null when nothing moves. */
+   function placedDrawings(key: string, ids: string[], over: Record<string, string | null>): Drawing[] | null {
+     const list = drawingsFor(key);
+     const byId = new Map(list.map((d) => [d.id, d]));
+@@ -473,7 +473,7 @@ export function createDrawingStore(
+     const next = list.map((d) => {
+       if (!moved.has(d.id)) return d;
+       const src = byId.get(backFirst[k++])!;
+-      const want = over[src.id] ?? undefined;
++      const want = savedOver(over[src.id]);
+       if (src !== d) changed = true;
+       if (overOf(src) === want) return src;
+       changed = true;

@@ -15,12 +15,18 @@ const h = vi.hoisted(() => {
     ticks: [] as ((t: { symbol: string; price: number }) => void)[],
     activeChart: 7,
     setPlugin: (_id: string | null) => {},
+    bars: [] as { time: number | null; open: number | null; high: number | null; low: number | null; close: number | null; volume: number | null }[],
+    barCalls: [] as { symbol: string; resolution: string; session: string }[],
   };
 });
 
 vi.mock("../../datafeed", () => ({
   getTickerInfo: async (symbol: string) => ({ name: `Name ${symbol}`, iconUrl: null, symbolType: "crypto" }),
   getTickerSnapshot: async () => ({ last: 100 }),
+  getBars: async (symbol: string, resolution: string, session: string) => {
+    h.barCalls.push({ symbol, resolution, session });
+    return { bars: h.bars, daily: null, aggregate: null };
+  },
   isEconomicSymbol: () => false,
 }));
 vi.mock("../../datafeed-live", () => ({
@@ -60,6 +66,8 @@ async function freshBroker() {
   h.ticks = [];
   h.activeChart = 7;
   h.setPlugin(null);
+  h.bars = [];
+  h.barCalls = [];
   vi.resetModules();
   const { paperBroker } = await import("../paper-broker");
   return paperBroker;
@@ -203,5 +211,59 @@ describe("paperBroker", () => {
     expect(paper.positions()).toMatchObject([{ side: "sell", qty: 1, avgPrice: 110 }]);
     expect(paper.account().realizedPnl).toBe(10);
     await flush();
+  });
+
+  it("closes a position whose bracket a bar reached while the app was closed", async () => {
+    const paper = await freshBroker();
+    paper.registerChart(7, () => SYMBOL);
+    paper.connect();
+    lastTick()({ symbol: SYMBOL, price: 100 });
+    paper.place(order({ qty: 2, takeProfit: 110, stopLoss: 90 }));
+    const opened = paper.fills()[0]!.timeMs;
+    paper.disconnect();
+
+    // The market reached the take profit while the account was not running.
+    h.bars = [{ time: Math.floor((opened + 60_000) / 1000), open: 100, high: 112, low: 98, close: 105, volume: 1 }];
+    vi.resetModules();
+    const { paperBroker: again } = await import("../paper-broker");
+    again.connect();
+    await flush();
+
+    expect(again.positions()).toEqual([]);
+    expect(again.fills()[0]).toMatchObject({ side: "sell", qty: 2, price: 110, realizedPnl: 20 });
+    expect(again.account()).toMatchObject({ realizedPnl: 20, balance: 100_020 });
+    // The absence was minutes long: 1-minute bars, all sessions.
+    expect(h.barCalls[h.barCalls.length - 1]).toEqual({ symbol: SYMBOL, resolution: "1", session: "ETH" });
+  });
+
+  it("checks a still-open position's bars once per absence, and keeps trading live", async () => {
+    const paper = await freshBroker();
+    paper.registerChart(7, () => SYMBOL);
+    paper.connect();
+    lastTick()({ symbol: SYMBOL, price: 100 });
+    paper.place(order({ qty: 1, takeProfit: 110, stopLoss: 90 }));
+    const opened = paper.fills()[0]!.timeMs;
+    paper.disconnect();
+
+    // The market stayed inside the brackets.
+    h.bars = [{ time: Math.floor((opened + 60_000) / 1000), open: 100, high: 108, low: 92, close: 105, volume: 1 }];
+    vi.resetModules();
+    const { paperBroker: again } = await import("../paper-broker");
+    again.registerChart(7, () => SYMBOL);
+    again.connect();
+    await flush();
+    expect(again.position(7)).toMatchObject({ qty: 1, takeProfit: 110, stopLoss: 90 });
+    expect(h.barCalls).toHaveLength(1);
+
+    // Reconnecting does not read the same bars again.
+    again.disconnect();
+    again.connect();
+    await flush();
+    expect(h.barCalls).toHaveLength(1);
+
+    // Live prices still close it.
+    lastTick()({ symbol: SYMBOL, price: 111 });
+    expect(again.position(7)).toBeNull();
+    expect(again.fills()[0]).toMatchObject({ price: 110 });
   });
 });
